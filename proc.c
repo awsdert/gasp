@@ -291,6 +291,8 @@ proc_notice_t*
 	int ret;
 	if ( !key_val || !notice ) {
 		if ( err ) *err = EDESTADDRREQ;
+		if ( !key_val ) ERRMSG( EDESTADDRREQ, "key_val was NULL" );
+		if ( !notice ) ERRMSG( EDESTADDRREQ, "notice was NULL" );
 		return NULL;
 	}
 	notice->entryId = pid;
@@ -298,6 +300,8 @@ proc_notice_t*
 	file = fopen(path,"rb");
 	if ( !file ) {
 		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't open status file" );
+		printf( "File '%s'\n", path );
 		return NULL;
 	}
 	full = &(key_val->full);
@@ -309,6 +313,7 @@ proc_notice_t*
 	if ( (ret = change_key_val(
 		key_val, BUFSIZ, BUFSIZ, BUFSIZ, 1 )) != EXIT_SUCCESS ) {
 		if ( err ) *err = ret;
+		ERRMSG( ret, "Couldn't allocate memory for key/val pair");
 		fclose(file);
 		return NULL;
 	}
@@ -319,7 +324,7 @@ proc_notice_t*
 			return NULL;
 		} 
 		if ( strstr( full->block, "\n" ) ||
-			strlen(full->block) < full->given - 1 )
+			strlen( full->block ) < full->given - 1 )
 			break;
 		if ( (ret = change_key_val(
 			key_val, full->given + BUFSIZ,
@@ -335,6 +340,7 @@ proc_notice_t*
 		full->given, full->given, 1 ))
 		!= EXIT_SUCCESS ) {
 		if ( err ) *err = ret;
+		ERRMSG( ret, "Couldn't allocate memory for key/val pair" );
 		fclose(file);
 		return NULL;
 	}
@@ -356,6 +362,7 @@ proc_notice_t*
 	proc_notice_t *notice, tmp = {0};
 	if ( !glance ) {
 		if ( err ) *err = EDESTADDRREQ;
+		ERRMSG( EDESTADDRREQ, "glance was NULL" );
 		return NULL;
 	}
 	if ( err && *err != EXIT_SUCCESS ) {
@@ -365,6 +372,7 @@ proc_notice_t*
 	notice = &(glance->notice);
 	if ( !(glance->dir) ) {
 		if ( err ) *err = EDESTADDRREQ;
+		ERRMSG( EDESTADDRREQ, "glance->dir was NULL" );
 		proc_glance_shut( glance );
 		return NULL;
 	}
@@ -395,9 +403,10 @@ proc_notice_t*
 
 proc_notice_t*
 	proc_glance_open( int *err, proc_glance_t *glance, int underId ) {
-	errno = EXIT_SUCCESS;
+	int ret = errno = EXIT_SUCCESS;
 	if ( !glance ) {
 		if ( err ) *err = EDESTADDRREQ;
+		ERRMSG( EDESTADDRREQ, "glance was NULL" );
 		return NULL;
 	}
 	(void)memset( glance, 0, sizeof(proc_glance_t) );
@@ -405,7 +414,9 @@ proc_notice_t*
 	glance->dir = opendir("/proc");
 	if ( glance->dir )
 		return proc_notice_next( err, glance );
-	if ( err ) *err = (errno != EXIT_SUCCESS) ? errno : EXIT_FAILURE;
+	ret = ( errno != EXIT_SUCCESS ) ? errno : EXIT_FAILURE;
+	if ( err ) *err = ret;
+	ERRMSG( ret, "glance->dir was NULL" );
 	return NULL;
 }
 

@@ -84,6 +84,7 @@ int main( int argc, char *argv[] ) {
 	lua_close(L);
 	free(LUA_CPATH);
 	free(LUA_PATH);
+	printf( "Searching for processes containing '%s'\n", gasp );
 	if ( (noticed = proc_locate_name( &ret, gasp, &nodes, 0 )) ) {
 		puts("Found:");
 		path = calloc( size, 1 );
@@ -135,8 +136,10 @@ int main( int argc, char *argv[] ) {
 			free( path );
 			path = NULL;
 		}
+		ret = EXIT_SUCCESS;
 	}
-	ret = EXIT_SUCCESS;
+	else if ( ret == EXIT_SUCCESS )
+		ret = EXIT_FAILURE;
 	cleanup:
 	if ( path ) free( path );
 	if ( ret != EXIT_SUCCESS ) {

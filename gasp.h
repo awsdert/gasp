@@ -128,11 +128,12 @@ typedef struct key_val {
  * @param want4full Bytes to give key_val->full
  * @param want4key Bytes to give key_val->key
  * @param want4val Bytes to give key_val->val
+ * @param dir Direction of allocation
  * @return EXIT_SUCCESS or error returned by change_space
 **/
 int change_key_val(
 	key_val_t *key_val,
-	size_t want4full, size_t want4key, size_t want4val );
+	size_t want4full, size_t want4key, size_t want4val, int dir );
 
 /** @brief Processes all arguments after argv[0] common to the gasp
  * executables

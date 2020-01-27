@@ -16,8 +16,8 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		printf( "cmd = '%s'\n", cmd );
 		leng += strlen(cmd) + 1;
 		if ( strcmp( cmd, "-D" ) == 0 ) {
-			if ( cmd[3] )
-				key = cmd + 3;
+			if ( cmd[2] )
+				key = cmd + 2;
 			else {
 				key = argv[++i];
 				leng += strlen(key) + 2;
@@ -32,7 +32,7 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 			}
 			printf("key = '%s', val = '%s'\n", key, val );
 			if ( (ret = change_key_val(
-				arg, 0, strlen(key) + 1, strlen(val) + 1))
+				arg, 0, strlen(key) + 1, strlen(val) + 1, 1))
 				== EXIT_SUCCESS ) {
 				(void)strcpy( (char*)(arg->key.block), key );
 				(void)strcpy( (char*)(arg->val.block), val );
@@ -42,9 +42,10 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 			}
 			else
 				ERRMSG( ret, "Couldn't create key & value pair" );
-			key[strlen(key)] = '=';
 			--val;
 			val[strlen(val)] = *val;
+			--val;
+			*val = '=';
 		}
 	}
 	if ( _leng ) *_leng = leng;

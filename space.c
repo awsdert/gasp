@@ -49,13 +49,15 @@ void* change_space( int *err, space_t *space, size_t want, int dir ) {
 }
 int change_key_val(
 	key_val_t *key_val,
-	size_t want4full, size_t want4key, size_t want4val )
+	size_t want4full, size_t want4key, size_t want4val, int dir )
 {
 	int ret = EXIT_SUCCESS;
-	if ( !change_space( &ret, &(key_val->full), want4full, 0 ) )
+	if ( !change_space( &ret, &(key_val->full), want4full, dir )
+		&& ret != EXIT_SUCCESS )
 		return ret;
-	if ( !change_space( &ret, &(key_val->key), want4key, 0 ) )
+	if ( !change_space( &ret, &(key_val->key), want4key, dir )
+		&& ret != EXIT_SUCCESS )
 		return ret;
-	(void)change_space( &ret, &(key_val->val), want4val, 0 );
+	(void)change_space( &ret, &(key_val->val), want4val, dir );
 	return ret;
 }

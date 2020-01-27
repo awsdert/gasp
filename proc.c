@@ -101,26 +101,30 @@ intptr_t proc_mapped_next( int *err, proc_handle_t *handle, intptr_t addr, proc_
 		ERRMSG( errno, "Couldn't seek page information" );
 		return -1;
 	}
-	next_page:
-	memset( line, 0, PAGE_LINE_SIZE );
-	if ( read( handle->pagesFd, line, PAGE_LINE_SIZE )
-		!= PAGE_LINE_SIZE ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't read page information" );
-		return -1;
-	}
-	line[PAGE_LINE_SIZE-1] = 0;
-	sscanf( line, "%p-%p",
-		(void**)&(mapped->base),
-		(void**)&(mapped->upto) );
-	if ( addr >= upto ) {
-		while ( gasp_read( handle->pagesFd, line, 1 ) == 1 ) {
-			if ( line[0] == '\n' )
-				goto next_page;
+	do {
+		memset( line, 0, PAGE_LINE_SIZE );
+		if ( gasp_read( handle->pagesFd, line, PAGE_LINE_SIZE )
+			!= PAGE_LINE_SIZE ) {
+			if ( errno == EXIT_SUCCESS ) errno = ERANGE;
+			if ( err ) *err = errno;
+			ERRMSG( errno, "Couldn't read page information" );
+			return -1;
 		}
-		if ( err ) *err = errno;
-		return -1;
-	}
+		line[PAGE_LINE_SIZE-1] = 0;
+		sscanf( line, "%p-%p",
+			(void**)&(mapped->base),
+			(void**)&(mapped->upto) );
+		if ( addr >= upto ) {
+			while ( gasp_read( handle->pagesFd, line, 1 ) == 1 ) {
+				if ( line[0] == '\n' )
+					break;
+			}
+			if ( line[0] != '\n' ) {
+				if ( err ) *err = errno;
+				return -1;
+			}
+		}
+	} while ( addr >= upto );
 	perm = strstr( line, " " );
 	++perm;
 	mapped->size = (mapped->upto) - (mapped->base);
@@ -167,7 +171,8 @@ node_t proc_aobscan(
 		return 0;
 	}
 	while ( mapped.upto <= from ) {
-		if ( proc_mapped_next( &ret, handle, 0, &mapped ) < 0 ) {
+		if ( proc_mapped_next( &ret, handle,
+			mapped.upto, &mapped ) < 0 ) {
 			if ( err ) *err = ret;
 			ERRMSG( ret, "no pages with base address >= start address" );
 			return 0;
@@ -283,6 +288,7 @@ proc_notice_t*
 	FILE *file;
 	char path[256];
 	space_t *full, *key, *val;
+	int ret;
 	if ( !key_val || !notice ) {
 		if ( err ) *err = EDESTADDRREQ;
 		return NULL;
@@ -300,7 +306,9 @@ proc_notice_t*
 	memset( full->block, 0, full->given );
 	memset( key->block, 0, key->given );
 	memset( val->block, 0, val->given );
-	if ( !more_space( err, full, BUFSIZ ) ) {
+	if ( (ret = change_key_val(
+		key_val, BUFSIZ, BUFSIZ, BUFSIZ, 1 )) != EXIT_SUCCESS ) {
+		if ( err ) *err = ret;
 		fclose(file);
 		return NULL;
 	}
@@ -313,20 +321,20 @@ proc_notice_t*
 		if ( strstr( full->block, "\n" ) ||
 			strlen(full->block) < full->given - 1 )
 			break;
-		if ( !more_space( err, full, full->given += BUFSIZ ) ) {
+		if ( (ret = change_key_val(
+			key_val, full->given + BUFSIZ,
+			key->given, val->given, 1 ))
+			!= EXIT_SUCCESS ) {
+			if ( err ) *err = ret;
 			fclose(file);
 			return NULL;
 		}
 	}
-	if ( !more_space( err, key, full->given ) ) {
-		fclose(file);
-		return NULL;
-	}
-	if ( !more_space( err, val, full->given ) ) {
-		fclose(file);
-		return NULL;
-	}
-	if ( !more_space( err, &(notice->name), full->given ) ) {
+	if ( (ret = change_key_val(
+		key_val, full->given,
+		full->given, full->given, 1 ))
+		!= EXIT_SUCCESS ) {
+		if ( err ) *err = ret;
 		fclose(file);
 		return NULL;
 	}

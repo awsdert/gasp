@@ -4,10 +4,7 @@ Game Assistive tech for Solo Play
 ## About
 Got tired of waiting for PINCE to be usable so started this myself.
 At the moment I can hook existing processes with this but have yet to
-successfully change memory. Will refocus on that once I crush a hidden
-bug (haven't found the source, code given is 139 which according to a
-result on google is possibly a segfault, yet to encounter that segfault
-with a debugger though)
+successfully change memory.
 
 ## APIs
 Uses C under the hood but will be mostly scripted in Lua for so users

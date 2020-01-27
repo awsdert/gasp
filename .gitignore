@@ -1,0 +1,11 @@
+*.o
+*.so
+*.elf
+*.obj
+*.dll
+*.exe
+*.zip
+gede.ini
+gede*.ini
+cloned
+cloned/*

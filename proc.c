@@ -349,8 +349,15 @@ proc_notice_t* proc_notice_info(
 		return NULL;
 	}
 	txt = strstr( full->block, "\n" );
-	if ( txt ) *txt = 0;
-	txt = strstr( full->block, " " );
+	if ( txt ) *(++txt) = 0;
+	txt = strstr( full->block, "\t" );
+	if ( !txt ) {
+		ret = ENODATA;
+		if ( *err ) *err = ret;
+		ERRMSG( ret, "Couldn't find character '\t' in read text");
+		(void)fprintf(stderr,"read '%s'\n", full->block );
+		return NULL;
+	}
 	++txt;
 	memcpy( name->block, txt, strlen(txt) );
 	gasp_lseek( fd, strlen(full->block), SEEK_SET );

@@ -126,7 +126,7 @@ $(private_gasp_exe): $(private_gasp_objects) $(moonnuklear_dll)
 	$(CC) $(exe_flags) -llua -o $@ $(private_gasp_objects)
 
 debug: $(gasp_dbg_exe) $(private_gasp_dbg_exe) $(debugger_gasp_exe)
-	./$(gasp_dbg_exe)
+	gede --args ./$(gasp_dbg_exe) -D HELLO="WORLD"
 
 $(gasp_dbg_exe): $(exposed_gasp_dbgobjs) $(moonnuklear_dbg)
 	$(CC) $(dbg_flags) $(exe_flags) -llua -o $@ $(exposed_gasp_dbgobjs)

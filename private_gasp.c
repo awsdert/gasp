@@ -33,7 +33,7 @@ int main( int argc, char *argv[] ) {
 	nodes_t nodes = {0}, ARGS = {0};
 	proc_notice_t *noticed;
 	proc_handle_t *handle;
-	key_val_t *args = NULL;
+	kvpair_t *args = NULL;
 	char *HOME = NULL, *path = NULL, *PWD = NULL, *gasp = "gasp",
 		*DISPLAY = NULL, *LUA_PATH = NULL, *LUA_CPATH = NULL;
 	size_t size = 0, leng = BUFSIZ;
@@ -47,8 +47,8 @@ int main( int argc, char *argv[] ) {
 	args = ARGS.space.block;
 	DISPLAY = getenv("DISPLAY");
 	if ( !(HOME = getenv("HOME")) || !(PWD = getenv("PWD")) ) {
-		ret = EXIT_FAILURE;
-		ERRMSG( errno, "Couldn't get $(HOME) and/or $(PWD)" );
+		ret = errno;
+		ERRMSG( ret, "Couldn't get $(HOME) and/or $(PWD)" );
 		goto cleanup;
 	}
 	size = strlen(HOME) + 32;
@@ -64,8 +64,8 @@ int main( int argc, char *argv[] ) {
 	setenv("LUA_CPATH",LUA_CPATH,0);
 	lua_State *L = NULL;
 	if ( !(L = luaL_newstate()) ) {
-		ERRMSG( errno, "Couldn't create lua instance" );
-		ret = EXIT_FAILURE;
+		ret = errno;
+		ERRMSG( ret, "Couldn't create lua instance" );
 		goto cleanup;
 	}
 	old_lua_panic_cb = lua_atpanic(L,lua_panic_cb);
@@ -138,8 +138,12 @@ int main( int argc, char *argv[] ) {
 		}
 		ret = EXIT_SUCCESS;
 	}
-	else if ( ret == EXIT_SUCCESS )
-		ret = EXIT_FAILURE;
+	else if ( ret == EXIT_SUCCESS ) {
+		ret = ENOENT;
+		ERRMSG( ret, "Couldn't find process" );
+	}
+	else
+		ERRMSG( ret, "Couldn't find process" );
 	cleanup:
 	if ( path ) free( path );
 	if ( ret != EXIT_SUCCESS ) {
@@ -152,7 +156,7 @@ int main( int argc, char *argv[] ) {
 			less_space( NULL, &(args[arg].val), 0 );
 		}
 	}
-	(void)less_nodes( key_val_t, NULL, &ARGS, 0 );
+	(void)less_nodes( kvpair_t, NULL, &ARGS, 0 );
 	(void)less_nodes( proc_notice_t, NULL, &nodes, 0 );
 	return ret;
 }

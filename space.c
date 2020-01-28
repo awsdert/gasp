@@ -47,17 +47,17 @@ void* change_space( int *err, space_t *space, size_t want, int dir ) {
 	space->given = want;
 	return (space->block = block);
 }
-int change_key_val(
-	key_val_t *key_val,
+int change_kvpair(
+	kvpair_t *kvpair,
 	size_t want4full, size_t want4key, size_t want4val, int dir )
 {
 	int ret = EXIT_SUCCESS;
-	if ( !change_space( &ret, &(key_val->full), want4full, dir )
+	if ( !change_space( &ret, &(kvpair->full), want4full, dir )
 		&& ret != EXIT_SUCCESS )
 		return ret;
-	if ( !change_space( &ret, &(key_val->key), want4key, dir )
+	if ( !change_space( &ret, &(kvpair->key), want4key, dir )
 		&& ret != EXIT_SUCCESS )
 		return ret;
-	(void)change_space( &ret, &(key_val->val), want4val, dir );
+	(void)change_space( &ret, &(kvpair->val), want4val, dir );
 	return ret;
 }

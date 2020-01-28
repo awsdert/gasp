@@ -1,12 +1,12 @@
 #include "gasp.h"
 
 int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
-	key_val_t *args, *arg;
+	kvpair_t *args, *arg;
 	char *cmd, *key, *val;
 	int i, ret = EXIT_SUCCESS;
 	size_t leng = 1;
 	if ( _leng ) *_leng = 1;
-	if ( !(args = more_nodes( key_val_t, &ret, ARGS, argc )) ) {
+	if ( !(args = more_nodes( kvpair_t, &ret, ARGS, argc )) ) {
 		ERRMSG( ret, "Couldn't allocate memory for argument pairs" );
 		return ret;
 	}
@@ -31,7 +31,7 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 				val[strlen(val)-1] = 0;
 			}
 			printf("key = '%s', val = '%s'\n", key, val );
-			if ( (ret = change_key_val(
+			if ( (ret = change_kvpair(
 				arg, 0, strlen(key) + 1, strlen(val) + 1, 1))
 				== EXIT_SUCCESS ) {
 				(void)strcpy( (char*)(arg->key.block), key );

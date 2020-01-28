@@ -4,7 +4,7 @@ int main( int argc, char *argv[] ) {
 	int ret = EXIT_SUCCESS;
 	int arg;
 	nodes_t nodes = {0}, ARGS = {0};
-	key_val_t *args = NULL;
+	kvpair_t *args = NULL;
 	char *HOME = NULL, *PWD = NULL, *DISPLAY = NULL,
 		*path = NULL, *cmd = NULL;
 	size_t size = 0, leng = BUFSIZ;
@@ -57,7 +57,7 @@ int main( int argc, char *argv[] ) {
 			less_space( NULL, &(args[arg].val), 0 );
 		}
 	}
-	(void)less_nodes( key_val_t, NULL, &ARGS, 0 );
+	(void)less_nodes( kvpair_t, NULL, &ARGS, 0 );
 	(void)less_nodes( proc_notice_t, NULL, &nodes, 0 );
 	return ret;
 }

@@ -23,7 +23,6 @@ bool proc_has_died( int *err, int pid ) {
 }
 proc_handle_t* proc_handle_open( int *err, int pid ) {
 	char path[256] = {0};
-	key_val_t key_val = {{0}};
 	proc_handle_t *handle;
 	long attach_ret = -1;
 	int ptrace_mode = (PTRACE_SEIZE) ? (PTRACE_SEIZE) : -1;
@@ -43,20 +42,15 @@ proc_handle_t* proc_handle_open( int *err, int pid ) {
 		if ( err ) *err = errno;
 		return NULL;
 	}
-	if ( !proc_notice_info( err, pid, &key_val, &(handle->notice) ) ) {
-		less_space( NULL, &(key_val.full), 0 );
-		less_space( NULL, &(key_val.key), 0 );
-		less_space( NULL, &(key_val.val), 0 );
+	if ( !proc_notice_info( err, pid, &(handle->notice) ) ) {
 		free(handle);
 		return NULL;
 	}
-	less_space( NULL, &(key_val.full), 0 );
-	less_space( NULL, &(key_val.key), 0 );
-	less_space( NULL, &(key_val.val), 0 );
 	(void)sprintf( path, "/proc/%d/maps", pid );
 	if ( (handle->pagesFd = open(path,O_RDONLY)) < 0 ) {
 		free(handle);
 		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't open maps file" );
 		return NULL;
 	}
 	(void)sprintf( path, "/proc/%d/mem", pid );
@@ -64,6 +58,7 @@ proc_handle_t* proc_handle_open( int *err, int pid ) {
 		close( handle->pagesFd );
 		free(handle);
 		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't open mem file in read only mode" );
 		return NULL;
 	}
 	handle->wrMemFd = open(path,O_WRONLY);
@@ -71,7 +66,7 @@ proc_handle_t* proc_handle_open( int *err, int pid ) {
 }
 void proc_handle_shut( proc_handle_t *handle ) {
 	if ( !handle ) return;
-	proc_notice_none( &(handle->notice) );
+	proc_notice_zero( &(handle->notice) );
 	if ( handle->rdMemFd >= 0 ) close( handle->rdMemFd );
 	if ( handle->wrMemFd >= 0 ) close( handle->wrMemFd );
 	if ( handle->pagesFd >= 0 ) close( handle->pagesFd );
@@ -242,8 +237,12 @@ proc_notice_t*
 	proc_glance_t glance;
 	proc_notice_t *notice, *noticed;
 	char *text;
-	if ( !nodes )
+	if ( !nodes ) {
+		if ( err ) *err = EDESTADDRREQ;
+		ERRMSG( EDESTADDRREQ, "nowhere to place noticed processes" );
 		return NULL;
+	}
+	if ( err ) *err = EXIT_SUCCESS;
 	memset( nodes, 0, sizeof(nodes_t) );
 	for ( notice = proc_glance_open( err, &glance, underId )
 		; notice; notice = proc_notice_next( err, &glance ) ) {
@@ -251,50 +250,50 @@ proc_notice_t*
 		if ( !text || !(*text) || !strstr( text, name ) )
 			continue;
 		if ( i == nodes->total && !(noticed = more_nodes(
-			proc_notice_t, err, nodes, nodes->total + 10 )) ) {
-			proc_glance_shut( &glance );
-			return (i > 0) ? nodes->space.block : NULL;
-		}
+			proc_notice_t, err, nodes, nodes->total + 10 )) )
+			break;
 		noticed[i].entryId = notice->entryId;
-		if ( !more_space(err,&(noticed[i].name),(size = strlen(text)+1)) ) {
-			proc_glance_shut(&glance);
-			return (i > 0) ? nodes->space.block : NULL;
-		}
+		if ( !more_space(
+			err,&(noticed[i].name), (size = strlen(text)+1)) )
+			break;
 		(void)memcpy( noticed[i].name.block, text, size );
 		nodes->count = ++i;
 	}
-	return (i > 0) ? nodes->space.block : NULL;
+	proc_glance_shut( &glance );
+	if ( i > 0 )
+		return nodes->space.block;
+	if ( err && *err == EXIT_SUCCESS ) *err = ENOENT;
+	return NULL;
 }
 
-void proc_notice_none( proc_notice_t *notice ) {
+void proc_notice_zero( proc_notice_t *notice ) {
 	if ( !notice ) return;
+	(void)change_kvpair( &(notice->kvpair), 0, 0, 0, 0 );
 	(void)less_space( NULL, &(notice->name), 0 );
 }
 
 void proc_glance_shut( proc_glance_t *glance ) {
 	if ( !glance ) return;
-	proc_notice_none( &(glance->notice) );
-	(void)less_space( NULL, &(glance->key_val.full), 0 );
-	(void)less_space( NULL, &(glance->key_val.key), 0 );
-	(void)less_space( NULL, &(glance->key_val.val), 0 );
+	proc_notice_zero( &(glance->notice) );
 	if ( glance->dir ) closedir( glance->dir );
 	(void)memset( glance, 0, sizeof(proc_glance_t) );
 }
 
-proc_notice_t*
-	proc_notice_info(
-	int *err, int pid, key_val_t *key_val, proc_notice_t *notice )
+proc_notice_t* proc_notice_info(
+	int *err, int pid, proc_notice_t *notice )
 {
 	FILE *file;
 	char path[256];
 	space_t *full, *key, *val;
+	kvpair_t *kvpair;
 	int ret;
-	if ( !key_val || !notice ) {
+	if ( !notice ) {
 		if ( err ) *err = EDESTADDRREQ;
-		if ( !key_val ) ERRMSG( EDESTADDRREQ, "key_val was NULL" );
-		if ( !notice ) ERRMSG( EDESTADDRREQ, "notice was NULL" );
+		ERRMSG( EDESTADDRREQ, "notice was NULL" );
 		return NULL;
 	}
+	kvpair = &(notice->kvpair);
+	notice->ownerId = -1;
 	notice->entryId = pid;
 	sprintf( path, "/proc/%d/status", pid );
 	file = fopen(path,"rb");
@@ -304,14 +303,14 @@ proc_notice_t*
 		printf( "File '%s'\n", path );
 		return NULL;
 	}
-	full = &(key_val->full);
-	key = &(key_val->key);
-	val = &(key_val->val);
+	full = &(kvpair->full);
+	key = &(kvpair->key);
+	val = &(kvpair->val);
 	memset( full->block, 0, full->given );
 	memset( key->block, 0, key->given );
 	memset( val->block, 0, val->given );
-	if ( (ret = change_key_val(
-		key_val, BUFSIZ, BUFSIZ, BUFSIZ, 1 )) != EXIT_SUCCESS ) {
+	if ( (ret = change_kvpair(
+		kvpair, BUFSIZ, BUFSIZ, BUFSIZ, 1 )) != EXIT_SUCCESS ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't allocate memory for key/val pair");
 		fclose(file);
@@ -326,8 +325,8 @@ proc_notice_t*
 		if ( strstr( full->block, "\n" ) ||
 			strlen( full->block ) < full->given - 1 )
 			break;
-		if ( (ret = change_key_val(
-			key_val, full->given + BUFSIZ,
+		if ( (ret = change_kvpair(
+			kvpair, full->given + BUFSIZ,
 			key->given, val->given, 1 ))
 			!= EXIT_SUCCESS ) {
 			if ( err ) *err = ret;
@@ -335,8 +334,8 @@ proc_notice_t*
 			return NULL;
 		}
 	}
-	if ( (ret = change_key_val(
-		key_val, full->given,
+	if ( (ret = change_kvpair(
+		kvpair, full->given,
 		full->given, full->given, 1 ))
 		!= EXIT_SUCCESS ) {
 		if ( err ) *err = ret;
@@ -359,7 +358,8 @@ proc_notice_t*
 proc_notice_t*
 	proc_notice_next( int *err, proc_glance_t *glance ) {
 	struct dirent *ent;
-	proc_notice_t *notice, tmp = {0};
+	proc_notice_t *notice;
+	int entryId = 0;
 	if ( !glance ) {
 		if ( err ) *err = EDESTADDRREQ;
 		ERRMSG( EDESTADDRREQ, "glance was NULL" );
@@ -379,24 +379,18 @@ proc_notice_t*
 	next_proc:
 	if ( !(ent = readdir(glance->dir)) ) {
 		if ( err ) *err = EXIT_SUCCESS;
-		proc_notice_none( &tmp );
 		proc_glance_shut( glance );
 		return NULL;
 	}
 	if ( ent->d_name[0] < '0' || ent->d_name[0] > '9' ) goto next_proc;
-	(void)sscanf( ent->d_name, "%d", &(tmp.entryId) );
-	notice->entryId = tmp.entryId;
-	while ( proc_notice_info( err,
-		tmp.entryId, &(glance->key_val), &tmp ) )
+	(void)sscanf( ent->d_name, "%d", &entryId );
+	notice->ownerId = entryId;
+	while ( proc_notice_info( err, notice->ownerId, notice ) )
 	{
-		if ( tmp.ownerId == glance->underId ) {
-			proc_notice_none( &tmp );
-			return proc_notice_info( err,
-			notice->entryId, &(glance->key_val), notice );
-		}
-		if ( tmp.ownerId == 0 )
+		if ( notice->ownerId == glance->underId )
+			return proc_notice_info( err, entryId, notice );
+		if ( notice->ownerId == 0 )
 			break;
-		tmp.entryId = tmp.ownerId;
 	}
 	goto next_proc;
 }

@@ -119,20 +119,20 @@ void* change_nodes(
 **/
 int add_node( nodes_t *nodes, node_t *node, size_t Nsize );
 
-typedef struct key_val {
+typedef struct kvpair {
 	space_t full, key, val;
-} key_val_t;
+} kvpair_t;
 
 /** @brief Passes to change_space() and error checks
- * @param key_val Desitination of memory that is allocated
- * @param want4full Bytes to give key_val->full
- * @param want4key Bytes to give key_val->key
- * @param want4val Bytes to give key_val->val
+ * @param kvpair Desitination of memory that is allocated
+ * @param want4full Bytes to give kvpair->full
+ * @param want4key Bytes to give kvpair->key
+ * @param want4val Bytes to give kvpair->val
  * @param dir Direction of allocation
  * @return EXIT_SUCCESS or error returned by change_space
 **/
-int change_key_val(
-	key_val_t *key_val,
+int change_kvpair(
+	kvpair_t *kvpair,
 	size_t want4full, size_t want4key, size_t want4val, int dir );
 
 /** @brief Processes all arguments after argv[0] common to the gasp
@@ -147,14 +147,17 @@ int change_key_val(
 **/
 int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng );
 
+/* We use concept of glance and notice here because it is possible
+ * for a process to have died by the time we try to open it, similar
+ * to the snapshot concept in win32 but this is tidier :) */
 typedef struct proc_notice {
 	int entryId, ownerId;
 	space_t name;
+	kvpair_t kvpair;
 } proc_notice_t;
 typedef struct proc_glance {
 	int underId;
 	DIR *dir;
-	key_val_t key_val;
 	proc_notice_t notice;
 } proc_glance_t;
 typedef struct proc_handle {
@@ -167,32 +170,110 @@ typedef struct proc_mapped {
 	intptr_t base, upto, size;
 } proc_mapped_t;
 
-void proc_notice_none( proc_notice_t *notice );
+/** @brief free's allocated memory and zeroes everything
+ * @param notice The entry to clear up
+ * @note mainly for internal usage
+**/
+void proc_notice_zero( proc_notice_t *notice );
 proc_notice_t* proc_notice_next( int *err, proc_glance_t *glance );
+/** @brief Load information for noticed process
+ * @param err Where to pass error codes back to, always of errno.h codes
+ * @param pid ID of the process to load information of
+ * @param notice Where to place noticed process information
+ * @note Although we can load information in notice it is possible for
+ * a process to die before we try to open it's memory thus we keep that
+ * attempt to the proc_handle_open() function, even thereafter it is
+ * possible for the captured process to die in while the handle is open
+ * but as long as it is open then failures will not be critical but
+ * rather an indication that the handle is no longer useful
+**/
 proc_notice_t* proc_notice_info(
-	int *err, int pid, key_val_t *key_val, proc_notice_t *notice );
+	int *err, int pid, proc_notice_t *notice );
+/** @brief Iterates through each entry in /proc
+ * @param err Where to pass back errors to
+ * @param glance Where to store directory handle and related info
+ * @param underId ID of ancestor, invalid IDs will not trigger errors
+ * but will produce 0 results
+**/
 proc_notice_t* proc_glance_open(
 	int *err, proc_glance_t *glance, int underId );
+/** @brief Deallocates any memory, closes handles and zeroes everything
+ * @param glance The glance to cleanup
+**/
 void proc_glance_shut(
 	proc_glance_t *glance );
+/** @brief Searches through a glance for processes that contain
+ * the given name
+ * @param err Where to pass error codes to
+ * @param name The name to look for
+ * @param nodes Where to place all the noticed processes
+ * @param underId ID of ancestor all must have
+ * @return nodes->space.block
+**/
 proc_notice_t* proc_locate_name(
 	int *err, char *name, nodes_t *nodes, int underId );
+/** @brief opens a file, seeks to end takes the offset then closes it
+ * @param err Where to pass errors back to
+ * @param path Path of file to get size of
+ * @return size of file or 0
+**/
 size_t file_get_size(
 	int *err, char const *path );
+/** @brief Checks if process is still alive
+ * @param err Where to pass errors back to
+ * @param pid ID of process to check
+ * @return true or false
+**/
 bool proc_has_died(
 	int *err, int pid );
+/** @brief Opens file descriptors and anything deemed neccessary for
+ * handling the process, also calls ptrace with PTRACE_SEIZE or
+ * PTRACE_ATTACH if that is unavailable
+ * @param err Where to pass errors back to
+ * @param pid ID of process to open handle for
+ * @return Handle of process or NULL
+**/
 proc_handle_t* proc_handle_open(
 	int *err, int pid );
+/** @brief Deallocates any memory before deallocating the handle itself
+ * @param handle The process handle to deallocate
+**/
 void proc_handle_shut(
 	proc_handle_t* handle );
+/** @brief Scans process mapped pages for array between from and upto
+ * @param err Where to pass errors to
+ * @param into File descriptor of file to write address list into
+ * @param handle Handle opened with proc_handle_open()
+ * @param array Array of bytes to look for
+ * @param bytes Number of bytes in array
+ * @param from Where to start search
+ * @param upto Where to end search
+ * @return Count of addresses that matched/where written to file
+**/
 node_t proc_aobscan(
 	int *err, int into,
 	proc_handle_t *handle,
 	uchar *array, intptr_t bytes,
 	intptr_t from, intptr_t upto );
+/** @brief Reads what was in memory at the time of the read/pread call
+ * @param err Where to pass errors to
+ * @param handle Handle opened with proc_handle_open()
+ * @param addr Where to read from
+ * @param dst Where to read into
+ * @param size Number of bytes to read into dst
+ * @return Number of bytes read into dst
+**/
 size_t proc_glance_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *dst, size_t size );
+/** @brief Writes what was in memory at the time of the write/pwrite call
+ * @param err Where to pass errors to
+ * @param handle Handle opened with proc_handle_open()
+ * @param addr Where to write from
+ * @param src Array of bytes to write out
+ * @param size Number of bytes to write from src
+ * @return Number of bytes written from src
+**/
 size_t proc_change_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *src, size_t size );

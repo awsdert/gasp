@@ -1,7 +1,7 @@
 #include "gasp.h"
 int main( int argc, char *argv[] ) {
 	nodes_t ARGS = {0};
-	key_val_t *args = NULL, *arg;
+	kvpair_t *args = NULL, *arg;
 	char *path = NULL, *HOME, *PWD;
 	size_t leng = 0;
 	int ret = EXIT_SUCCESS, i;
@@ -38,6 +38,6 @@ int main( int argc, char *argv[] ) {
 			less_space( NULL, &(arg->val), 0 );
 		}
 	}
-	(void)less_nodes( key_val_t, NULL, &ARGS, 0 );
+	(void)less_nodes( kvpair_t, NULL, &ARGS, 0 );
 	return ret;
 }

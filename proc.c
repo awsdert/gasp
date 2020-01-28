@@ -307,19 +307,23 @@ proc_notice_t* proc_locate_name(
 	memset( nodes, 0, sizeof(nodes_t) );
 	
 	for ( notice = proc_glance_open( err, &glance, underId )
-		; notice; notice = proc_notice_next( err, &glance ) ) {
+		; notice; notice = proc_notice_next( err, &glance )
+	)
+	{
 		text = notice->name.block;
-		printf("Process %d, %d, '%s'\n",
-			notice->entryId, notice->ownerId, notice->name.block );
+			
 		if ( !text || !(*text) || !strstr( text, name ) )
 			continue;
+			
 		if ( i == nodes->total && !(noticed = more_nodes(
 			proc_notice_t, err, nodes, nodes->total + 10 )) )
 			break;
+			
 		noticed[i].entryId = notice->entryId;
 		if ( !more_space(
 			err,&(noticed[i].name), (size = strlen(text)+1)) )
 			break;
+			
 		(void)memcpy( noticed[i].name.block, text, size );
 		nodes->count = ++i;
 	}
@@ -381,13 +385,14 @@ proc_notice_t* proc_notice_info(
 	if ( !(size = file_get_size( &ret, path )) ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't get status size" );
+		fprintf( stderr, "File '%s'\n", path );
 		return NULL;
 	}
 	
 	if ( (fd = open(path,O_RDONLY)) < 0 ) {
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't open status file" );
-		printf( "File '%s'\n", path );
+		fprintf( stderr, "File '%s'\n", path );
 		return NULL;
 	}
 	
@@ -466,7 +471,7 @@ proc_notice_t* proc_notice_info(
 		++txt;
 	}
 	
-	if ( !txt ) {
+	if ( !v ) {
 		ret = ENOENT;
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't locate ownerId" );
@@ -475,7 +480,10 @@ proc_notice_t* proc_notice_info(
 	
 	/* Just in case we decide to take more parameters */
 	*v = '\t';
-	sscanf( txt, "%d",	&(notice->ownerId) );
+	
+	/* Now actually read the value */
+	++v;
+	sscanf( v, "%d",	&(notice->ownerId) );
 	if ( err ) *err = EXIT_SUCCESS;
 	return notice;
 }
@@ -484,6 +492,7 @@ proc_notice_t*
 	proc_notice_next( int *err, proc_glance_t *glance ) {
 	proc_notice_t *notice;
 	int entryId = 0;
+	node_t i;
 	
 	if ( !glance ) {
 		if ( err ) *err = EDESTADDRREQ;
@@ -504,15 +513,17 @@ proc_notice_t*
 	}
 
 	notice = &(glance->notice);
-	for ( ; glance->process < glance->idNodes.count; glance->process++ )
+	for ( i = glance->process; i < glance->idNodes.count; ++i )
 	{
-		notice->ownerId = *(
-			((int*)(glance->idNodes.space.block)) + glance->process);
+		entryId = notice->ownerId =
+			((int*)(glance->idNodes.space.block))[i];
 
 		while ( proc_notice_info( err, notice->ownerId, notice ) )
 		{
-			if ( notice->ownerId == glance->underId )
+			if ( notice->ownerId == glance->underId ) {
+				glance->process = ++i;
 				return proc_notice_info( err, entryId, notice );
+			}
 			if ( notice->ownerId <= 0 )
 				break;
 		}
@@ -529,6 +540,7 @@ proc_notice_t*
 	DIR *dir;
 	struct dirent *ent;
 	node_t i = 0;
+	char *name;
 	if ( !glance ) {
 		if ( err ) *err = EDESTADDRREQ;
 		ERRMSG( EDESTADDRREQ, "glance was NULL" );
@@ -540,19 +552,23 @@ proc_notice_t*
 		if ( (dir = opendir("/proc")) ) {
 			
 			while ( (ent = readdir( dir )) ) {
-				if ( ent->d_name[0] < '0' && ent->d_name[0] > '9' )
+				for ( name = ent->d_name;; ++name ) {
+					if ( *name < '0' || *name > '9' )
+						break;
+				}
+				if ( *name )
 					continue;
-
+				
 				if ( (ret = add_node(
 					&(glance->idNodes), &i, sizeof(int) ))
 					!= EXIT_SUCCESS )
 					break;
 
 				sscanf( ent->d_name, "%d",
-					((int*)(glance->idNodes.space.block)) + i );
+					((int*)(glance->idNodes.space.block)) + i
+				);
 			}
 			closedir(dir);
-			
 			if ( glance->idNodes.count )
 				return proc_notice_next( err, glance );
 		}

@@ -282,76 +282,91 @@ void proc_glance_shut( proc_glance_t *glance ) {
 proc_notice_t* proc_notice_info(
 	int *err, int pid, proc_notice_t *notice )
 {
-	FILE *file;
+	int fd;
 	char path[256];
-	space_t *full, *key, *val;
+	space_t *full, *key, *val, *name;
 	kvpair_t *kvpair;
 	int ret;
+	char *txt;
 	if ( !notice ) {
 		if ( err ) *err = EDESTADDRREQ;
 		ERRMSG( EDESTADDRREQ, "notice was NULL" );
 		return NULL;
 	}
 	kvpair = &(notice->kvpair);
+	name = &(notice->name);
+	full = &(kvpair->full);
+	key = &(kvpair->key);
+	val = &(kvpair->val);
+	memset( name->block, 0, name->given );
+	memset( full->block, 0, full->given );
+	memset( key->block, 0, key->given );
+	memset( val->block, 0, val->given );
 	notice->ownerId = -1;
 	notice->entryId = pid;
 	sprintf( path, "/proc/%d/status", pid );
-	file = fopen(path,"rb");
-	if ( !file ) {
+	if ( (fd = open(path,O_RDONLY)) < 0 ) {
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't open status file" );
 		printf( "File '%s'\n", path );
 		return NULL;
 	}
-	full = &(kvpair->full);
-	key = &(kvpair->key);
-	val = &(kvpair->val);
-	memset( full->block, 0, full->given );
-	memset( key->block, 0, key->given );
-	memset( val->block, 0, val->given );
 	if ( (ret = change_kvpair(
 		kvpair, BUFSIZ, BUFSIZ, BUFSIZ, 1 )) != EXIT_SUCCESS ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't allocate memory for key/val pair");
-		fclose(file);
+		close(fd);
 		return NULL;
 	}
 	while ( 1 ) {
-		fseek( file, 0, SEEK_SET );
-		if ( !fgets(full->block, full->given, file) ) {
-			fclose(file);
+		gasp_lseek( fd, 0, SEEK_SET );
+		if ( !gasp_read(fd, full->block, full->given) ) {
+			close(fd);
 			return NULL;
 		} 
 		if ( strstr( full->block, "\n" ) ||
 			strlen( full->block ) < full->given - 1 )
 			break;
-		if ( (ret = change_kvpair(
-			kvpair, full->given + BUFSIZ,
-			key->given, val->given, 1 ))
-			!= EXIT_SUCCESS ) {
+		if ( !more_space( &ret, full, full->given + BUFSIZ )) {
 			if ( err ) *err = ret;
-			fclose(file);
+			ERRMSG( ret, "Couldn't allocate memory to read into" );
+			close(fd);
 			return NULL;
 		}
 	}
 	if ( (ret = change_kvpair(
 		kvpair, full->given,
-		full->given, full->given, 1 ))
-		!= EXIT_SUCCESS ) {
+		full->given, full->given, 1 )) != EXIT_SUCCESS ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't allocate memory for key/val pair" );
-		fclose(file);
+		close(fd);
 		return NULL;
 	}
-	(void)sscanf( full->block, "%s%*[\t]%s[^\n]",
-		(char*)(key->block), (char*)(notice->name.block) );
-	fseek( file, 0, SEEK_SET );
-	while ( fscanf( file, "%s", (char*)(full->block) ) > 0 ) {
-		if ( strcmp( full->block, "PPid:" ) == 0 ) break;
+	if ( !more_space( &ret, name, full->given ) ) {
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Couldn't allocate memory for name");
+		close(fd);
+		return NULL;
 	}
-	fscanf( file, "%d",	&(notice->ownerId) );
+	txt = strstr( full->block, "\n" );
+	if ( txt ) *txt = 0;
+	txt = strstr( full->block, " " );
+	++txt;
+	memcpy( name->block, txt, strlen(txt) );
+	gasp_lseek( fd, strlen(full->block), SEEK_SET );
+	gasp_read( fd, full->block, full->given );
+	close(fd);
+	txt = full->block;
+	while ( (txt = strstr( txt, " " )) ) {
+		if ( strcmp( txt, "PPid:" ) == 0 ) break;
+	}
+	if ( !txt ) {
+		if ( err ) *err = EXIT_FAILURE;
+		ERRMSG( EXIT_FAILURE, "Couldn't locate ownerId" );
+		return NULL;
+	}
+	sscanf( txt, "%d",	&(notice->ownerId) );
 	if ( err ) *err = EXIT_SUCCESS;
-	fclose(file);
 	return notice;
 }
 
@@ -382,7 +397,8 @@ proc_notice_t*
 		proc_glance_shut( glance );
 		return NULL;
 	}
-	if ( ent->d_name[0] < '0' || ent->d_name[0] > '9' ) goto next_proc;
+	if ( ent->d_name[0] < '0' || ent->d_name[0] > '9' )
+		goto next_proc;
 	(void)sscanf( ent->d_name, "%d", &entryId );
 	notice->ownerId = entryId;
 	while ( proc_notice_info( err, notice->ownerId, notice ) )

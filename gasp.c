@@ -8,7 +8,8 @@ int main( int argc, char *argv[] ) {
 	char *HOME = NULL, *PWD = NULL, *DISPLAY = NULL,
 		*path = NULL, *cmd = NULL;
 	size_t size = 0, leng = BUFSIZ;
-	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != EXIT_SUCCESS ) {
+	if ( (ret = arguments( argc, argv, &ARGS, &leng ))
+		!= EXIT_SUCCESS ) {
 		ERRMSG( ret, "Couldn't get argument pairs" );
 		goto cleanup;
 	}

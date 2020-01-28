@@ -117,7 +117,7 @@ leaks: $(gasp_dbg_exe)
 	valgrind --leak-check=full --show-leak-kinds=all ./$(gasp_dbg_exe)
 
 gasp: $(gasp_exe) $(private_gasp_exe)
-	./$(gasp_exe)
+	./$(gasp_exe) -D HELLO="WORLD"
 
 $(gasp_exe): $(exposed_gasp_objects) $(moonnuklear_dll)
 	$(CC) $(exe_flags) -llua -o $@ $(exposed_gasp_objects)

@@ -120,7 +120,7 @@ int main( int argc, char *argv[] ) {
 					(void)read( into, &addr, sizeof(void*) );
 					printf( "Got address %p, ", (void*)addr );
 					if ( proc_change_data( &ret, handle, addr,
-						"help.elf", strlen(gasp) )  != strlen(gasp) ) {
+						"help", strlen(gasp) )  != strlen(gasp) ) {
 						ret = errno;
 						ERRMSG( ret, "Couldn't write to memory" );
 					}

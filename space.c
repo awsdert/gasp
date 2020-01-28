@@ -3,7 +3,13 @@ void* change_space( int *err, space_t *space, size_t want, int dir ) {
 	uchar *block;
 	errno = EXIT_SUCCESS;
 	if ( !space ) {
+		if ( !want ) {
+			released:
+			if ( err ) *err = EXIT_SUCCESS;
+			return NULL;
+		}
 		if ( err ) *err = EDESTADDRREQ;
+		ERRMSG( EDESTADDRREQ, "Need somewhere to place allocated memory" );
 		return NULL;
 	}
 	if ( want % 16 ) want += (16 - (want % 16));
@@ -11,18 +17,22 @@ void* change_space( int *err, space_t *space, size_t want, int dir ) {
 		if ( err ) *err = EXIT_SUCCESS;
 		return space->block;
 	}
+	/* Shrink */
 	if ( dir < 0 && want > space->given ) {
 		if ( err ) *err = ERANGE;
 		return NULL;
 	}
+	/* Expand */
 	if ( dir > 0 && want < space->given ) {
 		if ( err ) *err = EXIT_SUCCESS;
-		return NULL;
+		return space->block;
 	}
+	/* Release */
 	if ( !want ) {
 		if ( space->block ) free( space->block );
+		space->block = NULL;
 		space->given = 0;
-		return (space->block = NULL);
+		goto released;
 	}
 	if ( !(space->block) ) {
 		space->block = malloc( want );

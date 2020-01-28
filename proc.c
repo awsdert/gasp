@@ -2,16 +2,32 @@
 
 size_t file_get_size( int *err, char const *path ) {
 	int fd;
-	gasp_off_t size;
+	char buff[BUFSIZ];
+	gasp_off_t size, tmp;
 	errno = EXIT_SUCCESS;
+	if ( !path || !(*path) ) {
+		if ( err ) *err = EINVAL;
+		ERRMSG( EINVAL, "path was invalid" );
+		return 0;
+	}
 	if ( (fd = open(path,O_RDONLY)) < 0 ) {
 		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't open file" );
+		fprintf( stderr, "File '%s'\n", path );
 		return 0;
 	}
 	size = gasp_lseek( fd, 0, SEEK_END );
+	if ( size <= 0 ) size = gasp_lseek( fd, 0, SEEK_CUR );
+	if ( size <= 0 ) {
+		errno = EXIT_SUCCESS;
+		while ( (tmp = read( fd, buff, BUFSIZ )) )
+			size += tmp;
+	}
 	close(fd);
 	if ( size <= 0 ) {
 		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't get file size" );
+		fprintf( stderr, "File '%s'\n", path );
 		return 0;
 	}
 	return size;
@@ -247,6 +263,8 @@ proc_notice_t*
 	for ( notice = proc_glance_open( err, &glance, underId )
 		; notice; notice = proc_notice_next( err, &glance ) ) {
 		text = notice->name.block;
+		printf("Process %d, %d, '%s'\n",
+			notice->entryId, notice->ownerId, notice->name.block );
 		if ( !text || !(*text) || !strstr( text, name ) )
 			continue;
 		if ( i == nodes->total && !(noticed = more_nodes(
@@ -287,7 +305,8 @@ proc_notice_t* proc_notice_info(
 	space_t *full, *key, *val, *name;
 	kvpair_t *kvpair;
 	int ret;
-	char *txt;
+	char *txt, *k, *v;
+	intptr_t size;
 	if ( !notice ) {
 		if ( err ) *err = EDESTADDRREQ;
 		ERRMSG( EDESTADDRREQ, "notice was NULL" );
@@ -305,73 +324,79 @@ proc_notice_t* proc_notice_info(
 	notice->ownerId = -1;
 	notice->entryId = pid;
 	sprintf( path, "/proc/%d/status", pid );
+	if ( !(size = file_get_size( &ret, path )) ) {
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Couldn't get status size" );
+		return NULL;
+	}
 	if ( (fd = open(path,O_RDONLY)) < 0 ) {
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't open status file" );
 		printf( "File '%s'\n", path );
 		return NULL;
 	}
-	if ( (ret = change_kvpair(
-		kvpair, BUFSIZ, BUFSIZ, BUFSIZ, 1 )) != EXIT_SUCCESS ) {
+	if ( !more_space( &ret, full, size )) {
 		if ( err ) *err = ret;
-		ERRMSG( ret, "Couldn't allocate memory for key/val pair");
+		ERRMSG( ret, "Couldn't allocate memory to read into" );
+		fprintf( stderr, "Wanted %zu bytes\n", size );
 		close(fd);
 		return NULL;
 	}
-	while ( 1 ) {
-		gasp_lseek( fd, 0, SEEK_SET );
-		if ( !gasp_read(fd, full->block, full->given) ) {
-			close(fd);
-			return NULL;
-		} 
-		if ( strstr( full->block, "\n" ) ||
-			strlen( full->block ) < full->given - 1 )
-			break;
-		if ( !more_space( &ret, full, full->given + BUFSIZ )) {
-			if ( err ) *err = ret;
-			ERRMSG( ret, "Couldn't allocate memory to read into" );
-			close(fd);
-			return NULL;
-		}
+	if ( !gasp_read(fd, full->block, full->given) ) {
+		close(fd);
+		ret = ENODATA;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Couldn't read the status file" );
+		return NULL;
 	}
+	close(fd);
 	if ( (ret = change_kvpair(
 		kvpair, full->given,
 		full->given, full->given, 1 )) != EXIT_SUCCESS ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't allocate memory for key/val pair" );
-		close(fd);
 		return NULL;
 	}
 	if ( !more_space( &ret, name, full->given ) ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't allocate memory for name");
-		close(fd);
 		return NULL;
 	}
 	txt = strstr( full->block, "\n" );
-	if ( txt ) *(++txt) = 0;
-	txt = strstr( full->block, "\t" );
 	if ( !txt ) {
+		ret = ENOSYS;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Don't know how to handle the status file" );
+		return NULL;
+	}
+	*txt = 0;
+	v = strstr( (k = full->block), "\t" );
+	if ( !v ) {
 		ret = ENODATA;
 		if ( *err ) *err = ret;
 		ERRMSG( ret, "Couldn't find character '\t' in read text");
 		(void)fprintf(stderr,"read '%s'\n", full->block );
 		return NULL;
 	}
-	++txt;
-	memcpy( name->block, txt, strlen(txt) );
-	gasp_lseek( fd, strlen(full->block), SEEK_SET );
-	gasp_read( fd, full->block, full->given );
-	close(fd);
-	txt = full->block;
-	while ( (txt = strstr( txt, " " )) ) {
-		if ( strcmp( txt, "PPid:" ) == 0 ) break;
+	++v;
+	memcpy( name->block, v, strlen(v) );
+	*txt = '\n';
+	while ( (k = txt = strstr( txt, "\n" )) ) {
+		*k = 0; ++k;
+		v = strstr( k, "\t" );
+		*v = 0;
+		if ( strcmp( k, "PPid:" ) == 0 ) break;
+		*v = '\t';
+		*(--k) = '\n';
+		++txt;
 	}
 	if ( !txt ) {
-		if ( err ) *err = EXIT_FAILURE;
-		ERRMSG( EXIT_FAILURE, "Couldn't locate ownerId" );
+		ret = ENOENT;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Couldn't locate ownerId" );
 		return NULL;
 	}
+	*v = '\t';
 	sscanf( txt, "%d",	&(notice->ownerId) );
 	if ( err ) *err = EXIT_SUCCESS;
 	return notice;
@@ -398,24 +423,22 @@ proc_notice_t*
 		proc_glance_shut( glance );
 		return NULL;
 	}
-	next_proc:
-	if ( !(ent = readdir(glance->dir)) ) {
-		if ( err ) *err = EXIT_SUCCESS;
-		proc_glance_shut( glance );
-		return NULL;
+	while ( (ent = readdir(glance->dir)) ) {
+		if ( ent->d_name[0] < '0' || ent->d_name[0] > '9' )
+			continue;
+		(void)sscanf( ent->d_name, "%d", &entryId );
+		notice->ownerId = entryId;
+		while ( proc_notice_info( err, notice->ownerId, notice ) )
+		{
+			if ( notice->ownerId == glance->underId )
+				return proc_notice_info( err, entryId, notice );
+			if ( notice->ownerId <= 0 )
+				break;
+		}
 	}
-	if ( ent->d_name[0] < '0' || ent->d_name[0] > '9' )
-		goto next_proc;
-	(void)sscanf( ent->d_name, "%d", &entryId );
-	notice->ownerId = entryId;
-	while ( proc_notice_info( err, notice->ownerId, notice ) )
-	{
-		if ( notice->ownerId == glance->underId )
-			return proc_notice_info( err, entryId, notice );
-		if ( notice->ownerId == 0 )
-			break;
-	}
-	goto next_proc;
+	if ( err ) *err = EXIT_SUCCESS;
+	proc_glance_shut( glance );
+	return NULL;
 }
 
 proc_notice_t*

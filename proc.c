@@ -301,7 +301,7 @@ proc_notice_t* proc_notice_info(
 	int *err, int pid, proc_notice_t *notice )
 {
 	int fd;
-	char path[256];
+	char path[256] = {0};
 	space_t *full, *key, *val, *name;
 	kvpair_t *kvpair;
 	int ret;
@@ -324,6 +324,8 @@ proc_notice_t* proc_notice_info(
 	notice->ownerId = -1;
 	notice->entryId = pid;
 	sprintf( path, "/proc/%d/status", pid );
+	/* Implements a fallback looped read call in the event lseek gleans
+	 * nothing */
 	if ( !(size = file_get_size( &ret, path )) ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't get status size" );
@@ -349,6 +351,7 @@ proc_notice_t* proc_notice_info(
 		ERRMSG( ret, "Couldn't read the status file" );
 		return NULL;
 	}
+	/* No longer need the file opened since we have everything */
 	close(fd);
 	if ( (ret = change_kvpair(
 		kvpair, full->given,
@@ -357,6 +360,7 @@ proc_notice_t* proc_notice_info(
 		ERRMSG( ret, "Couldn't allocate memory for key/val pair" );
 		return NULL;
 	}
+	/* Ensure we have enough space for the name */
 	if ( !more_space( &ret, name, full->given ) ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't allocate memory for name");
@@ -369,7 +373,9 @@ proc_notice_t* proc_notice_info(
 		ERRMSG( ret, "Don't know how to handle the status file" );
 		return NULL;
 	}
+	/* Don't want strlen to count through everything */
 	*txt = 0;
+	/* Find the start of the name given */
 	v = strstr( (k = full->block), "\t" );
 	if ( !v ) {
 		ret = ENODATA;
@@ -379,12 +385,16 @@ proc_notice_t* proc_notice_info(
 		return NULL;
 	}
 	++v;
+	/* Fill name with the name given */
 	memcpy( name->block, v, strlen(v) );
+	/* Restore ability for strstr to see next character */
 	*txt = '\n';
 	while ( (k = txt = strstr( txt, "\n" )) ) {
 		*k = 0; ++k;
 		v = strstr( k, "\t" );
 		*v = 0;
+		/* This is currently the only value we care about besides the
+		 * name */
 		if ( strcmp( k, "PPid:" ) == 0 ) break;
 		*v = '\t';
 		*(--k) = '\n';
@@ -396,6 +406,7 @@ proc_notice_t* proc_notice_info(
 		ERRMSG( ret, "Couldn't locate ownerId" );
 		return NULL;
 	}
+	/* Just in case we decide to take more parameters */
 	*v = '\t';
 	sscanf( txt, "%d",	&(notice->ownerId) );
 	if ( err ) *err = EXIT_SUCCESS;

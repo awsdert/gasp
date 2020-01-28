@@ -157,7 +157,8 @@ typedef struct proc_notice {
 } proc_notice_t;
 typedef struct proc_glance {
 	int underId;
-	DIR *dir;
+	node_t process;
+	nodes_t idNodes;
 	proc_notice_t notice;
 } proc_glance_t;
 typedef struct proc_handle {

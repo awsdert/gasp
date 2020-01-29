@@ -14,6 +14,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ptrace.h>
+#include <sys/wait.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -163,6 +165,8 @@ typedef struct proc_glance {
 } proc_glance_t;
 typedef struct proc_handle {
 	int rdMemFd, wrMemFd, pagesFd;
+	bool running;
+	pthread_t thread;
 	space_t launchedWith;
 	proc_notice_t notice;
 } proc_handle_t;
@@ -220,13 +224,6 @@ proc_notice_t* proc_locate_name(
 **/
 size_t file_get_size(
 	int *err, char const *path );
-/** @brief Checks if process is still alive
- * @param err Where to pass errors back to
- * @param pid ID of process to check
- * @return true or false
-**/
-bool proc_has_died(
-	int *err, int pid );
 /** @brief Opens file descriptors and anything deemed neccessary for
  * handling the process, also calls ptrace with PTRACE_SEIZE or
  * PTRACE_ATTACH if that is unavailable

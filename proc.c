@@ -38,11 +38,17 @@ size_t file_get_size( int *err, char const *path )
 	
 	return size;
 }
-bool proc_has_died( int *err, int pid )
-{
-	char path[256];
-	(void)sprintf( path, "/proc/%d/cmdline", pid );
-	return !file_get_size(err,path);
+void* proc_thread_wait( void *data ) {
+	proc_handle_t *handle = data;
+	int status;
+	while ( 1 ) {
+		waitpid(handle->notice.entryId,&status,0);
+		if ( WIFEXITED(status) || WIFSIGNALED(status) ) {
+			handle->running = 0;
+			break;
+		}
+	}
+	return data;
 }
 proc_handle_t* proc_handle_open( int *err, int pid )
 {
@@ -70,13 +76,13 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 	}
 	
 	if ( !proc_notice_info( err, pid, &(handle->notice) ) ) {
-		free(handle);
+		proc_handle_shut( handle );
 		return NULL;
 	}
 	
 	(void)sprintf( path, "/proc/%d/maps", pid );
 	if ( (handle->pagesFd = open(path,O_RDONLY)) < 0 ) {
-		free(handle);
+		proc_handle_shut( handle );
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't open maps file" );
 		return NULL;
@@ -84,14 +90,20 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 	
 	(void)sprintf( path, "/proc/%d/mem", pid );
 	if ( (handle->rdMemFd = open(path,O_RDONLY)) < 0 ) {
-		close( handle->pagesFd );
-		free(handle);
+		proc_handle_shut( handle );
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't open mem file in read only mode" );
 		return NULL;
 	}
-	
 	handle->wrMemFd = open(path,O_WRONLY);
+	handle->running = 1;
+	if ( pid != getpid() &&
+		pthread_create( &(handle->thread),
+		NULL, proc_thread_wait, handle ) ) {
+		proc_handle_shut( handle );
+		ERRMSG( errno, "Couldn't create pthread to check for SIGKILL" );
+		return NULL;
+	}
 	return handle;
 }
 void proc_handle_shut( proc_handle_t *handle ) {

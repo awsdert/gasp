@@ -3,6 +3,7 @@
 int main( int argc, char *argv[] ) {
 	int ret = EXIT_SUCCESS;
 	int arg;
+	space_t PATH = {0};
 	nodes_t nodes = {0}, ARGS = {0};
 	kvpair_t *args = NULL;
 	char *HOME = NULL, *PWD = NULL, *DISPLAY = NULL,
@@ -25,7 +26,11 @@ int main( int argc, char *argv[] ) {
 	leng += strlen(PWD) + 4;
 	leng += strlen(HOME) + 4;
 	leng += strlen(DISPLAY) + 4;
-	path = calloc( leng, 1 );
+	if ( !(path = more_space( &ret, &PATH, leng )) ) {
+		ret = errno;
+		ERRMSG( errno, "Couldn't allocate path" );
+		goto cleanup;
+	}
 	sprintf( path, "pkexec %s/%s -D HOME='%s' -D PWD='%s'",
 		PWD,
 #ifdef _DEBUG
@@ -42,24 +47,21 @@ int main( int argc, char *argv[] ) {
 		sprintf( path, "%s %s", path, cmd );
 	}
 	printf( "%s\n", path );
-	if ( access( "/proc/self/exe", 0 ) == 0 )
-		ret = system( path );
-	else
-		ret = EXIT_FAILURE;
+	ret = system( path );
 	cleanup:
-	if ( path ) free( path );
+	(void)free_space( &ret, &PATH );
 	if ( ret != EXIT_SUCCESS ) {
 		ERRMSG( ret, "Test failed" );
 		ret = EXIT_FAILURE;
 	}
 	if ( args ) {
 		for ( arg = 1; arg < argc; ++arg ) {
-			less_space( NULL, &(args[arg].key), 0 );
-			less_space( NULL, &(args[arg].val), 0 );
+			(void)free_space( NULL, &(args[arg].key) );
+			(void)free_space( NULL, &(args[arg].val) );
 		}
 	}
-	(void)less_nodes( kvpair_t, NULL, &ARGS, 0 );
-	(void)less_nodes( proc_notice_t, NULL, &nodes, 0 );
+	(void)free_nodes( kvpair_t, NULL, &ARGS );
+	(void)free_nodes( proc_notice_t, NULL, &nodes );
 	return ret;
 }
 

@@ -38,16 +38,17 @@ size_t file_get_size( int *err, char const *path )
 	
 	return size;
 }
-void* proc_thread_wait( void *data ) {
+void* proc_handle_wait( void *data ) {
 	proc_handle_t *handle = data;
 	int status;
-	while ( 1 ) {
+	while ( handle->waiting ) {
 		waitpid(handle->notice.entryId,&status,0);
 		if ( WIFEXITED(status) || WIFSIGNALED(status) ) {
 			handle->running = 0;
 			break;
 		}
 	}
+	handle->waiting = 0;
 	return data;
 }
 proc_handle_t* proc_handle_open( int *err, int pid )
@@ -97,22 +98,41 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 	}
 	handle->wrMemFd = open(path,O_WRONLY);
 	handle->running = 1;
-	if ( pid != getpid() &&
-		pthread_create( &(handle->thread),
-		NULL, proc_thread_wait, handle ) ) {
-		proc_handle_shut( handle );
-		ERRMSG( errno, "Couldn't create pthread to check for SIGKILL" );
-		return NULL;
+	if ( pid != getpid() ) {
+		if ( pthread_create( &(handle->thread),
+			NULL, proc_handle_wait, handle ) ) {
+			proc_handle_shut( handle );
+			ERRMSG( errno, "Couldn't create pthread to check for SIGKILL" );
+			return NULL;
+		}
+		handle->waiting = 1;
+		(void)pthread_detach( handle->thread );
 	}
 	return handle;
 }
 void proc_handle_shut( proc_handle_t *handle ) {
+	/* Used only to prevent segfault from pthread_join, do nothing
+	 * with it */
+	void *data;
+	/* Don't try to close NULL as that will segfault */
 	if ( !handle ) return;
+	/* Ensure thread closes before we release the handle it's using */
+	if ( handle->waiting ) {
+		handle->waiting = 0;
+		(void)pthread_join( handle->thread, &data );
+	}
+	/* Cleanup noticed info */
 	proc_notice_zero( &(handle->notice) );
+	/* None of these need to be open anymore */
 	if ( handle->rdMemFd >= 0 ) close( handle->rdMemFd );
 	if ( handle->wrMemFd >= 0 ) close( handle->wrMemFd );
 	if ( handle->pagesFd >= 0 ) close( handle->pagesFd );
+	/* Ensure that even if handle is reused by accident the most that
+	 * can happen is a segfault */
 	(void)memset(handle,0,sizeof(proc_handle_t));
+	/* Ensure none of these are treated as valid in the above scenario*/
+	handle->rdMemFd = handle->wrMemFd = handle->pagesFd = -1;
+	/* No need for the handle anymore */
 	free(handle);
 }
 
@@ -328,7 +348,6 @@ proc_notice_t* proc_locate_name(
 	)
 	{
 		text = notice->name.block;
-			
 		if ( !text || !(*text) || !strstr( text, name ) )
 			continue;
 			
@@ -344,7 +363,7 @@ proc_notice_t* proc_locate_name(
 		(void)memcpy( noticed[i].name.block, text, size );
 		nodes->count = ++i;
 	}
-	
+	puts("Closed loop");
 	proc_glance_shut( &glance );
 	if ( i > 0 )
 		return nodes->space.block;
@@ -395,6 +414,14 @@ proc_notice_t* proc_notice_info(
 	
 	notice->ownerId = -1;
 	notice->entryId = pid;
+	
+	if ( pid < 1 ) {
+		ret = EDESTADDRREQ;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "pid must not be less than 1");
+		return NULL;
+	}
+	
 	sprintf( path, "/proc/%d/status", pid );
 	
 	/* Implements a fallback looped read call in the event lseek gleans
@@ -534,7 +561,7 @@ proc_notice_t*
 	{
 		entryId = notice->ownerId =
 			((int*)(glance->idNodes.space.block))[i];
-
+		fputs( "Enter\n", stderr );
 		while ( proc_notice_info( err, notice->ownerId, notice ) )
 		{
 			if ( notice->ownerId == glance->underId ) {
@@ -544,6 +571,7 @@ proc_notice_t*
 			if ( notice->ownerId <= 0 )
 				break;
 		}
+		fputs( "Leave\n", stderr );
 	}
 
 	if ( err ) *err = EXIT_SUCCESS;

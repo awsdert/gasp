@@ -165,7 +165,7 @@ typedef struct proc_glance {
 } proc_glance_t;
 typedef struct proc_handle {
 	int rdMemFd, wrMemFd, pagesFd;
-	bool running;
+	bool running, waiting;
 	pthread_t thread;
 	space_t launchedWith;
 	proc_notice_t notice;

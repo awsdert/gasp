@@ -112,7 +112,6 @@ intptr_t proc_mapped_next(
 )
 {
 	char line[PAGE_LINE_SIZE] = {0}, *perm;
-	intptr_t from = 0, upto = 0;
 	
 	if ( !mapped ) {
 		if ( err ) *err = EDESTADDRREQ;
@@ -149,17 +148,22 @@ intptr_t proc_mapped_next(
 			(void**)&(mapped->base),
 			(void**)&(mapped->upto) );
 
-		if ( addr >= upto ) {
-			while ( gasp_read( handle->pagesFd, line, 1 ) == 1 ) {
-				if ( line[0] == '\n' )
-					break;
-			}
-			if ( line[0] != '\n' ) {
-				if ( err ) *err = errno;
-				return -1;
-			}
+		if ( addr < mapped->upto )
+			break;
+		
+		/* Move file pointer to next line */
+		while ( gasp_read( handle->pagesFd, line, 1 ) == 1 ) {
+			if ( line[0] == '\n' )
+				break;
+			line[0] = 0;
 		}
-	} while ( addr >= upto );
+		
+		/* Ensure we break out when we hit EOF */
+		if ( line[0] != '\n' ) {
+			if ( err ) *err = errno;
+			return -1;
+		}
+	} while ( addr >= mapped->upto );
 	
 	perm = strstr( line, " " );
 	++perm;
@@ -167,7 +171,7 @@ intptr_t proc_mapped_next(
 	mapped->perm |= (perm[0] == 'r') ? 04 : 0;
 	mapped->perm |= (perm[1] == 'w') ? 02 : 0;
 	mapped->perm |= (perm[2] == 'x') ? 01 : 0;
-	return from;
+	return mapped->base;
 }
 
 int proc_mapped_addr(
@@ -177,7 +181,7 @@ int proc_mapped_addr(
 {
 	proc_mapped_t mapped = {0};
 	
-	while ( proc_mapped_next( err, handle, mapped.base, &mapped ) >= 0 ) {
+	while ( proc_mapped_next( err, handle, mapped.upto, &mapped ) >= 0 ) {
 		if ( mapped.upto < addr ) continue;
 		return mapped.perm;
 	}
@@ -273,9 +277,10 @@ node_t proc_aobscan(
 		(void)memset( buff + BUFSIZ, 0, BUFSIZ );
 		
 		if ( from >= mapped.upto ) {
-			if ( proc_mapped_next( err, handle, from, &mapped ) < 0 )
+			if ( proc_mapped_next( err, handle,
+				mapped.upto, &mapped ) < 0 )
 				return count;
-				
+			
 			if ( mapped.base >= (upto - bytes) ) {
 				if ( err ) *err = EXIT_SUCCESS;
 				return count;

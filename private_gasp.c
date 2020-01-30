@@ -39,12 +39,14 @@ int main( int argc, char *argv[] ) {
 	size_t size = 0, leng = BUFSIZ;
 	intptr_t addr = 0;
 	lua_CFunction old_lua_panic_cb;
+	puts("Checking arguments");
 	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != EXIT_SUCCESS ) {
 		ERRMSG( ret, "Couldn't get argument pairs" );
 		goto cleanup;
 	}
 	leng += BUFSIZ;
 	args = ARGS.space.block;
+	puts("Checking enviroment");
 	DISPLAY = getenv("DISPLAY");
 	if ( !(HOME = getenv("HOME")) || !(PWD = getenv("PWD")) ) {
 		ret = errno;
@@ -63,6 +65,7 @@ int main( int argc, char *argv[] ) {
 	setenv("LUA_PATH",LUA_PATH,0);
 	setenv("LUA_CPATH",LUA_CPATH,0);
 	lua_State *L = NULL;
+	puts("Opening lua");
 	if ( !(L = luaL_newstate()) ) {
 		ret = errno;
 		ERRMSG( ret, "Couldn't create lua instance" );
@@ -72,7 +75,7 @@ int main( int argc, char *argv[] ) {
 	luaL_openlibs(L);
 	/* Just a hack for slipups upstream */
 	luaL_dostring(L,"loadlib = package.loadlib");
-#if 0
+#if 1
 	leng += 3;
 	path = calloc( leng, 1 );
 	sprintf(path, "%s/gasp.lua", PWD );
@@ -84,25 +87,26 @@ int main( int argc, char *argv[] ) {
 	lua_close(L);
 	free(LUA_CPATH);
 	free(LUA_PATH);
+	puts("Looking for gasp");
 	if ( (noticed = proc_locate_name( &ret, gasp, &nodes, 0 )) ) {
-		puts("Found:");
+		puts( "Found:");
 		path = calloc( size, 1 );
 		if ( path ) {
 			sprintf( path, "%s/.gasp", HOME );
 			if ( access(path,0) != 0 && mkdir(path,0755) != 0 ) {
 				ret = errno;
 				ERRMSG( ret, "access() or mkdir() failed" );
-				fputs( path, stderr );
+				fprintf( stderr, "Path: '%s'\n", path );
 			}
 			sprintf( path, "%s/.gasp/test.aobscan", HOME );
 			if ( (into = open(path, O_CREAT | O_RDWR, 0755 )) < 0 ) {
 				ret = errno;
 				ERRMSG( ret, "open() failed" );
-				puts( path );
+				fprintf( stderr, "Path: '%s'\n", path );
 			}
 		}
 		for ( i = 0; i < nodes.count; ++i ) {
-			(void)printf( "%04X '%s'\n",
+			(void)fprintf( stderr, "%04X '%s'\n",
 				noticed[i].entryId, (char*)(noticed[i].name.block) );
 			if ( (handle =
 				proc_handle_open( &ret, noticed[i].entryId )) ) {

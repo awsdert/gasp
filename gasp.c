@@ -46,7 +46,7 @@ int main( int argc, char *argv[] ) {
 		if ( strstr(cmd, "gasp") ) continue;
 		sprintf( path, "%s %s", path, cmd );
 	}
-	printf( "%s\n", path );
+	puts( path );
 	ret = system( path );
 	cleanup:
 	(void)free_space( &ret, &PATH );

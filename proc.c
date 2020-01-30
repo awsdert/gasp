@@ -40,7 +40,8 @@ size_t file_get_size( int *err, char const *path )
 }
 void* proc_handle_wait( void *data ) {
 	proc_handle_t *handle = data;
-	int status;
+	int status = 0;
+	(void)pthread_detach( handle->thread );
 	while ( handle->waiting ) {
 		waitpid(handle->notice.entryId,&status,0);
 		if ( WIFEXITED(status) || WIFSIGNALED(status) ) {
@@ -56,19 +57,17 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 	char path[256] = {0};
 	proc_handle_t *handle;
 	long attach_ret = -1;
-	int ptrace_mode = (PTRACE_SEIZE) ? (PTRACE_SEIZE) : -1;
-	
-	if ( pid != getpid() ) {
-		if ( ptrace_mode > 0 )
-			attach_ret = ptrace( ptrace_mode, pid, NULL, NULL );
-		if ( attach_ret != 0 ) { 
-			if ( ptrace_mode == -1 ) {
-				if ( err ) *err = ENOSYS;
-				puts("PTRACE_SEIZE not supported");
-			}
-			else if ( err ) *err = errno;
-			return NULL;
-		}
+#ifdef PTRACE_SEIZE
+	int ptrace_mode = PTRACE_SEIZE;
+#else
+	int ptrace_mode = PTRACE_ATTACH;
+	ERRMSG( ENOSYS,
+		"PTRACE_SEIZE not defined, defaulting to PTRACE_ATTACH");
+#endif
+	attach_ret = ptrace( ptrace_mode, pid, NULL, NULL );
+	if ( attach_ret != 0 ) {
+		if ( err ) *err = errno;
+		return NULL;
 	}
 	
 	if ( !(handle = calloc(sizeof(proc_handle_t),1)) ) {
@@ -98,7 +97,8 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 	}
 	handle->wrMemFd = open(path,O_WRONLY);
 	handle->running = 1;
-	if ( pid != getpid() ) {
+#if 0
+	if ( pid != (getpid()) ) {
 		if ( pthread_create( &(handle->thread),
 			NULL, proc_handle_wait, handle ) ) {
 			proc_handle_shut( handle );
@@ -106,8 +106,8 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 			return NULL;
 		}
 		handle->waiting = 1;
-		(void)pthread_detach( handle->thread );
 	}
+#endif
 	return handle;
 }
 void proc_handle_shut( proc_handle_t *handle ) {
@@ -329,45 +329,49 @@ node_t proc_aobscan(
 proc_notice_t* proc_locate_name(
 	int *err, char *name, nodes_t *nodes, int underId )
 {
-	size_t i = 0, size;
+	int ret = EXIT_SUCCESS;
+	node_t i = 0;
+	size_t size;
 	proc_glance_t glance;
 	proc_notice_t *notice, *noticed;
 	char *text;
 	
 	if ( !nodes ) {
-		if ( err ) *err = EDESTADDRREQ;
-		ERRMSG( EDESTADDRREQ, "nowhere to place noticed processes" );
+		ret = EDESTADDRREQ;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "nowhere to place noticed processes" );
 		return NULL;
 	}
-	
-	if ( err ) *err = EXIT_SUCCESS;
+
+	if ( err ) *err = ret;
 	memset( nodes, 0, sizeof(nodes_t) );
 	
-	for ( notice = proc_glance_open( err, &glance, underId )
-		; notice; notice = proc_notice_next( err, &glance )
+	for ( notice = proc_glance_open( &ret, &glance, underId )
+		; notice; notice = proc_notice_next( &ret, &glance )
 	)
 	{
 		text = notice->name.block;
-		if ( !text || !(*text) || !strstr( text, name ) )
+		if ( !strstr( text, name ) )
 			continue;
-			
-		if ( i == nodes->total && !(noticed = more_nodes(
-			proc_notice_t, err, nodes, nodes->total + 10 )) )
+		if ( (ret = add_node( nodes, &i, sizeof(proc_notice_t) ))
+			!= EXIT_SUCCESS )
 			break;
-			
+		
+		noticed = (proc_notice_t*)(nodes->space.block);
 		noticed[i].entryId = notice->entryId;
 		if ( !more_space(
-			err,&(noticed[i].name), (size = strlen(text)+1)) )
+			&ret,&(noticed[i].name), (size = strlen(text)+1)) ) {
+			nodes->count--;
 			break;
-			
+		}
+		
 		(void)memcpy( noticed[i].name.block, text, size );
-		nodes->count = ++i;
 	}
-	puts("Closed loop");
 	proc_glance_shut( &glance );
 	if ( i > 0 )
 		return nodes->space.block;
-	if ( err && *err == EXIT_SUCCESS ) *err = ENOENT;
+	if ( ret == EXIT_SUCCESS ) ret = ENOENT;
+	if ( err ) *err = ret;
 	return NULL;
 }
 
@@ -379,8 +383,8 @@ void proc_notice_zero( proc_notice_t *notice ) {
 
 void proc_glance_shut( proc_glance_t *glance ) {
 	if ( !glance ) return;
-	proc_notice_zero( &(glance->notice) );
 	(void)free_nodes( int, NULL, &(glance->idNodes) );
+	proc_notice_zero( &(glance->notice) );
 	(void)memset( glance, 0, sizeof(proc_glance_t) );
 }
 
@@ -392,7 +396,7 @@ proc_notice_t* proc_notice_info(
 	space_t *full, *key, *val, *name;
 	kvpair_t *kvpair;
 	int ret;
-	char *txt, *k, *v;
+	char *k, *v, *n;
 	intptr_t size;
 	
 	if ( !notice ) {
@@ -400,7 +404,6 @@ proc_notice_t* proc_notice_info(
 		ERRMSG( EDESTADDRREQ, "notice was NULL" );
 		return NULL;
 	}
-	
 	kvpair = &(notice->kvpair);
 	name = &(notice->name);
 	full = &(kvpair->full);
@@ -414,14 +417,12 @@ proc_notice_t* proc_notice_info(
 	
 	notice->ownerId = -1;
 	notice->entryId = pid;
-	
 	if ( pid < 1 ) {
 		ret = EDESTADDRREQ;
 		if ( err ) *err = ret;
 		ERRMSG( ret, "pid must not be less than 1");
 		return NULL;
 	}
-	
 	sprintf( path, "/proc/%d/status", pid );
 	
 	/* Implements a fallback looped read call in the event lseek gleans
@@ -432,14 +433,12 @@ proc_notice_t* proc_notice_info(
 		fprintf( stderr, "File '%s'\n", path );
 		return NULL;
 	}
-	
 	if ( (fd = open(path,O_RDONLY)) < 0 ) {
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't open status file" );
 		fprintf( stderr, "File '%s'\n", path );
 		return NULL;
 	}
-	
 	if ( !more_space( &ret, full, size )) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't allocate memory to read into" );
@@ -447,15 +446,13 @@ proc_notice_t* proc_notice_info(
 		close(fd);
 		return NULL;
 	}
-	
-	if ( !gasp_read(fd, full->block, full->given) ) {
+	if ( gasp_read(fd, full->block, full->given) < size ) {
 		close(fd);
 		ret = ENODATA;
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't read the status file" );
 		return NULL;
 	}
-	
 	/* No longer need the file opened since we have everything */
 	close(fd);
 	if ( (ret = change_kvpair(
@@ -465,7 +462,6 @@ proc_notice_t* proc_notice_info(
 		ERRMSG( ret, "Couldn't allocate memory for key/val pair" );
 		return NULL;
 	}
-	
 	/* Ensure we have enough space for the name */
 	if ( !more_space( &ret, name, full->given ) ) {
 		if ( err ) *err = ret;
@@ -473,63 +469,38 @@ proc_notice_t* proc_notice_info(
 		return NULL;
 	}
 	
-	txt = strstr( full->block, "\n" );
-	if ( !txt ) {
-		ret = ENOSYS;
-		if ( err ) *err = ret;
-		ERRMSG( ret, "Don't know how to handle the status file" );
-		return NULL;
-	}
-	
-	/* Don't want strlen to count through everything */
-	*txt = 0;
-	
-	/* Find the start of the name given */
-	v = strstr( (k = full->block), "\t" );
-	if ( !v ) {
-		ret = ENODATA;
-		if ( *err ) *err = ret;
-		ERRMSG( ret, "Couldn't find character '\t' in read text");
-		(void)fprintf(stderr,"read '%s'\n", full->block );
-		return NULL;
-	}
-	
-	/* We don't want to copy the tab character */
-	++v;
-	
-	/* Fill name with the name given */
-	memcpy( name->block, v, strlen(v) );
-	
-	/* Restore ability for strstr to see next character */
-	*txt = '\n';
-	
-	while ( (k = txt = strstr( txt, "\n" )) ) {
-		*k = 0; ++k;
-		v = strstr( k, "\t" );
+	n = k = full->block;
+	while ( n ) {
+		n = strchr( n, '\n' );
+		if ( n ) {
+			*n = 0;
+			size -= strlen(k) + 1;
+		}
+		else size = 0;
+		v = strchr( k, ':' );
 		*v = 0;
-		/* This is currently the only value we care about besides the
-		 * name */
-		if ( strcmp( k, "PPid:" ) == 0 ) break;
-		*v = '\t';
-		*(--k) = '\n';
-		++txt;
+		/* We only care about the name and ppid at the moment */
+		if ( strcmp( k, "Name" ) == 0 )
+			memcpy( name->block, v + 2, strlen(v+1) );
+		if ( strcmp( k, "PPid" ) == 0 )
+			notice->ownerId = strtol( v + 2, NULL, 10 );
+		*v = ':';
+		if ( n ) {
+			*n = '\n';
+			++n;
+		}
+		k = n;
 	}
-	
-	if ( !v ) {
-		ret = ENOENT;
-		if ( err ) *err = ret;
-		ERRMSG( ret, "Couldn't locate ownerId" );
-		return NULL;
+	if ( *((char*)(notice->name.block)) && notice->ownerId >= 0 ) {
+		if ( err ) *err = EXIT_SUCCESS;
+		return notice;
 	}
-	
-	/* Just in case we decide to take more parameters */
-	*v = '\t';
-	
-	/* Now actually read the value */
-	++v;
-	sscanf( v, "%d",	&(notice->ownerId) );
-	if ( err ) *err = EXIT_SUCCESS;
-	return notice;
+	ret = ENOENT;
+	if ( err ) *err = ret;
+	ERRMSG( ret, "Couldn't locate process" );
+	fprintf( stderr, "pid: %d; ppid: %d; name '%s'\n",
+		notice->entryId, notice->ownerId, notice->name.block );
+	return NULL;
 }
 
 proc_notice_t*
@@ -561,7 +532,6 @@ proc_notice_t*
 	{
 		entryId = notice->ownerId =
 			((int*)(glance->idNodes.space.block))[i];
-		fputs( "Enter\n", stderr );
 		while ( proc_notice_info( err, notice->ownerId, notice ) )
 		{
 			if ( notice->ownerId == glance->underId ) {
@@ -571,8 +541,8 @@ proc_notice_t*
 			if ( notice->ownerId <= 0 )
 				break;
 		}
-		fputs( "Leave\n", stderr );
 	}
+	glance->process++;
 
 	if ( err ) *err = EXIT_SUCCESS;
 	proc_glance_shut( glance );

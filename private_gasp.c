@@ -39,14 +39,12 @@ int main( int argc, char *argv[] ) {
 	size_t size = 0, leng = BUFSIZ;
 	intptr_t addr = 0;
 	lua_CFunction old_lua_panic_cb;
-	puts("Checking arguments");
 	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != EXIT_SUCCESS ) {
 		ERRMSG( ret, "Couldn't get argument pairs" );
 		goto cleanup;
 	}
 	leng += BUFSIZ;
 	args = ARGS.space.block;
-	puts("Checking enviroment");
 	DISPLAY = getenv("DISPLAY");
 	if ( !(HOME = getenv("HOME")) || !(PWD = getenv("PWD")) ) {
 		ret = errno;
@@ -65,7 +63,6 @@ int main( int argc, char *argv[] ) {
 	setenv("LUA_PATH",LUA_PATH,0);
 	setenv("LUA_CPATH",LUA_CPATH,0);
 	lua_State *L = NULL;
-	puts("Opening lua");
 	if ( !(L = luaL_newstate()) ) {
 		ret = errno;
 		ERRMSG( ret, "Couldn't create lua instance" );
@@ -87,9 +84,9 @@ int main( int argc, char *argv[] ) {
 	lua_close(L);
 	free(LUA_CPATH);
 	free(LUA_PATH);
-	puts("Looking for gasp");
+
 	if ( (noticed = proc_locate_name( &ret, gasp, &nodes, 0 )) ) {
-		puts( "Found:");
+		fputs( "Found:\n", stderr);
 		path = calloc( size, 1 );
 		if ( path ) {
 			sprintf( path, "%s/.gasp", HOME );
@@ -112,12 +109,13 @@ int main( int argc, char *argv[] ) {
 				proc_handle_open( &ret, noticed[i].entryId )) ) {
 				if ( ret != EXIT_SUCCESS )
 					ERRMSG( ret, "proc_handle_open() failed" );
-				printf("rdMemFd = %d, wrMemFd = %d\n",
+				fprintf( stderr, "rdMemFd = %d, wrMemFd = %d\n",
 					handle->rdMemFd, handle->wrMemFd );
 				if ( !(count = proc_aobscan( &ret, into, handle,
 					(uchar*)gasp, strlen(gasp), 0, INTPTR_MAX )) &&
 					ret != EXIT_SUCCESS )
 					ERRMSG( ret, "proc_aobscan() failed" );
+				
 				gasp_lseek( into, 0, SEEK_SET );
 				for ( a = 0; a < count; ++a ) {
 					(void)read( into, &addr, sizeof(void*) );

@@ -235,6 +235,7 @@ node_t proc_aobscan(
 	uchar buff[BUFSIZ*2] = {0}, *i, *next;
 	intptr_t done;
 	proc_mapped_t mapped = {0};
+	_Bool load_next = 0;
 	
 	errno = EXIT_SUCCESS;
 	if ( into < 0 ) {
@@ -292,7 +293,10 @@ node_t proc_aobscan(
 			}
 			next = buff + BUFSIZ;
 		}
-		else next = buff + (done - bytes) + 1;
+		else {
+			next = buff + (done - bytes) + 1;
+			load_next = 1;
+		}
 		
 		for ( i = buff; i < next; ++i, ++from ) {
 			if ( memcmp( i, array, bytes ) == 0 ) {
@@ -308,7 +312,7 @@ node_t proc_aobscan(
 		(void)memmove( buff, buff + BUFSIZ, BUFSIZ );
 		(void)memset( buff + BUFSIZ, 0, BUFSIZ );
 		
-		if ( from >= mapped.upto ) {
+		if ( load_next ) {
 			if ( proc_mapped_next( err, handle,
 				mapped.upto, &mapped ) < 0 )
 				return count;
@@ -353,6 +357,7 @@ proc_notice_t* proc_locate_name(
 		text = notice->name.block;
 		if ( !strstr( text, name ) )
 			continue;
+			
 		if ( (ret = add_node( nodes, &i, sizeof(proc_notice_t) ))
 			!= EXIT_SUCCESS )
 			break;
@@ -367,6 +372,7 @@ proc_notice_t* proc_locate_name(
 		
 		(void)memcpy( noticed[i].name.block, text, size );
 	}
+	
 	proc_glance_shut( &glance );
 	if ( i > 0 )
 		return nodes->space.block;
@@ -393,7 +399,7 @@ proc_notice_t* proc_notice_info(
 {
 	int fd;
 	char path[256] = {0};
-	space_t *full, *key, *val, *name;
+	space_t *name, *full;
 	kvpair_t *kvpair;
 	int ret;
 	char *k, *v, *n;
@@ -407,16 +413,13 @@ proc_notice_t* proc_notice_info(
 	kvpair = &(notice->kvpair);
 	name = &(notice->name);
 	full = &(kvpair->full);
-	key = &(kvpair->key);
-	val = &(kvpair->val);
 	
 	memset( name->block, 0, name->given );
 	memset( full->block, 0, full->given );
-	memset( key->block, 0, key->given );
-	memset( val->block, 0, val->given );
 	
 	notice->ownerId = -1;
 	notice->entryId = pid;
+	
 	if ( pid < 1 ) {
 		ret = EDESTADDRREQ;
 		if ( err ) *err = ret;
@@ -433,12 +436,14 @@ proc_notice_t* proc_notice_info(
 		fprintf( stderr, "File '%s'\n", path );
 		return NULL;
 	}
+	
 	if ( (fd = open(path,O_RDONLY)) < 0 ) {
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't open status file" );
 		fprintf( stderr, "File '%s'\n", path );
 		return NULL;
 	}
+	
 	if ( !more_space( &ret, full, size )) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't allocate memory to read into" );
@@ -446,6 +451,7 @@ proc_notice_t* proc_notice_info(
 		close(fd);
 		return NULL;
 	}
+	
 	if ( gasp_read(fd, full->block, full->given) < size ) {
 		close(fd);
 		ret = ENODATA;
@@ -455,13 +461,7 @@ proc_notice_t* proc_notice_info(
 	}
 	/* No longer need the file opened since we have everything */
 	close(fd);
-	if ( (ret = change_kvpair(
-		kvpair, full->given,
-		full->given, full->given, 1 )) != EXIT_SUCCESS ) {
-		if ( err ) *err = ret;
-		ERRMSG( ret, "Couldn't allocate memory for key/val pair" );
-		return NULL;
-	}
+	
 	/* Ensure we have enough space for the name */
 	if ( !more_space( &ret, name, full->given ) ) {
 		if ( err ) *err = ret;
@@ -470,13 +470,10 @@ proc_notice_t* proc_notice_info(
 	}
 	
 	n = k = full->block;
-	while ( n ) {
+	while ( size > 0 ) {
 		n = strchr( n, '\n' );
-		if ( n ) {
-			*n = 0;
-			size -= strlen(k) + 1;
-		}
-		else size = 0;
+		*n = 0;
+		size -= strlen(k) + 1;
 		v = strchr( k, ':' );
 		*v = 0;
 		/* We only care about the name and ppid at the moment */
@@ -485,12 +482,10 @@ proc_notice_t* proc_notice_info(
 		if ( strcmp( k, "PPid" ) == 0 )
 			notice->ownerId = strtol( v + 2, NULL, 10 );
 		*v = ':';
-		if ( n ) {
-			*n = '\n';
-			++n;
-		}
-		k = n;
+		*n = '\n';
+		k = ++n;
 	}
+	
 	if ( *((char*)(notice->name.block)) && notice->ownerId >= 0 ) {
 		if ( err ) *err = EXIT_SUCCESS;
 		return notice;
@@ -515,11 +510,12 @@ proc_notice_t*
 		return NULL;
 	}
 	
+
 	if ( err && *err != EXIT_SUCCESS ) {
 		proc_glance_shut( glance );
 		return NULL;
 	}
-
+	
 	if ( !(glance->idNodes.count) ) {
 		if ( err ) *err = ENODATA;
 		ERRMSG( ENODATA, "glance->idNodes.count was 0" );
@@ -542,8 +538,8 @@ proc_notice_t*
 				break;
 		}
 	}
-	glance->process++;
 
+	glance->process = glance->idNodes.count;
 	if ( err ) *err = EXIT_SUCCESS;
 	proc_glance_shut( glance );
 	return NULL;

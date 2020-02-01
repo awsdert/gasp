@@ -164,8 +164,8 @@ typedef struct proc_glance {
 	proc_notice_t notice;
 } proc_glance_t;
 typedef struct proc_handle {
-	int rdMemFd, wrMemFd, pagesFd;
-	bool running, waiting;
+	bool samepid, running, waiting;
+	int ptrace_mode, memfile, pagesFd;
 	pthread_t thread;
 	space_t launchedWith;
 	proc_notice_t notice;
@@ -261,7 +261,7 @@ node_t proc_aobscan(
  * @param size Number of bytes to read into dst
  * @return Number of bytes read into dst
 **/
-size_t proc_glance_data(
+intptr_t proc_glance_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *dst, size_t size );
 /** @brief Writes what was in memory at the time of the write/pwrite call
@@ -272,7 +272,7 @@ size_t proc_glance_data(
  * @param size Number of bytes to write from src
  * @return Number of bytes written from src
 **/
-size_t proc_change_data(
+intptr_t proc_change_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *src, size_t size );
 

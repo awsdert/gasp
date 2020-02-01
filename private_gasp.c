@@ -72,11 +72,10 @@ int main( int argc, char *argv[] ) {
 	luaL_openlibs(L);
 	/* Just a hack for slipups upstream */
 	luaL_dostring(L,"loadlib = package.loadlib");
-#if 1
+#if 0
 	leng += 3;
 	path = calloc( leng, 1 );
-	sprintf(path, "%s/gasp.lua", PWD );
-	if ( luaL_dofile(L, path) )
+	if ( luaL_dofile(L, "gasp.lua" ) )
 		printf("Failed:\n%s\n", lua_tostring(L,-1));
 	free(path);
 	path = NULL;
@@ -109,23 +108,23 @@ int main( int argc, char *argv[] ) {
 				proc_handle_open( &ret, noticed[i].entryId )) ) {
 				if ( ret != EXIT_SUCCESS )
 					ERRMSG( ret, "proc_handle_open() failed" );
-				fprintf( stderr, "rdMemFd = %d, wrMemFd = %d\n",
-					handle->rdMemFd, handle->wrMemFd );
 				if ( !(count = proc_aobscan( &ret, into, handle,
-					(uchar*)gasp, strlen(gasp), 0, INTPTR_MAX )) &&
-					ret != EXIT_SUCCESS )
-					ERRMSG( ret, "proc_aobscan() failed" );
+					(uchar*)gasp, strlen(gasp), 0, INTPTR_MAX )) ) {
+					if ( ret != EXIT_SUCCESS )
+						ERRMSG( ret, "proc_aobscan() failed" );
+					continue;
+				}
 				
 				gasp_lseek( into, 0, SEEK_SET );
 				for ( a = 0; a < count; ++a ) {
 					(void)read( into, &addr, sizeof(void*) );
-					printf( "Got address %p, ", (void*)addr );
+					fprintf( stderr, "Got address %p\n", (void*)addr );
 					if ( proc_change_data( &ret, handle, addr,
-						"help", strlen(gasp) )  != strlen(gasp) ) {
+						"help", 4 )  != strlen(gasp) ) {
 						ret = errno;
 						ERRMSG( ret, "Couldn't write to memory" );
 					}
-					printf("gasp = %s\n", gasp);
+					fprintf(stderr, "gasp = '%s'\n", gasp);
 				}
 				proc_handle_shut( handle );
 			}

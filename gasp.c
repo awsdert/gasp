@@ -7,7 +7,7 @@ int main( int argc, char *argv[] ) {
 	nodes_t nodes = {0}, ARGS = {0};
 	kvpair_t *args = NULL;
 	char *HOME = NULL, *PWD = NULL, *DISPLAY = NULL,
-		*path = NULL, *cmd = NULL;
+		*path = NULL, *cmd = NULL, *gasp = "gasp";
 	size_t size = 0, leng = BUFSIZ;
 	if ( (ret = arguments( argc, argv, &ARGS, &leng ))
 		!= EXIT_SUCCESS ) {
@@ -43,11 +43,13 @@ int main( int argc, char *argv[] ) {
 		sprintf( path, "%s -D DISPLAY='%s'", path, DISPLAY );
 	for ( arg = 0; arg < argc; ++arg ) {
 		cmd = argv[arg];
-		if ( strstr(cmd, "gasp") ) continue;
+		if ( strstr(cmd, gasp) ) continue;
 		sprintf( path, "%s %s", path, cmd );
 	}
+	fprintf(stderr, "gasp = '%s'\n", gasp);
 	puts( path );
 	ret = system( path );
+	fprintf(stderr, "gasp = '%s'\n", gasp);
 	cleanup:
 	(void)free_space( &ret, &PATH );
 	if ( ret != EXIT_SUCCESS ) {

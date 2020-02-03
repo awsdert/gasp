@@ -1,39 +1,60 @@
 #include "gasp.h"
 
-size_t file_get_size( int *err, char const *path )
+mode_t file_glance_perm( int *err, char const *path) {
+	struct stat st;
+	if ( stat( path, &st ) == 0 )
+		return st.st_mode;
+	if ( err ) *err = errno;
+	return 0;
+}
+
+mode_t file_change_perm( int *err, char const * path, mode_t set ) {
+	int ret = EXIT_SUCCESS;
+	mode_t was = file_glance_perm( &ret, path );
+	if ( !was && ret != EXIT_SUCCESS ) {
+		if ( err ) *err = ret;
+		return 0;
+	}
+	if ( chmod( path, set ) != 0 ) {
+		if ( err ) *err = errno;
+		return was;
+	}
+	return was;
+}
+
+size_t file_glance_size( int *err, char const *path )
 {
 	int fd;
 	char buff[BUFSIZ];
-	gasp_off_t size, tmp;
+	gasp_off_t size = 0, tmp = -1;
+	struct stat st;
 	
 	errno = EXIT_SUCCESS;
-	if ( !path || !(*path) ) {
-		if ( err ) *err = EINVAL;
-		ERRMSG( EINVAL, "path was invalid" );
+	
+	if ( stat( path, &st ) == 0 && st.st_size > 0 )
+		return st.st_size;
+	
+	if ( access( path, F_OK ) != 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Check path" );
 		return 0;
 	}
 	
+	errno = EXIT_SUCCESS;
 	if ( (fd = open(path,O_RDONLY)) < 0 ) {
 		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't open file" );
-		fprintf( stderr, "File '%s'\n", path );
+		ERRMSG( errno, "Don't have read access path" );
 		return 0;
 	}
 	
-	size = gasp_lseek( fd, 0, SEEK_END );
-	if ( size <= 0 ) size = gasp_lseek( fd, 0, SEEK_CUR );
-	if ( size <= 0 ) {
-		errno = EXIT_SUCCESS;
-		while ( (tmp = read( fd, buff, BUFSIZ )) )
-			size += tmp;
-	}
+	while ( (tmp = read( fd, buff, BUFSIZ )) > 0 )
+		size += tmp;
+	
 	close(fd);
 	
 	if ( size <= 0 ) {
 		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't get file size" );
-		fprintf( stderr, "File '%s'\n", path );
-		return 0;
+		return size;
 	}
 	
 	return size;
@@ -92,7 +113,7 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 	}
 	
 	/* Ensure none of these are treated as valid by proc_handle_shut() */
-	handle->memfile = (handle->memfile) = (handle->pagesFd) = -1;
+	handle->rdmemfd = (handle->wrmemfd) = (handle->pagesFd) = -1;
 	
 	if ( !proc_notice_info( err, pid, &(handle->notice) ) ) {
 		proc_handle_shut( handle );
@@ -123,11 +144,25 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 	}
 	
 	(void)sprintf( path, "/proc/%d/mem", pid );
-	if ( (handle->memfile = open(path,O_RDWR|O_SYNC)) < 0 ) {
-		proc_handle_shut( handle );
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't open mem file in read write mode" );
-		return NULL;
+	if ( access( path, F_OK ) == 0 && access( path, R_OK ) == 0 ) {
+		if ( (handle->rdmemfd = open(path,O_RDONLY)) < 0
+		)
+		{
+			proc_handle_shut( handle );
+			if ( err ) *err = errno;
+			ERRMSG( errno, "Couldn't open mem file in read mode" );
+			return NULL;
+		}
+		
+		if ( access(path,W_OK) == 0 &&
+			(handle->wrmemfd = open( path, O_WRONLY )) < 0
+		)
+		{
+			proc_handle_shut( handle );
+			if ( err ) *err = errno;
+			ERRMSG( errno, "Couldn't open mem file in read mode" );
+			return NULL;
+		}
 	}
 	
 	handle->running = 1;
@@ -160,8 +195,8 @@ void proc_handle_shut( proc_handle_t *handle ) {
 	}
 	
 	/* None of these need to be open anymore */
-	if ( handle->memfile >= 0 ) close( handle->memfile );
-	if ( handle->memfile >= 0 ) close( handle->memfile );
+	if ( handle->wrmemfd >= 0 ) close( handle->wrmemfd );
+	if ( handle->rdmemfd >= 0 ) close( handle->rdmemfd );
 	if ( handle->pagesFd >= 0 ) close( handle->pagesFd );
 	if ( handle->ptrace_mode )
 		ptrace(PTRACE_DETACH, handle->notice.entryId, NULL, NULL);
@@ -174,7 +209,7 @@ void proc_handle_shut( proc_handle_t *handle ) {
 	(void)memset(handle,0,sizeof(proc_handle_t));
 	
 	/* Ensure none of these are treated as valid in the above scenario*/
-	handle->memfile = (handle->memfile) = (handle->pagesFd) = -1;
+	handle->rdmemfd = (handle->wrmemfd) = (handle->pagesFd) = -1;
 	
 	/* No need for the handle anymore */
 	free(handle);
@@ -184,10 +219,10 @@ void proc_handle_shut( proc_handle_t *handle ) {
 
 intptr_t proc_mapped_next(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, proc_mapped_t *mapped
+	intptr_t addr, proc_mapped_t *mapped, int prot
 )
 {
-	char line[PAGE_LINE_SIZE] = {0}, *perm;
+	char line[PAGE_LINE_SIZE] = {0}, *pos, path[256] = {0};
 	
 	errno = EXIT_SUCCESS;
 	if ( !mapped ) {
@@ -197,7 +232,6 @@ intptr_t proc_mapped_next(
 	}
 	
 	memset( mapped, 0, sizeof(proc_mapped_t) );
-	mapped->size = -1;
 	if ( !handle ) {
 		if ( err ) *err = EINVAL;
 		ERRMSG( EINVAL, "Invalid handle" );
@@ -211,62 +245,103 @@ intptr_t proc_mapped_next(
 	}
 	
 	do {
-		memset( line, 0, PAGE_LINE_SIZE );
-		if ( gasp_read( handle->pagesFd, line, PAGE_LINE_SIZE )
-			!= PAGE_LINE_SIZE ) {
-			if ( errno == EXIT_SUCCESS ) errno = EOF;
-			if ( err ) *err = errno;
-			return -1;
-		}
-		
-		line[PAGE_LINE_SIZE-1] = 0;
-		sscanf( line, "%p-%p",
-			(void**)&(mapped->base),
-			(void**)&(mapped->upto) );
+		memset( mapped, 0, sizeof(proc_mapped_t) );
+		do {
+			memset( line, 0, PAGE_LINE_SIZE );
+			if ( gasp_read( handle->pagesFd, line, PAGE_LINE_SIZE )
+				!= PAGE_LINE_SIZE ) {
+				if ( err ) *err = errno;
+				return -1;
+			}
+			
+			line[PAGE_LINE_SIZE-1] = 0;
+			sscanf( line, "%p-%p",
+				(void**)&(mapped->base),
+				(void**)&(mapped->upto) );
 
-		if ( addr < mapped->upto )
-			break;
-		
-		/* Move file pointer to next line */
-		while ( gasp_read( handle->pagesFd, line, 1 ) == 1 ) {
-			if ( line[0] == '\n' )
+			if ( addr < mapped->upto )
 				break;
-			line[0] = 0;
-		}
+			
+			/* Move file pointer to next line */
+			while ( gasp_read( handle->pagesFd, line, 1 ) == 1 ) {
+				if ( line[0] == '\n' )
+					break;
+				line[0] = 0;
+			}
+			
+			/* Ensure we break out when we hit EOF */
+			if ( line[0] != '\n' ) {
+				if ( err ) *err = errno;
+				return -1;
+			}
+		} while ( addr >= mapped->upto );
 		
-		/* Ensure we break out when we hit EOF */
-		if ( line[0] != '\n' ) {
-			if ( err ) *err = errno;
-			return -1;
-		}
-	} while ( addr >= mapped->upto );
-	
-	perm = strstr( line, " " );
-	++perm;
-	mapped->size = (mapped->upto) - (mapped->base);
-	mapped->perm |= (perm[0] == 'r') ? 04 : 0;
-	mapped->perm |= (perm[1] == 'w') ? 02 : 0;
-	mapped->perm |= (perm[2] == 'x') ? 01 : 0;
-	mapped->perm |= (perm[3] == 'p') ? 010 : 0;
+		pos = strchr( line, ' ' );
+		*pos = 0;
+		++pos;
+		mapped->size = (mapped->upto) - (mapped->base);
+		mapped->prot |= (pos[0] == 'r') ? 04 : 0;
+		mapped->prot |= (pos[1] == 'w') ? 02 : 0;
+		mapped->prot |= (pos[2] == 'x') ? 01 : 0;
+		mapped->prot |= (pos[3] == 'p') ? 0 : 010;
+		if ( mapped->prot | 010 )
+			mapped->prot |= (pos[3] == 's') ? 0 : 020;
+		sprintf( path, "/proc/%d/map_files/%s",
+			handle->notice.entryId, line );
+		mapped->perm = file_glance_perm( err, path );
+		addr = mapped->upto;
+	} while ( (mapped->prot & prot) != prot );
 	return mapped->base;
 }
 
-int proc_mapped_addr(
+mode_t proc_mapped_addr(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, int octal_perm
+	intptr_t addr, mode_t perm, int *fd
 )
 {
+	char path[256] = {0};
 	proc_mapped_t mapped = {0};
 	
-	while ( proc_mapped_next( err, handle, mapped.upto, &mapped ) >= 0 ) {
+	while ( proc_mapped_next( err, handle, mapped.upto, &mapped, 0 )
+		>= 0 ) {
 		if ( mapped.upto < addr ) continue;
-		return mapped.perm;
+#ifdef SIZEOF_LLONG
+		sprintf( path, "/proc/%d/map_files/%llx-%llx",
+			handle->notice.entryId,
+			(long long)(mapped.base), (long long)(mapped.upto) );
+#else
+		sprintf( path, "/proc/%d/map_files/%lx-%lx",
+			handle->notice.entryId,
+			(long)(mapped.base), (long)(mapped.upto) );
+#endif
+		if ( access( path, F_OK ) == 0 ) {
+			(void)file_change_perm( err, path, perm | mapped.perm );
+			if ( fd ) *fd = open( path, O_RDWR );
+			return mapped.perm;
+		}
 	}
 	
 	if ( err ) *err = ERANGE;
-	ERRMSG( ERANGE, "Address out of range" );
 	return 0;
 }
+
+int proc__rwvmem_test(
+	proc_handle_t *handle, void *mem, size_t size
+)
+{
+	int ret = EXIT_SUCCESS;
+	
+	if ( !handle || !mem || !size ) {
+		ret = EINVAL;
+		if ( !handle ) ERRMSG( ret, "Invalid handle" );
+		if ( !mem ) ERRMSG( ret, "Invalid memory pointer" );
+		if ( !size ) ERRMSG( ret, "Invalid memory size" );
+		return 0;
+	}
+	
+	return ret;
+}
+
 node_t proc_aobscan(
 	int *err, int into,
 	proc_handle_t *handle,
@@ -283,17 +358,16 @@ node_t proc_aobscan(
 	
 	errno = EXIT_SUCCESS;
 	
-	if ( !handle || !array || bytes <= 0 ) {
-		if ( err ) *err = EINVAL;
-		if ( !handle ) ERRMSG( EINVAL, "invalid handle" );
-		if ( !array ) ERRMSG( EINVAL, "invalid array of bytes" );
-		if ( bytes <= 0 ) ERRMSG( EINVAL, "invalid size for array of bytes" );
+	if ( (ret = proc__rwvmem_test( handle, array, bytes ))
+		!= EXIT_SUCCESS ) {
+		if ( err ) *err = ret;
 		return 0;
 	}
 	
 	if ( into < 0 ) {
-		if ( err ) *err = EDESTADDRREQ;
-		ERRMSG( EDESTADDRREQ, "into needs a file descriptor" );
+		ret = EDESTADDRREQ;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "into needs a file descriptor" );
 		return 0;
 	}
 	
@@ -303,15 +377,11 @@ node_t proc_aobscan(
 		return 0;
 	}
 	
-	do {
-		if ( proc_mapped_next( &ret, handle,
-			mapped.upto, &mapped ) < 0 ) {
-			if ( err ) *err = ret;
-			ERRMSG( ret, "no pages with base address >= start address" );
-			return 0;
-		}
+	if ( proc_mapped_next( &ret, handle, from, &mapped, 04 ) < 0 ) {
+		if ( err ) *err = ret;
+		ERRMSG( ret, "no pages with base address >= start address" );
+		return 0;
 	}
-	while ( mapped.upto <= from || (mapped.perm & 04) == 0 );
 	
 	if ( mapped.base >= (upto - bytes) ) {
 		if ( err ) *err = EXIT_SUCCESS;
@@ -321,9 +391,10 @@ node_t proc_aobscan(
 	
 	done = mapped.upto - from;
 	if ( done >= BUFSIZ ) done = BUFSIZ;
-	if ( (done = proc_glance_data( err, handle, from, buff, done ))
+	if ( (done = proc_glance_data( &ret, handle, from, buff, done ))
 		<= 0 ) {
-		ERRMSG( errno, "failed to read from process memory" );
+		if ( err ) *err = ret;
+		ERRMSG( ret, "failed to read from process memory" );
 		return 0;
 	}
 	
@@ -365,12 +436,13 @@ node_t proc_aobscan(
 		(void)memset( buff + BUFSIZ, 0, BUFSIZ );
 		
 		if ( load_next ) {
-			do {
-				if ( proc_mapped_next( err, handle,
-					mapped.upto, &mapped ) < 0 )
-					return count;
+			if ( proc_mapped_next( &ret, handle,
+				mapped.upto, &mapped, 04 ) < 0 ) {
+				if ( err ) *err = ret;
+				if ( ret != EXIT_SUCCESS )
+					ERRMSG( ret, "Couldn't read VM" );
+				return count;
 			}
-			while ( (mapped.perm & 04) == 0 );
 			
 			if ( mapped.base >= (upto - bytes) ) {
 				if ( err ) *err = EXIT_SUCCESS;
@@ -410,12 +482,17 @@ proc_notice_t* proc_locate_name(
 	)
 	{
 		text = notice->name.block;
-		if ( !strstr( text, name ) )
-			continue;
+		if ( !strstr( text, name ) ) {
+			text = notice->cmdl.block;
+			if ( !strstr( text, name ) )
+				continue;
+		}
 			
 		if ( (ret = add_node( nodes, &i, sizeof(proc_notice_t) ))
 			!= EXIT_SUCCESS )
 			break;
+		
+		text = notice->name.block;
 		
 		noticed = (proc_notice_t*)(nodes->space.block);
 		noticed[i].entryId = notice->entryId;
@@ -426,6 +503,16 @@ proc_notice_t* proc_locate_name(
 		}
 		
 		(void)memcpy( noticed[i].name.block, text, size );
+		
+		text = notice->cmdl.block;
+		
+		if ( !more_space(
+			&ret,&(noticed[i].cmdl), (size = strlen(text)+1)) ) {
+			nodes->count--;
+			break;
+		}
+		
+		(void)memcpy( noticed[i].cmdl.block, text, size );
 	}
 	
 	proc_glance_shut( &glance );
@@ -440,6 +527,7 @@ void proc_notice_zero( proc_notice_t *notice ) {
 	if ( !notice ) return;
 	(void)change_kvpair( &(notice->kvpair), 0, 0, 0, 0 );
 	(void)less_space( NULL, &(notice->name), 0 );
+	(void)less_space( NULL, &(notice->cmdl), 0 );
 }
 
 void proc_glance_shut( proc_glance_t *glance ) {
@@ -461,8 +549,7 @@ proc_notice_t* proc_notice_info(
 {
 	int fd;
 	char path[256] = {0};
-	space_t *name, *full;
-	kvpair_t *kvpair;
+	space_t *name, *full, *cmdl;
 	int ret;
 	char *k, *v, *n;
 	intptr_t size;
@@ -472,11 +559,12 @@ proc_notice_t* proc_notice_info(
 		ERRMSG( EDESTADDRREQ, "notice was NULL" );
 		return NULL;
 	}
-	kvpair = &(notice->kvpair);
 	name = &(notice->name);
-	full = &(kvpair->full);
+	cmdl = &(notice->cmdl);
+	full = &(notice->kvpair.full);
 	
 	memset( name->block, 0, name->given );
+	memset( cmdl->block, 0, cmdl->given );
 	memset( full->block, 0, full->given );
 	
 	notice->ownerId = -1;
@@ -489,15 +577,46 @@ proc_notice_t* proc_notice_info(
 		proc_notice_puts(notice);
 		return NULL;
 	}
-	sprintf( path, "/proc/%d/status", pid );
 	
-	/* Implements a fallback looped read call in the event lseek gleans
-	 * nothing */
-	if ( !(size = file_get_size( &ret, path )) ) {
+	sprintf( path, "/proc/%d/cmdline", pid );
+	
+	if ( !(size = file_glance_size( &ret, path )) ) {
 		if ( err ) *err = ret;
-		ERRMSG( ret, "Couldn't get status size" );
+		return NULL;
+	}
+	
+	if ( (fd = open(path,O_RDONLY)) < 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't open status file" );
 		proc_notice_puts(notice);
 		fprintf( stderr, "File '%s'\n", path );
+		return NULL;
+	}
+	
+	if ( !more_space( &ret, cmdl, size )) {
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Couldn't allocate memory to read into" );
+		proc_notice_puts(notice);
+		fprintf( stderr, "Wanted %zu bytes\n", size );
+		close(fd);
+		return NULL;
+	}
+	
+	if ( gasp_read(fd, cmdl->block, cmdl->given) < size ) {
+		close(fd);
+		ret = ENODATA;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Couldn't read the status file" );
+		proc_notice_puts(notice);
+		return NULL;
+	}
+	/* No longer need the file opened since we have everything */
+	close(fd);
+	
+	sprintf( path, "/proc/%d/status", pid );
+	
+	if ( !(size = file_glance_size( &ret, path )) ) {
+		if ( err ) *err = ret;
 		return NULL;
 	}
 	
@@ -653,140 +772,351 @@ proc_notice_t*
 	}
 	ret = ( errno != EXIT_SUCCESS ) ? errno : EXIT_FAILURE;
 	if ( err ) *err = ret;
-	ERRMSG( ret, "glance->dir was NULL" );
+	ERRMSG( ret, "" );
 	return NULL;
 }
 
-intptr_t proc_glance_data(
+size_t proc__glance_vmem(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, void *dst, size_t size ) {
+	intptr_t addr, void *mem, size_t size ) {
+#ifdef _GNU_SOURCE
+	struct iovec internal, external;
 	intptr_t done;
-#ifndef gasp_pread
-	gasp_off_t off;
-#endif
-
-	errno = EXIT_SUCCESS;
+	int ret;
 	
-	if ( !handle ) {
-		if ( err ) *err = EINVAL;
-		ERRMSG( errno, "Invalid handle" );
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
 		return 0;
 	}
 
-#if 0
+	errno = EXIT_SUCCESS;
+	
+	internal.iov_base = mem;
+	internal.iov_len = size;
+	external.iov_base = (void*)addr;
+	external.iov_len = size;
+	
+	if ( (done = process_vm_readv(
+		handle->notice.entryId, &internal, 1, &external, 1, 0))
+		!= size )
+	{
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't write to VM" );
+		fprintf( stderr, "%p", external.iov_base );
+	}
+	
+	return done;
+#else
+	if ( err ) *err = ENOSYS;
+	return 0;
+#endif
+}
+
+intptr_t proc__glance_file(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, size_t size
+)
+{
+#ifdef gasp_pread
+	intptr_t done = 0;
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	if ( (done = gasp_pread( handle->rdmemfd, mem, size, addr )) > 0 )
+		return done;
+	if ( err ) *err = errno;
+	return 0;
+#else
+	if ( err ) err = ENOSYS;
+	return 0;
+#endif
+}
+
+intptr_t proc__glance_self(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, size_t size
+)
+{
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
 	if ( handle->samepid ) {
-		(void)memmove( dst, NULL + addr, size );
+		(void)memmove( mem, (void*)addr, size );
 		if ( err ) *err = errno;
 		if ( errno != EXIT_SUCCESS )
 			ERRMSG( errno, "Couldn't override VM" );
 		return size;
 	}
-#endif
+	
+	return 0;
+}
 
-#ifdef gasp_pread
-	done = gasp_pread( handle->memfile, dst, size, addr );
-	if ( done > 0 ) {
-		if ( err ) *err = EXIT_SUCCESS;
-		return done;
-	}
-	if ( err ) *err = errno;
-	if ( errno == EIO )
+intptr_t proc__glance_seek(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, size_t size
+)
+{
+	intptr_t done = 0;
+	gasp_off_t off;
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
 		return 0;
-	if ( errno != EXIT_SUCCESS )
-		ERRMSG( errno, "Couldn't read VM" );
-	return -1;
-#else
-	off = gasp_lseek( handle->memfile, 0, SEEK_CUR );
+	}
+	
+	off = gasp_lseek( handle->rdmemfd, 0, SEEK_CUR );
 	if ( errno != EXIT_SUCCESS ) {
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't seek VM address" );
 		return 0;
 	}
 	
-	gasp_lseek( handle->memfile, addr, SEEK_SET );
+	gasp_lseek( handle->rdmemfd, addr, SEEK_SET );
 	if ( errno != EXIT_SUCCESS ) {
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't seek VM address" );
 		return 0;
 	}
 	
-	done = gasp_read( handle->memfile, data, size );
+	done = gasp_read( handle->rdmemfd, mem, size );
 	if ( done <= 0 || errno != EXIT_SUCCESS ) {
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Couldn't read VM" );
 		return 0;
 	}
 
-	gasp_lseek( handle->memfile, off, SEEK_SET );
+	gasp_lseek( handle->rdmemfd, off, SEEK_SET );
 	return done;
-#endif
 }
-intptr_t proc_change_data(
+
+intptr_t proc_glance_data(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, void *src, size_t size ) {
+	intptr_t addr, void *mem, size_t size
+)
+{
 	intptr_t done;
-#ifndef gasp_pwrite
-	gasp_off_t off;
-#endif
+	mode_t perm;
+	int ret = EXIT_SUCCESS, fd = -1;
 
 	errno = EXIT_SUCCESS;
 	
-	if ( !handle ) {
-		if ( err ) *err = EINVAL;
-		ERRMSG( errno, "Invalid handle" );
+	if ( (perm = proc_mapped_addr( &ret, handle, addr, 0777, NULL )) == 0
+		&& ret != EXIT_SUCCESS ) {
+		if ( fd >= 0 ) close(fd);
+		if ( err ) *err = ret;
 		return 0;
 	}
 	
-#if 0
+	if ( fd >= 0 ) {
+		gasp_lseek( fd, addr, SEEK_SET );
+		done = gasp_read( fd, mem, size );
+		if ( err ) *err = errno;
+		close(fd);
+		if ( errno )
+			ERRMSG( errno, "Couldn't read VM" );
+		return done;
+	}
+	
+	if ( (done = proc__glance_file( err, handle, addr, mem, size ))
+		> 0 ) goto success;
+	if ( (done = proc__glance_self( err, handle, addr, mem, size ))
+		> 0 ) goto success;
+	if ( (done = proc__glance_seek( err, handle, addr, mem, size ))
+		> 0 ) goto success;
+	if ( (done = proc__glance_vmem( err, handle, addr, mem, size ))
+		> 0 ) goto success;
+	if ( proc_mapped_addr( &ret, handle, addr, perm, NULL ) == 0
+		&& ret != EXIT_SUCCESS && err )
+		*err = ret;
+	return 0;
+	success:
+	if ( proc_mapped_addr( &ret, handle, addr, perm, NULL ) == 0
+		&& ret != EXIT_SUCCESS && err )
+		*err = ret;
+	return done;
+}
+
+size_t proc__change_vmem(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, size_t size ) {
+#ifdef _GNU_SOURCE
+	struct iovec internal, external;
+	intptr_t done;
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+
+	errno = EXIT_SUCCESS;
+	
+	internal.iov_base = mem;
+	internal.iov_len = size;
+	external.iov_base = (void*)addr;
+	external.iov_len = size;
+	
+	if ( (done = process_vm_writev(
+		handle->notice.entryId, &internal, 1, &external, 1, 0))
+		!= size )
+	{
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't write to VM" );
+		fprintf( stderr, "Address %p\n", external.iov_base );
+	}
+	
+	return done;
+#else
+	if ( err ) *err = ENOSYS;
+	return 0;
+#endif
+}
+
+intptr_t proc__change_file(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, size_t size
+)
+{
+#ifdef gasp_pwrite
+	intptr_t done = 0;
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	if ( (done = gasp_pwrite( handle->wrmemfd, mem, size, addr )) > 0 )
+		return done;
+	if ( err ) *err = errno;
+	return 0;
+#else
+	if ( err ) err = ENOSYS;
+	return 0;
+#endif
+}
+
+size_t proc__change_self(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, size_t size
+)
+{
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
 	if ( handle->samepid ) {
-		(void)memmove( NULL + addr, src, size );
+		(void)memmove( (void*)addr, mem, size );
 		if ( err ) *err = errno;
 		if ( errno != EXIT_SUCCESS )
 			ERRMSG( errno, "Couldn't override VM" );
-		return size;
+		return ret;
 	}
-#endif
+	
+	return ENOSYS;
+}
 
-#ifdef gasp_pwrite	
-	done = gasp_pwrite( handle->memfile, src, size, addr );
-	if ( done > 0 ) {
-		(void)fsync(handle->memfile);
+intptr_t proc__change_seek(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, size_t size
+)
+{
+	intptr_t done = 0;
+	gasp_off_t off;
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
+	off = gasp_lseek( handle->wrmemfd, 0, SEEK_CUR );
+	if ( errno != EXIT_SUCCESS ) {
 		if ( err ) *err = errno;
-		if ( errno ) {
-			ERRMSG( errno, "either pwrite() or fsync() failed");
-			fprintf(stderr, "handle->memfile = %d\n", handle->memfile );
-		}
+		ERRMSG( errno, "Couldn't seek VM address" );
+		return 0;
+	}
+	
+	gasp_lseek( handle->wrmemfd, addr, SEEK_SET );
+	if ( errno != EXIT_SUCCESS ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't seek VM address" );
+		return 0;
+	}
+	
+	done = gasp_write( handle->wrmemfd, mem, size );
+	if ( done <= 0 || errno != EXIT_SUCCESS ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't read VM" );
+		return 0;
+	}
+
+	gasp_lseek( handle->wrmemfd, off, SEEK_SET );
+	return done;
+}
+
+intptr_t proc_change_data(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, size_t size
+)
+{
+	intptr_t done;
+	mode_t perm;
+	int ret = EXIT_SUCCESS, fd = -1;
+
+	errno = EXIT_SUCCESS;
+	
+	if ( (perm = proc_mapped_addr( &ret, handle, addr, 0777, NULL ))
+		== 0 && ret != EXIT_SUCCESS ) {
+		if ( fd >= 0 ) close(fd);
+		if ( err ) *err = ret;
+		return 0;
+	}
+	if ( fd >= 0 ) {
+		gasp_lseek( fd, addr, SEEK_SET );
+		done = gasp_write( fd, mem, size );
+		if ( err ) *err = errno;
+		close(fd);
+		if ( errno )
+			ERRMSG( errno, "Couldn't write VM" );
 		return done;
 	}
-	if ( err ) *err = errno;
-	if ( errno == EIO )
-		return 0;
-	if ( errno != EXIT_SUCCESS )
-		ERRMSG( errno, "Couldn't override VM" );
-	return done;
-#else
-	off = gasp_lseek( handle->memfile, 0, SEEK_CUR );
-	if ( errno != EXIT_SUCCESS ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't seek VM address" );
-		return 0;
-	}
 	
-	gasp_lseek( handle->memfile, addr, SEEK_SET );
-	if ( errno != EXIT_SUCCESS ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't seek VM address" );
-		return 0;
-	}
+	if ( (done = proc__change_vmem( &ret, handle, addr, mem, size ))
+		> 0 ) goto success;
+	if ( ret == EADDRNOTAVAIL ) ret = EXIT_SUCCESS;
+	if ( (done = proc__change_file( err, handle, addr, mem, size ))
+		> 0 ) goto success;
+	if ( (done = proc__change_self( err, handle, addr, mem, size ))
+		> 0 ) goto success;
+	if ( (done = proc__change_seek( err, handle, addr, mem, size ))
+		> 0 ) goto success;
 	
-	done = gasp_write( handle->memfile, src, size );
-	if ( errno != EXIT_SUCCESS ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't override VM" );
-		return 0;
-	}
-	
-	gasp_lseek( handle->memfile, off, SEEK_SET );
-#endif
+	if ( proc_mapped_addr( &ret, handle, addr, perm, NULL ) == 0
+		&& ret != EXIT_SUCCESS && err )
+		*err = ret;
+	return 0;
+	success:
+	if ( proc_mapped_addr( &ret, handle, addr, perm, NULL ) == 0
+		&& ret != EXIT_SUCCESS && err )
+		*err = ret;
 	return done;
 }

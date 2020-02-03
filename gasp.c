@@ -7,7 +7,7 @@ int main( int argc, char *argv[] ) {
 	nodes_t nodes = {0}, ARGS = {0};
 	kvpair_t *args = NULL;
 	char *HOME = NULL, *PWD = NULL, *DISPLAY = NULL,
-		*path = NULL, *cmd = NULL, *gasp = "gasp";
+		*path = NULL, *cmd = NULL, gasp[] = "gasp";
 	size_t size = 0, leng = BUFSIZ;
 	if ( (ret = arguments( argc, argv, &ARGS, &leng ))
 		!= EXIT_SUCCESS ) {

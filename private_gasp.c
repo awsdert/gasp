@@ -34,7 +34,7 @@ int main( int argc, char *argv[] ) {
 	proc_notice_t *noticed;
 	proc_handle_t *handle;
 	kvpair_t *args = NULL;
-	char *HOME = NULL, *path = NULL, *PWD = NULL, *gasp = "gasp",
+	char *HOME = NULL, *path = NULL, *PWD = NULL, gasp[] = "firefox",
 		*DISPLAY = NULL, *LUA_PATH = NULL, *LUA_CPATH = NULL;
 	size_t size = 0, leng = BUFSIZ;
 	intptr_t addr = 0;
@@ -109,7 +109,7 @@ int main( int argc, char *argv[] ) {
 				if ( ret != EXIT_SUCCESS )
 					ERRMSG( ret, "proc_handle_open() failed" );
 				if ( !(count = proc_aobscan( &ret, into, handle,
-					(uchar*)gasp, strlen(gasp), 0, INTPTR_MAX )) ) {
+					(uchar*)"cprogramming", strlen(gasp), 0, INTPTR_MAX )) ) {
 					if ( ret != EXIT_SUCCESS )
 						ERRMSG( ret, "proc_aobscan() failed" );
 					continue;
@@ -124,7 +124,7 @@ int main( int argc, char *argv[] ) {
 						ret = errno;
 						ERRMSG( ret, "Couldn't write to memory" );
 					}
-					fprintf(stderr, "gasp = '%s'\n", gasp);
+					//fprintf(stderr, "gasp = '%s'\n", gasp);
 				}
 				proc_handle_shut( handle );
 			}

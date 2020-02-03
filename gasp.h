@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
+#include <sys/uio.h>
 #include <pthread.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -155,6 +156,7 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng );
 typedef struct proc_notice {
 	int entryId, ownerId;
 	space_t name;
+	space_t cmdl;
 	kvpair_t kvpair;
 } proc_notice_t;
 typedef struct proc_glance {
@@ -165,13 +167,12 @@ typedef struct proc_glance {
 } proc_glance_t;
 typedef struct proc_handle {
 	bool samepid, running, waiting;
-	int ptrace_mode, memfile, pagesFd;
+	int ptrace_mode, rdmemfd, wrmemfd, change, pagesFd;
 	pthread_t thread;
-	space_t launchedWith;
 	proc_notice_t notice;
 } proc_handle_t;
 typedef struct proc_mapped {
-	int perm;
+	mode_t perm, prot;
 	intptr_t base, upto, size;
 } proc_mapped_t;
 
@@ -220,10 +221,25 @@ proc_notice_t* proc_locate_name(
 /** @brief opens a file, seeks to end takes the offset then closes it
  * @param err Where to pass errors back to
  * @param path Path of file to get size of
- * @return size of file or 0
+ * @return Size of file or 0
 **/
-size_t file_get_size(
+size_t file_glance_size(
 	int *err, char const *path );
+/** @brief Get permissions of given path
+ * @param err Where to pass errors back to
+ * @param path Path of file to get permissions of
+ * @return st_mode or 0
+**/
+mode_t file_glance_perm(
+	int *err, char const *path );
+/** @brief Set permissions of given path
+ * @param err Where to pass errors back to
+ * @param path Path of file to get permissions of
+ * @param perm The permissions you want
+ * @return Original st_mode
+**/
+mode_t file_change_perm(
+	int *err, char const *path, mode_t perm );
 /** @brief Opens file descriptors and anything deemed neccessary for
  * handling the process, also calls ptrace with PTRACE_SEIZE or
  * PTRACE_ATTACH if that is unavailable

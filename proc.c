@@ -36,7 +36,8 @@ size_t file_glance_size( int *err, char const *path )
 	
 	if ( access( path, F_OK ) != 0 ) {
 		if ( err ) *err = errno;
-		ERRMSG( errno, "Check path" );
+		ERRMSG( errno, "Invalid path" );
+		fprintf( stderr, "Path: '%s'\n", path );
 		return 0;
 	}
 	
@@ -90,15 +91,8 @@ void* proc_handle_catch_sigstop_on_attach( void *data ) {
 }
 proc_handle_t* proc_handle_open( int *err, int pid )
 {
-	char path[256] = {0};
 	proc_handle_t *handle;
-	long attach_ret = -1;
 	
-#ifdef PTRACE_SEIZE
-	int ptrace_mode = PTRACE_SEIZE;
-#else
-	int ptrace_mode = PTRACE_ATTACH;
-#endif
 	if ( pid <= 0 ) {
 		errno = EINVAL;
 		if ( err ) *err = errno;
@@ -112,70 +106,17 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 		return NULL;
 	}
 	
-	/* Ensure none of these are treated as valid by proc_handle_shut() */
-	handle->rdmemfd = (handle->wrmemfd) = (handle->pagesFd) = -1;
-	
 	if ( !proc_notice_info( err, pid, &(handle->notice) ) ) {
 		proc_handle_shut( handle );
 		return NULL;
 	}
 	
-	if ( !(handle->samepid = (pid == getpid())) ) {
-	#ifndef PTRACE_SEIZE
-		ERRMSG( ENOSYS,
-			"PTRACE_SEIZE not defined, defaulting to PTRACE_ATTACH");
-	#endif
-		attach_ret = ptrace( ptrace_mode, pid, NULL, NULL );
-		if ( attach_ret != 0 ) {
-			proc_handle_shut( handle );
-			if ( err ) *err = errno;
-			ERRMSG( errno, "Couldn't attach gasp to process" );
-			return NULL;
-		}
-		handle->ptrace_mode = ptrace_mode;
-	}
-	
-	(void)sprintf( path, "/proc/%d/maps", pid );
-	if ( (handle->pagesFd = open(path,O_RDONLY)) < 0 ) {
-		proc_handle_shut( handle );
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't open maps file" );
-		return NULL;
-	}
-	
-	(void)sprintf( path, "/proc/%d/mem", pid );
-	if ( access( path, F_OK ) == 0 && access( path, R_OK ) == 0 ) {
-		if ( (handle->rdmemfd = open(path,O_RDONLY)) < 0
-		)
-		{
-			proc_handle_shut( handle );
-			if ( err ) *err = errno;
-			ERRMSG( errno, "Couldn't open mem file in read mode" );
-			return NULL;
-		}
-		
-		if ( access(path,W_OK) == 0 &&
-			(handle->wrmemfd = open( path, O_WRONLY )) < 0
-		)
-		{
-			proc_handle_shut( handle );
-			if ( err ) *err = errno;
-			ERRMSG( errno, "Couldn't open mem file in read mode" );
-			return NULL;
-		}
-	}
+	if ( handle->notice.self )
+		sprintf( handle->procdir, "/proc/self" );
+	else
+		sprintf( handle->procdir, "/proc/%d", pid );
 	
 	handle->running = 1;
-	
-	if ( ptrace_mode != PTRACE_ATTACH ) {
-		if ( pthread_create( &(handle->thread),
-			NULL, proc_handle_wait, handle ) ) {
-			proc_handle_shut( handle );
-			ERRMSG( errno, "Couldn't create pthread to check for SIGKILL" );
-			return NULL;
-		}
-		handle->waiting = 1;
-	}
 	
 	return handle;
 }
@@ -194,22 +135,12 @@ void proc_handle_shut( proc_handle_t *handle ) {
 		(void)pthread_join( handle->thread, &data );
 	}
 	
-	/* None of these need to be open anymore */
-	if ( handle->wrmemfd >= 0 ) close( handle->wrmemfd );
-	if ( handle->rdmemfd >= 0 ) close( handle->rdmemfd );
-	if ( handle->pagesFd >= 0 ) close( handle->pagesFd );
-	if ( handle->ptrace_mode )
-		ptrace(PTRACE_DETACH, handle->notice.entryId, NULL, NULL);
-	
 	/* Cleanup noticed info */
 	proc_notice_zero( &(handle->notice) );
 	
 	/* Ensure that even if handle is reused by accident the most that
 	 * can happen is a segfault */
 	(void)memset(handle,0,sizeof(proc_handle_t));
-	
-	/* Ensure none of these are treated as valid in the above scenario*/
-	handle->rdmemfd = (handle->wrmemfd) = (handle->pagesFd) = -1;
 	
 	/* No need for the handle anymore */
 	free(handle);
@@ -222,6 +153,7 @@ intptr_t proc_mapped_next(
 	intptr_t addr, proc_mapped_t *mapped, int prot
 )
 {
+	int fd;
 	char line[PAGE_LINE_SIZE] = {0}, *pos, path[256] = {0};
 	
 	errno = EXIT_SUCCESS;
@@ -238,9 +170,11 @@ intptr_t proc_mapped_next(
 		return -1;
 	}
 	
-	if ( gasp_lseek( handle->pagesFd, 0, SEEK_SET ) < 0 ) {
+	sprintf( path, "%s/maps", handle->procdir );
+	if ( (fd = open( path, O_RDONLY )) < 0 ) {
 		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't seek page information" );
+		ERRMSG( errno, "Failed to open maps file" );
+		fprintf( stderr, "Path: '%s'\n", path );
 		return -1;
 	}
 	
@@ -248,11 +182,10 @@ intptr_t proc_mapped_next(
 		memset( mapped, 0, sizeof(proc_mapped_t) );
 		do {
 			memset( line, 0, PAGE_LINE_SIZE );
-			if ( gasp_read( handle->pagesFd, line, PAGE_LINE_SIZE )
-				!= PAGE_LINE_SIZE ) {
-				if ( err ) *err = errno;
-				return -1;
-			}
+			errno = EXIT_SUCCESS;
+			if ( gasp_read( fd, line, PAGE_LINE_SIZE )
+				!= PAGE_LINE_SIZE )
+				goto failed;
 			
 			line[PAGE_LINE_SIZE-1] = 0;
 			sscanf( line, "%p-%p",
@@ -263,35 +196,56 @@ intptr_t proc_mapped_next(
 				break;
 			
 			/* Move file pointer to next line */
-			while ( gasp_read( handle->pagesFd, line, 1 ) == 1 ) {
+			while ( gasp_read( fd, line, 1 ) == 1 ) {
 				if ( line[0] == '\n' )
 					break;
 				line[0] = 0;
 			}
 			
 			/* Ensure we break out when we hit EOF */
-			if ( line[0] != '\n' ) {
-				if ( err ) *err = errno;
-				return -1;
-			}
+			if ( line[0] != '\n' )
+				goto failed;
 		} while ( addr >= mapped->upto );
 		
+		/* Get position right after address range */
 		pos = strchr( line, ' ' );
+		/* Capture actual permissions */
 		*pos = 0;
+		sprintf( path, "%s/map_files/%s", handle->procdir, line );
+		mapped->perm = file_glance_perm( err, path );
+		/* Move pointer to the permissions text */
 		++pos;
+		
 		mapped->size = (mapped->upto) - (mapped->base);
 		mapped->prot |= (pos[0] == 'r') ? 04 : 0;
 		mapped->prot |= (pos[1] == 'w') ? 02 : 0;
 		mapped->prot |= (pos[2] == 'x') ? 01 : 0;
+		/* Check if shared */
 		mapped->prot |= (pos[3] == 'p') ? 0 : 010;
-		if ( mapped->prot | 010 )
+		if ( mapped->prot & 010 )
+			/* Check if validated share */
 			mapped->prot |= (pos[3] == 's') ? 0 : 020;
-		sprintf( path, "/proc/%d/map_files/%s",
-			handle->notice.entryId, line );
-		mapped->perm = file_glance_perm( err, path );
+		
 		addr = mapped->upto;
 	} while ( (mapped->prot & prot) != prot );
+	
+	close(fd);
 	return mapped->base;
+	
+	failed:
+	close(fd);
+	if ( err ) *err = errno;
+	if ( errno == EXIT_SUCCESS )
+		return -1;
+	ERRMSG( errno, "Failed to find page that finishes after address" );
+	fprintf( stderr, "Wanted: From address %p a page with %c%c%c%c\n",
+		(void*)addr,
+		((prot & 04) ? 'r' : '-'),
+		((prot & 02) ? 'w' : '-'),
+		((prot & 01) ? 'x' : '-'),
+		((prot & 010) ? ((prot & 020) ? 'v' : 's') : '-')
+	);
+	return -1;
 }
 
 mode_t proc_mapped_addr(
@@ -306,12 +260,12 @@ mode_t proc_mapped_addr(
 		>= 0 ) {
 		if ( mapped.upto < addr ) continue;
 #ifdef SIZEOF_LLONG
-		sprintf( path, "/proc/%d/map_files/%llx-%llx",
-			handle->notice.entryId,
+		sprintf( path, "%s/map_files/%llx-%llx",
+			handle->procdir,
 			(long long)(mapped.base), (long long)(mapped.upto) );
 #else
-		sprintf( path, "/proc/%d/map_files/%lx-%lx",
-			handle->notice.entryId,
+		sprintf( path, "%s/map_files/%lx-%lx",
+			handle->procdir,
 			(long)(mapped.base), (long)(mapped.upto) );
 #endif
 		if ( access( path, F_OK ) == 0 ) {
@@ -346,7 +300,8 @@ node_t proc_aobscan(
 	int *err, int into,
 	proc_handle_t *handle,
 	uchar *array, intptr_t bytes,
-	intptr_t from, intptr_t upto
+	intptr_t from, intptr_t upto,
+	bool writable
 )
 {
 	int ret = EXIT_SUCCESS;
@@ -355,6 +310,7 @@ node_t proc_aobscan(
 	intptr_t done;
 	proc_mapped_t mapped = {0};
 	_Bool load_next = 0;
+	mode_t prot = 04 | (writable ? 02 : 0);
 	
 	errno = EXIT_SUCCESS;
 	
@@ -377,7 +333,7 @@ node_t proc_aobscan(
 		return 0;
 	}
 	
-	if ( proc_mapped_next( &ret, handle, from, &mapped, 04 ) < 0 ) {
+	if ( proc_mapped_next( &ret, handle, from, &mapped, prot ) < 0 ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "no pages with base address >= start address" );
 		return 0;
@@ -437,7 +393,7 @@ node_t proc_aobscan(
 		
 		if ( load_next ) {
 			if ( proc_mapped_next( &ret, handle,
-				mapped.upto, &mapped, 04 ) < 0 ) {
+				mapped.upto, &mapped, prot ) < 0 ) {
 				if ( err ) *err = ret;
 				if ( ret != EXIT_SUCCESS )
 					ERRMSG( ret, "Couldn't read VM" );
@@ -548,6 +504,7 @@ proc_notice_t* proc_notice_info(
 	int *err, int pid, proc_notice_t *notice )
 {
 	int fd;
+	char dir[sizeof(int) * CHAR_BIT] = {0};
 	char path[256] = {0};
 	space_t *name, *full, *cmdl;
 	int ret;
@@ -562,6 +519,13 @@ proc_notice_t* proc_notice_info(
 	name = &(notice->name);
 	cmdl = &(notice->cmdl);
 	full = &(notice->kvpair.full);
+	
+	notice->self = (pid == getpid());
+	
+	if ( notice->self )
+		sprintf( dir, "/proc/self" );
+	else
+		sprintf( dir, "/proc/%d", pid );
 	
 	memset( name->block, 0, name->given );
 	memset( cmdl->block, 0, cmdl->given );
@@ -578,7 +542,7 @@ proc_notice_t* proc_notice_info(
 		return NULL;
 	}
 	
-	sprintf( path, "/proc/%d/cmdline", pid );
+	sprintf( path, "%s/cmdline", dir );
 	
 	if ( !(size = file_glance_size( &ret, path )) ) {
 		if ( err ) *err = ret;
@@ -613,7 +577,7 @@ proc_notice_t* proc_notice_info(
 	/* No longer need the file opened since we have everything */
 	close(fd);
 	
-	sprintf( path, "/proc/%d/status", pid );
+	sprintf( path, "%s/status", dir );
 	
 	if ( !(size = file_glance_size( &ret, path )) ) {
 		if ( err ) *err = ret;
@@ -637,7 +601,7 @@ proc_notice_t* proc_notice_info(
 		return NULL;
 	}
 	
-	if ( gasp_read(fd, full->block, full->given) < size ) {
+	if ( gasp_read(fd, full->block, full->given) <= 0 ) {
 		close(fd);
 		ret = ENODATA;
 		if ( err ) *err = ret;
@@ -819,18 +783,31 @@ intptr_t proc__glance_file(
 )
 {
 #ifdef gasp_pread
+	char path[sizeof(int) * CHAR_BIT] = {0};
 	intptr_t done = 0;
-	int ret;
+	int ret, fd;
 	
 	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
 	{
 		if ( err ) *err = ret;
 		return 0;
 	}
-	if ( (done = gasp_pread( handle->rdmemfd, mem, size, addr )) > 0 )
-		return done;
-	if ( err ) *err = errno;
-	return 0;
+	
+	sprintf( path, "%s/mem", handle->procdir );
+	if ( (fd = open( path, O_RDONLY )) < 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Could'nt open process memory" );
+		fprintf( stderr, "Path: '%s'\n", path );
+		return 0;
+	}
+	
+	done = gasp_pread( fd, mem, size, addr );
+	close(fd);
+	if ( done < 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't read process memory" );
+	}
+	return done;
 #else
 	if ( err ) err = ENOSYS;
 	return 0;
@@ -850,7 +827,7 @@ intptr_t proc__glance_self(
 		return 0;
 	}
 	
-	if ( handle->samepid ) {
+	if ( handle->notice.self ) {
 		(void)memmove( mem, (void*)addr, size );
 		if ( err ) *err = errno;
 		if ( errno != EXIT_SUCCESS )
@@ -866,9 +843,9 @@ intptr_t proc__glance_seek(
 	intptr_t addr, void *mem, size_t size
 )
 {
+	char path[sizeof(int) * CHAR_BIT] = {0};
 	intptr_t done = 0;
-	gasp_off_t off;
-	int ret;
+	int ret, fd;
 	
 	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
 	{
@@ -876,29 +853,30 @@ intptr_t proc__glance_seek(
 		return 0;
 	}
 	
-	off = gasp_lseek( handle->rdmemfd, 0, SEEK_CUR );
-	if ( errno != EXIT_SUCCESS ) {
+	sprintf( path, "%s/mem", handle->procdir );
+	if ( (fd = open( path, O_RDONLY )) < 0 ) {
 		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't seek VM address" );
+		ERRMSG( errno, "Could'nt open process memory" );
+		fprintf( stderr, "Path: '%s'\n", path );
 		return 0;
 	}
 	
-	gasp_lseek( handle->rdmemfd, addr, SEEK_SET );
-	if ( errno != EXIT_SUCCESS ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't seek VM address" );
-		return 0;
-	}
+	gasp_lseek( fd, addr, SEEK_SET );
+	if ( errno != EXIT_SUCCESS )
+		goto failed;
 	
-	done = gasp_read( handle->rdmemfd, mem, size );
-	if ( done <= 0 || errno != EXIT_SUCCESS ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't read VM" );
-		return 0;
-	}
+	done = gasp_read( fd, mem, size );
+	if ( done <= 0 || errno != EXIT_SUCCESS )
+		goto failed;
 
-	gasp_lseek( handle->rdmemfd, off, SEEK_SET );
+	close(fd);
 	return done;
+	
+	failed:
+	close(fd);
+	if ( err ) *err = errno;
+	ERRMSG( errno, "Couldn't read process memory" );
+	return 0;
 }
 
 intptr_t proc_glance_data(
@@ -908,9 +886,15 @@ intptr_t proc_glance_data(
 {
 	intptr_t done;
 	mode_t perm;
-	int ret = EXIT_SUCCESS, fd = -1;
-
+	int ret = proc__rwvmem_test( handle, mem, size ), fd = -1;
+	
+	if ( ret != EXIT_SUCCESS ) {
+		if ( err ) *err = ret;
+		return 0;
+	}
 	errno = EXIT_SUCCESS;
+	
+	ptrace( PTRACE_ATTACH, handle->notice.entryId, NULL, NULL );
 	
 	if ( (perm = proc_mapped_addr( &ret, handle, addr, 0777, NULL )) == 0
 		&& ret != EXIT_SUCCESS ) {
@@ -929,19 +913,22 @@ intptr_t proc_glance_data(
 		return done;
 	}
 	
+	if ( (done = proc__glance_vmem( err, handle, addr, mem, size ))
+		> 0 ) goto success;
 	if ( (done = proc__glance_file( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	if ( (done = proc__glance_self( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	if ( (done = proc__glance_seek( err, handle, addr, mem, size ))
 		> 0 ) goto success;
-	if ( (done = proc__glance_vmem( err, handle, addr, mem, size ))
-		> 0 ) goto success;
+	
+	ptrace( PTRACE_DETACH, handle->notice.entryId, NULL, NULL );
 	if ( proc_mapped_addr( &ret, handle, addr, perm, NULL ) == 0
 		&& ret != EXIT_SUCCESS && err )
 		*err = ret;
 	return 0;
 	success:
+	ptrace( PTRACE_DETACH, handle->notice.entryId, NULL, NULL );
 	if ( proc_mapped_addr( &ret, handle, addr, perm, NULL ) == 0
 		&& ret != EXIT_SUCCESS && err )
 		*err = ret;
@@ -991,18 +978,31 @@ intptr_t proc__change_file(
 )
 {
 #ifdef gasp_pwrite
+	char path[sizeof(int) * CHAR_BIT] = {0};
 	intptr_t done = 0;
-	int ret;
+	int ret, fd;
 	
 	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
 	{
 		if ( err ) *err = ret;
 		return 0;
 	}
-	if ( (done = gasp_pwrite( handle->wrmemfd, mem, size, addr )) > 0 )
-		return done;
-	if ( err ) *err = errno;
-	return 0;
+	
+	sprintf( path, "%s/mem", handle->procdir );
+	if ( (fd = open( path, O_WRONLY )) < 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Could'nt open process memory" );
+		fprintf( stderr, "Path: '%s'\n", path );
+		return 0;
+	}
+	
+	done = gasp_pwrite( fd, mem, size, addr );
+	close(fd);
+	if ( done < 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't write to process memory" );
+	}
+	return done;
 #else
 	if ( err ) err = ENOSYS;
 	return 0;
@@ -1022,7 +1022,7 @@ size_t proc__change_self(
 		return 0;
 	}
 	
-	if ( handle->samepid ) {
+	if ( handle->notice.self ) {
 		(void)memmove( (void*)addr, mem, size );
 		if ( err ) *err = errno;
 		if ( errno != EXIT_SUCCESS )
@@ -1038,9 +1038,9 @@ intptr_t proc__change_seek(
 	intptr_t addr, void *mem, size_t size
 )
 {
+	char path[sizeof(int) * CHAR_BIT] = {0};
 	intptr_t done = 0;
-	gasp_off_t off;
-	int ret;
+	int ret, fd;
 	
 	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
 	{
@@ -1048,29 +1048,30 @@ intptr_t proc__change_seek(
 		return 0;
 	}
 	
-	off = gasp_lseek( handle->wrmemfd, 0, SEEK_CUR );
-	if ( errno != EXIT_SUCCESS ) {
+	sprintf( path, "%s/mem", handle->procdir );
+	if ( (fd = open( path, O_WRONLY )) < 0 ) {
 		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't seek VM address" );
+		ERRMSG( errno, "Could'nt open process memory" );
+		fprintf( stderr, "Path: '%s'\n", path );
 		return 0;
 	}
 	
-	gasp_lseek( handle->wrmemfd, addr, SEEK_SET );
-	if ( errno != EXIT_SUCCESS ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't seek VM address" );
-		return 0;
-	}
+	gasp_lseek( fd, addr, SEEK_SET );
+	if ( errno != EXIT_SUCCESS )
+		goto failed;
 	
-	done = gasp_write( handle->wrmemfd, mem, size );
-	if ( done <= 0 || errno != EXIT_SUCCESS ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't read VM" );
-		return 0;
-	}
+	done = gasp_write( fd, mem, size );
+	if ( done <= 0 || errno != EXIT_SUCCESS )
+		goto failed;
 
-	gasp_lseek( handle->wrmemfd, off, SEEK_SET );
+	close(fd);
 	return done;
+	
+	failed:
+	close(fd);
+	if ( err ) *err = errno;
+	ERRMSG( errno, "Couldn't write to process memory" );
+	return 0;
 }
 
 intptr_t proc_change_data(
@@ -1080,9 +1081,15 @@ intptr_t proc_change_data(
 {
 	intptr_t done;
 	mode_t perm;
-	int ret = EXIT_SUCCESS, fd = -1;
+	int ret = proc__rwvmem_test(handle,mem,size), fd = -1;
 
+	if ( ret != EXIT_SUCCESS ) {
+		if ( err ) *err = ret;
+		return 0;
+	}
 	errno = EXIT_SUCCESS;
+	
+	ptrace( PTRACE_ATTACH, handle->notice.entryId, NULL, NULL );
 	
 	if ( (perm = proc_mapped_addr( &ret, handle, addr, 0777, NULL ))
 		== 0 && ret != EXIT_SUCCESS ) {
@@ -1102,7 +1109,6 @@ intptr_t proc_change_data(
 	
 	if ( (done = proc__change_vmem( &ret, handle, addr, mem, size ))
 		> 0 ) goto success;
-	if ( ret == EADDRNOTAVAIL ) ret = EXIT_SUCCESS;
 	if ( (done = proc__change_file( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	if ( (done = proc__change_self( err, handle, addr, mem, size ))
@@ -1110,13 +1116,161 @@ intptr_t proc_change_data(
 	if ( (done = proc__change_seek( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	
+	ptrace( PTRACE_DETACH, handle->notice.entryId, NULL, NULL );
 	if ( proc_mapped_addr( &ret, handle, addr, perm, NULL ) == 0
 		&& ret != EXIT_SUCCESS && err )
 		*err = ret;
 	return 0;
 	success:
+	ptrace( PTRACE_DETACH, handle->notice.entryId, NULL, NULL );
 	if ( proc_mapped_addr( &ret, handle, addr, perm, NULL ) == 0
 		&& ret != EXIT_SUCCESS && err )
 		*err = ret;
 	return done;
 }
+
+void push_branch_str( lua_State *L, char const *key, char *val ) {
+	lua_pushstring(L,key);
+	lua_pushstring(L,val);
+	lua_settable(L,-3);
+}
+
+void push_branch_int( lua_State *L, char const *key, int val ) {
+	lua_pushstring(L,key);
+	lua_pushinteger(L,val);
+	lua_settable(L,-3);
+}
+
+void push_branch_num( lua_State *L, char const *key, long double val ) {
+	lua_pushstring(L,key);
+	lua_pushnumber(L,val);
+	lua_settable(L,-3);
+}
+
+void push_branch_bool( lua_State *L, char const *key, bool val ) {
+	lua_pushstring(L,key);
+	lua_pushboolean(L,val);
+	lua_settable(L,-3);
+}
+
+void push_branch_obj( lua_State *L, char const *key ) {
+	lua_pushstring(L,key);
+	lua_newtable(L);
+	lua_settable(L,-3);
+}
+
+bool find_branch_key( lua_State *L, char const *key ) {
+	if ( !L || !key ) {
+		lua_error_cb( L, "C function gave NULL parameter" );
+		return 0;
+	}
+	lua_pushstring(L, key);
+	lua_gettable(L, -2);
+	return 1;
+}
+
+bool find_branch_str( lua_State *L, char const *key, char const **val ) {
+	if ( !find_branch_key(L,key) || !val ) {
+		lua_error_cb( L, "C function gave NULL parameter" );
+		return 0;
+	}
+	*val = lua_isstring(L,-1) ? lua_tostring(L,-1) : NULL;
+	lua_pop(L,-1);
+	return (*val != NULL);
+}
+
+bool find_branch_int( lua_State *L, char const *key, int *val ) {
+	_Bool valid = 0;
+	if ( !find_branch_key(L,key) || !val ) {
+		lua_error_cb( L, "C function gave NULL parameter" );
+		return 0;
+	}
+	*val = (valid = (lua_isinteger(L,-1) || lua_isnumber(L,-1)))
+		? lua_tointeger(L,-1) : 0;
+	lua_pop(L,-1);
+	return valid;
+}
+
+bool find_branch_num( lua_State *L, char const *key, long double *val ) {
+	_Bool valid = 0;
+	if ( !find_branch_key(L,key) || !val ) {
+		lua_error_cb( L, "C function gave NULL parameter" );
+		return 0;
+	}
+	*val = (valid = (lua_isnumber(L,-1) || lua_isinteger(L,-1)))
+		? lua_tonumber(L,-1) : 0;
+	lua_pop(L,-1);
+	return valid;
+}
+
+bool find_branch_bool( lua_State *L, char const *key, bool *val ) {
+	_Bool valid = 0;
+	if ( !find_branch_key(L,key) || !val ) {
+		lua_error_cb( L, "C function gave NULL parameter" );
+		return 0;
+	}
+	*val = (valid = (lua_isboolean(L,-1)))
+		? lua_toboolean(L,-1) : 0;
+	lua_pop(L,-1);
+	return valid;
+}
+
+typedef struct lua_proc_func {
+	char const * name;
+	lua_CFunction func;
+} lua_proc_func_t;
+
+#define lua_proc_func(NAME) { #NAME, lua_proc_##NAME }
+
+int lua_panic_cb( lua_State *L ) {
+	puts("Error: Lua traceback...");
+	luaL_traceback(L,L,"[error]",-1);
+	puts(lua_tostring(L,-1));
+	return 0;
+}
+
+void lua_error_cb( lua_State *L, char const *text ) {
+	fprintf(stderr,"%s\n", text);
+	lua_panic_cb(L);
+}
+
+int lua_proc_glance_open( lua_State *L ) {
+	
+	return 0;
+}
+int lua_proc_glance_shut( lua_State *L ) {
+	return 0;
+}
+int lua_proc_notice_info( lua_State *L ) {
+	proc_notice_t notice = {0};
+	int ret = EXIT_SUCCESS, pid = -1;
+	if ( lua_isinteger(L,-1) || lua_isnumber(L,-1) )
+		pid = lua_tointeger(L,-1);
+	if ( !proc_notice_info( &ret, pid, &notice ) ) {
+		proc_notice_zero( &notice );
+		return 0;
+	}
+	lua_newtable( L );
+	push_branch_bool( L, "self", notice.self );
+	push_branch_int( L, "entryId", notice.entryId );
+	push_branch_int( L, "ownerId", notice.ownerId );
+	push_branch_str( L, "name", (char*)(notice.name.block) );
+	push_branch_str( L, "cmdl", (char*)(notice.cmdl.block) );
+	proc_notice_zero( &notice );
+	return 1;
+}
+int lua_proc_notice_next( lua_State *L ) {
+	proc_glance_t glance = {0};
+	if ( !lua_istable(L,-1) ) {
+		lua_pushstring(L,"Expect glance table in argument 1");
+		lua_panic_cb(L);
+		return 0;
+	}
+	if ( find_branch_int( L, "underId", &(glance.underId) ) )
+		return 0;
+	return 0;
+}
+
+lua_proc_func_t lua_proc_func_list[] = {
+	lua_proc_func(glance_open),
+{NULL}};

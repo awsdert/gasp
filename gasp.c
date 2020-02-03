@@ -6,7 +6,7 @@ int main( int argc, char *argv[] ) {
 	space_t PATH = {0};
 	nodes_t nodes = {0}, ARGS = {0};
 	kvpair_t *args = NULL;
-	char *HOME = NULL, *PWD = NULL, *DISPLAY = NULL,
+	char *HOME = NULL, *PWD = NULL, *DISPLAY = NULL, *CWD = NULL,
 		*path = NULL, *cmd = NULL, gasp[] = "gasp";
 	size_t size = 0, leng = BUFSIZ;
 	if ( (ret = arguments( argc, argv, &ARGS, &leng ))
@@ -22,8 +22,10 @@ int main( int argc, char *argv[] ) {
 		ERRMSG( errno, "Couldn't get $(HOME) and/or $(PWD)" );
 		goto cleanup;
 	}
+	if ( !(CWD = getenv("CWD")) ) CWD = PWD;
 	size = strlen(HOME) + 32;
 	leng += strlen(PWD) + 4;
+	leng += strlen(CWD) + 4;
 	leng += strlen(HOME) + 4;
 	leng += strlen(DISPLAY) + 4;
 	if ( !(path = more_space( &ret, &PATH, leng )) ) {
@@ -31,14 +33,15 @@ int main( int argc, char *argv[] ) {
 		ERRMSG( errno, "Couldn't allocate path" );
 		goto cleanup;
 	}
-	sprintf( path, "pkexec %s/%s -D HOME='%s' -D PWD='%s'",
+	sprintf( path, "pkexec %s/%s"
+		" -D HOME='%s' -D PWD='%s' -D CWD='%s'",
 		PWD,
 #ifdef _DEBUG
 		"debugger_gasp-d.elf",
 #else
 		"private_gasp.elf",
 #endif
-		HOME, PWD );
+		HOME, PWD, CWD );
 	if ( DISPLAY )
 		sprintf( path, "%s -D DISPLAY='%s'", path, DISPLAY );
 	for ( arg = 0; arg < argc; ++arg ) {

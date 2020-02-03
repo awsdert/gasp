@@ -154,6 +154,7 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng );
  * for a process to have died by the time we try to open it, similar
  * to the snapshot concept in win32 but this is tidier :) */
 typedef struct proc_notice {
+	bool self;
 	int entryId, ownerId;
 	space_t name;
 	space_t cmdl;
@@ -166,8 +167,13 @@ typedef struct proc_glance {
 	proc_notice_t notice;
 } proc_glance_t;
 typedef struct proc_handle {
-	bool samepid, running, waiting;
-	int ptrace_mode, rdmemfd, wrmemfd, change, pagesFd;
+	bool running, waiting;
+#ifdef _WIN32
+	HANDLE handle;
+#else
+	/* Should only hold /proc/%d or /proc/self */
+	char procdir[sizeof(int) * CHAR_BIT];
+#endif
 	pthread_t thread;
 	proc_notice_t notice;
 } proc_handle_t;
@@ -262,13 +268,15 @@ void proc_handle_shut(
  * @param bytes Number of bytes in array
  * @param from Where to start search
  * @param upto Where to end search
+ * @param writable Must be writable if this is true
  * @return Count of addresses that matched/where written to file
 **/
 node_t proc_aobscan(
 	int *err, int into,
 	proc_handle_t *handle,
 	uchar *array, intptr_t bytes,
-	intptr_t from, intptr_t upto );
+	intptr_t from, intptr_t upto,
+	bool writable );
 /** @brief Reads what was in memory at the time of the read/pread call
  * @param err Where to pass errors to
  * @param handle Handle opened with proc_handle_open()
@@ -291,5 +299,8 @@ intptr_t proc_glance_data(
 intptr_t proc_change_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *src, size_t size );
+	
+int lua_panic_cb( lua_State *L );
+void lua_error_cb( lua_State *L, char const *text );
 
 #endif

@@ -3,13 +3,6 @@ void error_cb( char *from, int code, char const *desc ) {
 	ERRMSG( code, desc );
 }
 
-int lua_panic_cb( lua_State *L ) {
-	puts("Error: Lua traceback...");
-	luaL_traceback(L,L,"[error]",-1);
-	puts(lua_tostring(L,-1));
-	return 0;
-}
-
 void *lua_allocator( void *ud, void *ptr, size_t size, size_t want ) {
 	void *tmp = NULL;
 	(void)ud;
@@ -34,11 +27,12 @@ int main( int argc, char *argv[] ) {
 	proc_notice_t *noticed;
 	proc_handle_t *handle;
 	kvpair_t *args = NULL;
-	char *HOME = NULL, *path = NULL, *PWD = NULL, gasp[] = "firefox",
+	char *HOME = NULL, *path = NULL, *PWD = NULL, gasp[] = "gasp",
 		*DISPLAY = NULL, *LUA_PATH = NULL, *LUA_CPATH = NULL;
 	size_t size = 0, leng = BUFSIZ;
 	intptr_t addr = 0;
 	lua_CFunction old_lua_panic_cb;
+	lua_State *L = NULL;
 	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != EXIT_SUCCESS ) {
 		ERRMSG( ret, "Couldn't get argument pairs" );
 		goto cleanup;
@@ -58,11 +52,10 @@ int main( int argc, char *argv[] ) {
 	leng = strlen(PWD) + 7;
 	LUA_PATH = calloc( leng, 1 );
 	LUA_CPATH = calloc( leng, 1 );
-	sprintf(LUA_PATH,"%s/?.lua",PWD);
+	sprintf(LUA_PATH,"%s/lua/?.lua",PWD);
 	sprintf(LUA_CPATH,"%s/?.so",PWD);
 	setenv("LUA_PATH",LUA_PATH,0);
 	setenv("LUA_CPATH",LUA_CPATH,0);
-	lua_State *L = NULL;
 	if ( !(L = luaL_newstate()) ) {
 		ret = errno;
 		ERRMSG( ret, "Couldn't create lua instance" );
@@ -72,10 +65,11 @@ int main( int argc, char *argv[] ) {
 	luaL_openlibs(L);
 	/* Just a hack for slipups upstream */
 	luaL_dostring(L,"loadlib = package.loadlib");
-#if 0
-	leng += 3;
+#if 1
+	leng += 10;
 	path = calloc( leng, 1 );
-	if ( luaL_dofile(L, "gasp.lua" ) )
+	sprintf( path, "%s/lua/gasp.lua", PWD );
+	if ( luaL_dofile(L, path ) )
 		printf("Failed:\n%s\n", lua_tostring(L,-1));
 	free(path);
 	path = NULL;
@@ -102,14 +96,16 @@ int main( int argc, char *argv[] ) {
 			}
 		}
 		for ( i = 0; i < nodes.count; ++i ) {
-			(void)fprintf( stderr, "%04X '%s'\n",
-				noticed[i].entryId, (char*)(noticed[i].name.block) );
+			(void)fprintf( stderr, "%04X '%s' launched with\n%s\n",
+				noticed[i].entryId,
+				(char*)(noticed[i].name.block),
+				(char*)(noticed[i].cmdl.block) );
 			if ( (handle =
 				proc_handle_open( &ret, noticed[i].entryId )) ) {
 				if ( ret != EXIT_SUCCESS )
 					ERRMSG( ret, "proc_handle_open() failed" );
 				if ( !(count = proc_aobscan( &ret, into, handle,
-					(uchar*)"cprogramming", strlen(gasp), 0, INTPTR_MAX )) ) {
+					(uchar*)gasp, strlen(gasp), 0, INTPTR_MAX, 1 )) ) {
 					if ( ret != EXIT_SUCCESS )
 						ERRMSG( ret, "proc_aobscan() failed" );
 					continue;

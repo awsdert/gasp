@@ -19,6 +19,7 @@ local DROID_FONT_DIR = ROOT_FONT_DIR .. '/droid'
 local NOTO_FONT_DIR = ROOT_FONT_DIR .. '/noto'
 local GASP_FONT_DIR = ROOT_FONT_DIR .. '/TTF'
 local GASP_FONT_1EM = 20
+local GASP_FONT_USE = 'default'
 
 local R, G, B, A
 local window, ctx, atlas
@@ -71,9 +72,14 @@ local fonts = {
 	default = gasp_add_font( "DejaVuSans.ttf" ),
 	droid = gasp_add_font( "DroidSans.ttf",nil,"droid" ),
 	droid_large = gasp_add_font( "DroidSans.ttf", "large","droid" ),
-	noto = gasp_add_font( "NotoSansCJK-Regular.ttc", nil, "noto-cjk" ),
-	noto_large = gasp_add_font( "NotoSansCJK-Regular.ttc", "large", "noto-cjk" ),
-	noto_small = gasp_add_font( "NotoSansCJK-Regular.ttc", "small", "noto-cjk" )
+	noto = gasp_add_font( "NotoSansDisplay-Regular.ttf", nil, "noto" ),
+	noto_large = gasp_add_font( "NotoSansDisplay-Regular.ttf", "large", "noto" ),
+	noto_small = gasp_add_font( "NotoSansDisplay-Regular.ttf", "small", "noto" )
+	--[[
+	cjk = gasp_add_font( "NotoSansCJK-Regular.ttc", nil, "noto-cjk" ),
+	cjk_large = gasp_add_font( "NotoSansCJK-Regular.ttc", "large", "noto-cjk" ),
+	cjk_small = gasp_add_font( "NotoSansCJK-Regular.ttc", "small", "noto-cjk" )
+	]]
 }
 gasp_add_font = nil
 rear.font_stash_end( ctx, fonts.default )
@@ -81,6 +87,7 @@ rear.font_stash_end( ctx, fonts.default )
 -- Set the default font to 'droid':
 --nk.style_set_font(ctx, fonts.droid)
 
+print("Setting callback")
 glfw.set_key_callback(window,
 function (window, key, scancode, action, shift, control, alt, super)
    if key == 'escape' and action == 'press' then
@@ -94,29 +101,29 @@ collectgarbage('stop')
 
 local window_flags = nk.WINDOW_BORDER |	nk.WINDOW_MOVABLE | nk.WINDOW_CLOSABLE | nk.WINDOW_SCALABLE
 
-function add_font_label(ctx,name)
-	nk.style_push_font(ctx, fonts[name])
-	nk.label(ctx, "Using font '" .. name .. "'", nk.TEXT_CENTERED)
-end
-
-function rem_font_label(ctx)
-	nk.style_pop_font(ctx)
-	nk.label(ctx, "Back to using font '" .. name .. "'", nk.TEXT_CENTERED)
-end
-
-function main()
+function draw()
+	local used_default = (GASP_FONT_USE == 'default')
+	if used_default == false then
+		nk.style_push_font(ctx, fonts[GASP_FONT_USE])
+	end
 	-- Draw the GUI --------------------------------------------
 	if nk.window_begin(ctx, "GUI", {50, 50, 320, 220}, window_flags) then
 		nk.layout_row_dynamic(ctx, 20, 1)
-		nk.label(ctx, "Using default font 'default'", nk.TEXT_CENTERED)
-		add_font_label(ctx,"droid_large")
-		add_font_label(ctx,"noto_large")
-		add_font_label(ctx,"noto")
-		add_font_label(ctx,"noto_small")
-		rem_font_label(ctx,"noto")
-		rem_font_label(ctx,"noto_large")
-		rem_font_label(ctx,"droid_large")
-		rem_font_label(ctx,"default")
+		if nk.button(ctx, nil, "Default Font") then
+			 GASP_FONT_USE = 'noto'
+		end
+		if nk.button(ctx, nil, "Noto Font") then
+			 GASP_FONT_USE = 'noto'
+		end
+		if nk.button(ctx, nil, "Noto Large Font") then
+			 GASP_FONT_USE = 'noto_small'
+		end
+		if nk.button(ctx, nil, "Noto Small Font") then
+			 GASP_FONT_USE = 'noto_small'
+		end
+	end
+	if used_default == false then
+		nk.style_pop_font(ctx)
 	end
 	nk.window_end(ctx)
 	------------------------------------------------------------
@@ -131,9 +138,9 @@ function main()
 	collectgarbage()
 end
 while not glfw.window_should_close(window) do
-   glfw.wait_events_timeout(1/FPS) --glfw.poll_events()
-   rear.new_frame()
-   main()
+	glfw.wait_events_timeout(1/FPS) --glfw.poll_events()
+	rear.new_frame()
+	draw()
 end
 rear.shutdown()
 --[[

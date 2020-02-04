@@ -223,7 +223,7 @@ void proc_glance_shut(
  * @return nodes->space.block
 **/
 proc_notice_t* proc_locate_name(
-	int *err, char *name, nodes_t *nodes, int underId );
+	int *err, char const *name, nodes_t *nodes, int underId );
 /** @brief opens a file, seeks to end takes the offset then closes it
  * @param err Where to pass errors back to
  * @param path Path of file to get size of

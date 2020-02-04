@@ -414,7 +414,7 @@ node_t proc_aobscan(
 }
 
 proc_notice_t* proc_locate_name(
-	int *err, char *name, nodes_t *nodes, int underId )
+	int *err, char const *name, nodes_t *nodes, int underId )
 {
 	int ret = EXIT_SUCCESS;
 	node_t i = 0;
@@ -1269,6 +1269,39 @@ int lua_proc_notice_next( lua_State *L ) {
 	if ( find_branch_int( L, "underId", &(glance.underId) ) )
 		return 0;
 	return 0;
+}
+
+int lua_proc_locate_name( lua_State *L ) {
+	int ret = EXIT_SUCCESS, underId = 0;
+	char const *name;
+	nodes_t nodes = {0};
+	proc_notice_t *notice;
+	node_t i, count = 0;
+	
+	if ( lua_isinteger(L,-1) || lua_isnumber(L,-1) )
+		underId = lua_tonumber(L,-1);
+		
+	if ( !lua_isstring(L,-1) ) {
+		lua_error_cb( L, "Invalid name" );
+		return 0;
+	}
+	
+	name = lua_tostring(L,-1);
+	notice = proc_locate_name( &ret, name, &nodes, underId );
+	
+	if ( nodes.count == 1 ) {
+		lua_newtable( L );
+		push_branch_bool( L, "self", notice->self );
+		push_branch_int( L, "entryId", notice->entryId );
+		push_branch_int( L, "ownerId", notice->ownerId );
+		push_branch_str( L, "name", (char*)(notice->name.block) );
+		push_branch_str( L, "cmdl", (char*)(notice->cmdl.block) );
+		count = 1;
+	}
+	for ( i = 0; i < nodes.count; ++i )
+		proc_notice_zero( notice + i );
+	free_nodes( proc_notice_t, &ret, &nodes );
+	return count;
 }
 
 lua_proc_func_t lua_proc_func_list[] = {

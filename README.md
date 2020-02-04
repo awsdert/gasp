@@ -26,4 +26,4 @@ directly or indrectly (not including system libraries)
 * https://github.com/stetre/moongl
 * https://github.com/stetre/moonglfw
 * https://github.com/stetre/moonnuklear
-* https://github.com/Immediate-Mode-UI/Nuklear
+* https://github.com/vurtun/nuklear

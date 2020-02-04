@@ -46,7 +46,8 @@ local function init(width, height, title, anti_aliasing, font_path, parameters)
 	p.def_font = p.atlas:add(para.font_size, p.font_dir)
 	p.painter.font_stash_end(p.ctx, p.def_font)
 
-	p.glfw.set_key_callback(p.window, function (window, key, scancode, action, shift, control, alt, super)
+	p.glfw.set_key_callback(p.window,
+	function (window, key, scancode, action, shift, control, alt, super)
 		if key == 'escape' and action == 'press' then
 			p.glfw.set_window_should_close(window, true)
 		end

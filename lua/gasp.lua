@@ -1,10 +1,10 @@
 #!/usr/bin/env lua
 -- Simple example that shows how to change font when drawing widgets.
--- Uses the GLFW/OpenGL backend shipped with MoonNuklear.
+-- Uses the GLFW/OpenGL rear shipped with MoonNuklear.
 
 local glfw = require("moonglfw")
 local gl = require("moongl")
-local backend = require("moonnuklear.glbackend")
+local rear = require("moonnuklear.glbackend")
 local nk = require("moonnuklear")
 
 local TITLE = "Changing font" -- GLFW window title
@@ -14,7 +14,11 @@ local BGCOLOR = {0.10, 0.18, 0.24, 1.0} -- background color
 local VBO_SIZE, EBO_SIZE = 512*1024, 128*1024 -- size of GL buffers
 local ANTI_ALIASING = true -- use anti-aliasing
 local CLIPBOARD = false -- use clipboard
-local DEFAULT_FONT_PATH = '/usr/share/fonts/TTF' --  full path filename of a ttf file (optional)
+local ROOT_FONT_DIR = '/usr/share/fonts'
+local DROID_FONT_DIR = ROOT_FONT_DIR .. '/droid'
+local NOTO_FONT_DIR = ROOT_FONT_DIR .. '/noto'
+local GASP_FONT_DIR = ROOT_FONT_DIR .. '/TTF'
+local GASP_FONT_1EM = 20
 
 local R, G, B, A
 local window, ctx, atlas
@@ -31,8 +35,8 @@ window = glfw.create_window(W, H, TITLE)
 glfw.make_context_current(window)
 gl.init()
 
--- Initialize the backend
-ctx = backend.init(window, {
+-- Initialize the rear
+ctx = rear.init(window, {
    vbo_size = VBO_SIZE,
    ebo_size = EBO_SIZE,
    anti_aliasing = ANTI_ALIASING,
@@ -41,68 +45,97 @@ ctx = backend.init(window, {
 })
 
 -- Load fonts: if none of these are loaded a default font will be used
-atlas = backend.font_stash_begin()
-local default_font = atlas:add(13, DEFAULT_FONT_PATH)
-local droid = atlas:add(14, "fonts/DroidSans.ttf")
-local droid_big = atlas:add(28, "fonts/DroidSans.ttf")
-local roboto = atlas:add(14, "fonts/Roboto-Regular.ttf")
-local future = atlas:add(13, "fonts/kenvector_future_thin.ttf")
-local clean = atlas:add(12, "fonts/ProggyClean.ttf")
-local tiny = atlas:add(10, "fonts/ProggyTiny.ttf")
-local cousine = atlas:add(13, "fonts/Cousine-Regular.ttf")
-backend.font_stash_end(ctx, default_font)
+atlas = rear.font_stash_begin()
+function gasp_add_font(name,size,dir)
+	if not dir then
+		dir = GASP_FONT_DIR
+	else
+		dir = ROOT_FONT_DIR .. '/' .. dir
+	end
+	if size == "large" then
+		size = GASP_FONT_1EM + 4
+	elseif size == "small" then
+		size = GASP_FONT_1EM - 4
+	else
+		size = GASP_FONT_1EM
+	end
+	if not name then
+		name = dir .. "/"
+	else
+		name = dir .. "/" .. name
+	end
+	print( "Adding font '" .. name .. "' at size " .. size )
+	return atlas:add( size, name )
+end
+local fonts = {
+	default = gasp_add_font( "DejaVuSans.ttf" ),
+	droid = gasp_add_font( "DroidSans.ttf",nil,"droid" ),
+	droid_large = gasp_add_font( "DroidSans.ttf", "large","droid" ),
+	noto = gasp_add_font( "NotoSansCJK-Regular.ttc", nil, "noto-cjk" ),
+	noto_large = gasp_add_font( "NotoSansCJK-Regular.ttc", "large", "noto-cjk" ),
+	noto_small = gasp_add_font( "NotoSansCJK-Regular.ttc", "small", "noto-cjk" )
+}
+gasp_add_font = nil
+rear.font_stash_end( ctx, fonts.default )
 
--- Set the default font to 'cousine':
-nk.style_set_font(ctx, cousine)
+-- Set the default font to 'droid':
+--nk.style_set_font(ctx, fonts.droid)
 
-glfw.set_key_callback(window, function (window, key, scancode, action, shift, control, alt, super)
+glfw.set_key_callback(window,
+function (window, key, scancode, action, shift, control, alt, super)
    if key == 'escape' and action == 'press' then
       glfw.set_window_should_close(window, true)
    end
-   backend.key_callback(window, key, scancode, action, shift, control, alt, super)
+   rear.key_callback(window, key, scancode, action, shift, control, alt, super)
 end)
 
 collectgarbage()
 collectgarbage('stop')
 
-local window_flags = nk.WINDOW_BORDER |
-	nk.WINDOW_MOVABLE | nk.WINDOW_CLOSABLE | nk.WINDOW_SCALABLE
+local window_flags = nk.WINDOW_BORDER |	nk.WINDOW_MOVABLE | nk.WINDOW_CLOSABLE | nk.WINDOW_SCALABLE
 
-while not glfw.window_should_close(window) do
-   glfw.wait_events_timeout(1/FPS) --glfw.poll_events()
-   backend.new_frame()
-
-   -- Draw the GUI --------------------------------------------
-   if nk.window_begin(ctx, "GUI", {50, 50, 320, 220}, window_flags) then
-      nk.layout_row_dynamic(ctx, 20, 1)
-      nk.label(ctx, "Using default font 'cousine'", nk.TEXT_CENTERED)
-      nk.style_push_font(ctx, droid)
-      nk.label(ctx, "Using font 'droid'", nk.TEXT_CENTERED)
-      nk.style_push_font(ctx, future)
-      nk.label(ctx, "Using font 'future'", nk.TEXT_CENTERED)
-      nk.style_push_font(ctx, droid_big)
-      nk.label(ctx, "Using font 'droid_big'", nk.TEXT_CENTERED)
-      nk.style_pop_font(ctx)
-      nk.label(ctx, "Back to using font 'future'", nk.TEXT_CENTERED)
-      nk.style_pop_font(ctx)
-      nk.label(ctx, "Back to using font 'droid'", nk.TEXT_CENTERED)
-      nk.style_pop_font(ctx)
-      nk.label(ctx, "Back to using default font 'cousine'", nk.TEXT_CENTERED)
-   end
-   nk.window_end(ctx)
-   ------------------------------------------------------------
-
-   -- Render
-   W, H = glfw.get_window_size(window)
-   gl.viewport(0, 0, W, H)
-   gl.clear_color(R, G, B, A)
-   gl.clear('color')
-   backend.render()
-   glfw.swap_buffers(window)
-   collectgarbage()
+function add_font_label(ctx,name)
+	nk.style_push_font(ctx, fonts[name])
+	nk.label(ctx, "Using font '" .. name .. "'", nk.TEXT_CENTERED)
 end
 
-backend.shutdown()
+function rem_font_label(ctx)
+	nk.style_pop_font(ctx)
+	nk.label(ctx, "Back to using font '" .. name .. "'", nk.TEXT_CENTERED)
+end
+
+function main()
+	-- Draw the GUI --------------------------------------------
+	if nk.window_begin(ctx, "GUI", {50, 50, 320, 220}, window_flags) then
+		nk.layout_row_dynamic(ctx, 20, 1)
+		nk.label(ctx, "Using default font 'default'", nk.TEXT_CENTERED)
+		add_font_label(ctx,"droid_large")
+		add_font_label(ctx,"noto_large")
+		add_font_label(ctx,"noto")
+		add_font_label(ctx,"noto_small")
+		rem_font_label(ctx,"noto")
+		rem_font_label(ctx,"noto_large")
+		rem_font_label(ctx,"droid_large")
+		rem_font_label(ctx,"default")
+	end
+	nk.window_end(ctx)
+	------------------------------------------------------------
+
+	-- Render
+	W, H = glfw.get_window_size(window)
+	gl.viewport(0, 0, W, H)
+	gl.clear_color(R, G, B, A)
+	gl.clear('color')
+	rear.render()
+	glfw.swap_buffers(window)
+	collectgarbage()
+end
+while not glfw.window_should_close(window) do
+   glfw.wait_events_timeout(1/FPS) --glfw.poll_events()
+   rear.new_frame()
+   main()
+end
+rear.shutdown()
 --[[
 nk = require("moonnuklear")
 nkgl = require('backend')

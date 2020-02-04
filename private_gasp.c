@@ -77,7 +77,7 @@ int main( int argc, char *argv[] ) {
 	lua_close(L);
 	free(LUA_CPATH);
 	free(LUA_PATH);
-
+#if 0
 	if ( (noticed = proc_locate_name( &ret, gasp, &nodes, 0 )) ) {
 		fputs( "Found:\n", stderr);
 		path = calloc( size, 1 );
@@ -140,6 +140,16 @@ int main( int argc, char *argv[] ) {
 	}
 	else
 		ERRMSG( ret, "Couldn't find process" );
+#else
+	(void)into;
+	(void)i;
+	(void)a;
+	(void)count;
+	(void)noticed;
+	(void)handle;
+	(void)gasp;
+	(void)addr;
+#endif
 	cleanup:
 	if ( path ) free( path );
 	if ( ret != EXIT_SUCCESS ) {

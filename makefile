@@ -37,8 +37,10 @@ gasp_dbg_exe:=gasp-d.$(exe_ext)
 debugger_gasp_exe:=debugger_$(gasp_dbg_exe)
 private_gasp_exe:=private_$(gasp_exe)
 private_gasp_dbg_exe:=private_$(gasp_dbg_exe)
+PHONY_TARGETS:=makefile default all rebuild clean libs build debug
+PHONY_TARGETS+= run gede
 
-.PHONY: default all run gede gasp debug makefile clean
+.PHONY: $(PHONY_TARGETS)
 default: run
 
 lua_dir=cloned/lua
@@ -72,11 +74,14 @@ defines:=$(if $(IS_LINUX),$(linux_defines),$(win32_defines))
 src_flags=$(bin_flags) -Wall -std=c99 $(defines:%=-D %) -DLUAVER=5.3
 dbg_flags=-ggdb -D _DEBUG
 
-libs: lua_lib moon_libs
+all: libs build debug
+rebuild: clean libs build
 
-lua_lib:
-	cd $(lua_dir) && make
-	cp $(lua_src_dir)liblua.so liblua.so
+libs: moon_libs
+
+#lua_lib:
+#	cd $(lua_dir) && make
+#	cp $(lua_src_dir)/liblua.so liblua.so
 
 moon_libs:
 	cd $(moongl_dir) && make
@@ -99,20 +104,20 @@ clean:
 	rm -f $(moonglfw_src_dir)/*.so
 	rm -f $(moonnuklear_src_dir)/*.so
 
-leaks: gasp debug
+leaks: build debug
 	valgrind -s ./$(private_gasp_dbg_exe) $(gasp_args)
 	valgrind -s ./$(debugger_gasp_exe) $(gasp_args)
 	valgrind -s ./$(gasp_dbg_exe) $(gasp_args)
 	valgrind -s ./$(private_gasp_exe) $(gasp_args)
 	valgrind -s ./$(gasp_exe) $(gasp_args)
 
-run: gasp
+run: build
 	./$(gasp_exe) $(gasp_args)
 
 gede: debug
 	gede --args ./$(gasp_dbg_exe) $(gasp_args)
 
-gasp: $(gasp_exe) $(private_gasp_exe)
+build: $(gasp_exe) $(private_gasp_exe)
 
 debug: $(gasp_dbg_exe) $(private_gasp_dbg_exe) $(debugger_gasp_exe)
 

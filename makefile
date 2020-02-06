@@ -65,9 +65,10 @@ $(call pull,$(moonnuklear_dir))
 gasp_args=-D HELLO="WORLD"
 bin_flags=-fPIC
 rpath=-L'.' -Wl,-rpath,'.'
-exe_flags=$(bin_flags) -ldl -lm -lpthread -llua
-lib_flags=$(exe_flags) -shared
-inc_flags=-I $(lua_dir) -I $(moonnuklear_dir) -I $(moonglfw_dir) -I $(moongl_dir)
+libraries:=-ldl -lm -lpthread -llua
+exe_flags:=$(bin_flags)
+lib_flags:=$(exe_flags) -shared
+inc_flags=-I $(lua_dir)
 win32_defines=_WIN32
 linux_defines=_GNU_SOURCE LINUX LUA_USE_LINUX LUA_USE_READLINE
 defines:=$(if $(IS_LINUX),$(linux_defines),$(win32_defines))
@@ -122,19 +123,19 @@ build: $(gasp_exe) $(private_gasp_exe)
 debug: $(gasp_dbg_exe) $(private_gasp_dbg_exe) $(debugger_gasp_exe)
 
 $(gasp_exe): $(exposed_gasp_objects)
-	$(CC) $(exe_flags) -o $@ $(exposed_gasp_objects)
+	$(CC) $(exe_flags) -o $@ $(exposed_gasp_objects) $(libraries)
 
 $(private_gasp_exe): $(private_gasp_objects)
-	$(CC) $(exe_flags) -o $@ $(private_gasp_objects)
+	$(CC) $(exe_flags) -o $@ $(private_gasp_objects) $(libraries)
 
 $(gasp_dbg_exe): $(exposed_gasp_dbgobjs)
-	$(CC) $(dbg_flags) $(exe_flags) -o $@ $(exposed_gasp_dbgobjs)
+	$(CC) $(dbg_flags) $(exe_flags) -o $@ $(exposed_gasp_dbgobjs) $(libraries)
 
 $(private_gasp_dbg_exe): $(private_gasp_dbgobjs)
-	$(CC) $(dbg_flags) $(exe_flags) -o $@ $(private_gasp_dbgobjs)
+	$(CC) $(dbg_flags) $(exe_flags) -o $@ $(private_gasp_dbgobjs) $(libraries)
 
 $(debugger_gasp_exe): $(debugger_gasp_dbgobjs)
-	$(CC) $(dbg_flags) $(exe_flags) -o $@ $(debugger_gasp_dbgobjs)
+	$(CC) $(dbg_flags) $(exe_flags) -o $@ $(debugger_gasp_dbgobjs) $(libraries)
 
 %.o: %
 	$(CC) $(flags) $(inc_flags) $(src_flags) -o $@ -c $<

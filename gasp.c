@@ -55,9 +55,7 @@ int main( int argc, char *argv[] ) {
 		sprintf( strchr( path, '\0'), " %s", cmd );
 	}
 	fprintf(stderr, "gasp = '%s'\n", gasp);
-	fprintf(stderr,"%s\n",path);
-	fprintf(stdout,"%s\n",path);
-	//puts( path );
+	puts(path);
 	ret = system( path );
 	fprintf(stderr, "gasp = '%s'\n", gasp);
 	cleanup:

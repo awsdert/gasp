@@ -311,4 +311,26 @@ int lua_proc_load_glance( lua_State *L );
 int lua_proc_free_glance( lua_State *L );
 void lua_error_cb( lua_State *L, char const *text );
 
+void push_global_cfunc(
+	lua_State *L, char const *key, lua_CFunction val
+);
+void push_global_str( lua_State *L, char const *key, char *val );
+void push_global_int( lua_State *L, char const *key, int val );
+void push_global_num( lua_State *L, char const *key, long double val );
+void push_global_bool( lua_State *L, char const *key, bool val );
+void push_global_obj( lua_State *L, char const *key );
+void push_branch_cfunc(
+	lua_State *L, char const *key, lua_CFunction val
+);
+void push_branch_str( lua_State *L, char const *key, char *val );
+void push_branch_int( lua_State *L, char const *key, int val );
+void push_branch_num( lua_State *L, char const *key, long double val );
+void push_branch_bool( lua_State *L, char const *key, bool val );
+void push_branch_obj( lua_State *L, char const *key );
+bool find_branch_key( lua_State *L, char const *key );
+bool find_branch_str( lua_State *L, char const *key, char const **val );
+bool find_branch_int( lua_State *L, char const *key, int *val );
+bool find_branch_num( lua_State *L, char const *key, long double *val );
+bool find_branch_bool( lua_State *L, char const *key, bool *val );
+
 #endif

@@ -6,6 +6,7 @@ gl = require("moongl")
 glfw = require("moonglfw")
 nk = require("moonnuklear")
 rear = require("moonnuklear.glbackend")
+cfg_font = require("cfg.font")
 
 gui = {}
 cfg = {
@@ -65,20 +66,8 @@ gui.ctx = rear.init(gui.window, {
 
 -- Load fonts: if none of these are loaded a default font will be used
 atlas = rear.font_stash_begin()
-gui.font_size = {}
-gui.font_size["xx-large"] = 1.6
-gui.font_size["x-large"] = 1.4
-gui.font_size["large"] = 1.2
-gui.font_size["medium"] = 1
-gui.font_size["small"] = 0.8
-gui.font_size["x-small"] = 0.6
-gui.font_size["xx-small"] = 0.4
-gui.fonts = {}
-for name,size in pairs(gui.font_size) do
-	size = cfg.font.base_size * size
-	gui.fonts[name] = atlas:add( size, cfg.font.file )
-end
-rear.font_stash_end( gui.ctx, gui.fonts.medium )
+gui.font = atlas:add( cfg.font.base_size, cfg.font.file )
+rear.font_stash_end( gui.ctx, gui.font )
 
 glfw.set_key_callback(gui.window,
 function (window, key, scancode, action, shift, control, alt, super)
@@ -93,139 +82,39 @@ collectgarbage('stop')
 
 gui.window_flags = nk.WINDOW_BORDER | nk.WINDOW_SCALABLE
 
-local function pad_width(font,text)
+local function pad_width(text)
+	local font = gui.font
 	return math.ceil((font:width(font:height(),text)) * 1.2)
 end
 
-local function pad_height(font,text)
+local function pad_height(text)
+	local font = gui.font
 	return math.ceil((font:height(text)) * 1.2)
 end
-
-function draw_font_sizes_window()
-	local normal_font = (cfg.font.use == 'medium')
+function draw_all(ctx)
+	local text
 	local bounds = {0,0,cfg.window.width,cfg.window.height}
-	
-	local add_label = function(name,text)
-		local used = (cfg.font.use == name)
-		local font = gui.fonts[name]
-		if used == false then
-			nk.style_push_font(gui.ctx, font)
-		end
-		nk.layout_row_static(gui.ctx,
-			pad_height(font,text), pad_width(font,text), #text )
-		nk.label(gui.ctx,text,nk.WINDOW_BORDER)
-		if used == false then
-			nk.style_pop_font(gui.ctx)
-		end
-	end
-	
-	local add_button = function(name,text)
-		local used = (cfg.font.use == name)
-		local font = gui.fonts[name]
-		if used == false then
-			nk.style_push_font(gui.ctx, font)
-		end
-		nk.layout_row_static(gui.ctx,
-			pad_height(font,text), pad_width(font,text), #text )
-		if nk.button(gui.ctx, nil, text) then
-			 cfg.font.use = name
-		end
-		if used == false then
-			nk.style_pop_font(gui.ctx)
-		end
-	end
-	
-	if normal_font == false then
-		nk.style_push_font(gui.ctx, gui.fonts[cfg.font.use])
-	end
-	
-	if nk.window_begin(gui.ctx, "Font Size",
-		bounds, gui.window_flags) then
-		
-		add_label(cfg.font.use,"Change font size to:")
-		
-		add_button( 'xx-large', 'XX-Large')
-		add_button( 'x-large', 'X-Large')
-		add_button( 'large', 'Large')
-		add_button( 'medium', 'Medium')
-		add_button( 'small', 'Small')
-		add_button( 'x-small', 'X-Small')
-		add_button( 'xx-small', 'XX-Small')
-	end
-	
-	if normal_font == false then
-		nk.style_pop_font(gui.ctx)
-	end
-	nk.window_end(gui.ctx)
-end
-function draw_all()
-	cfg.window.width, cfg.window.height =
-		glfw.get_window_size(gui.window)
-	draw_font_sizes_window()
-	-- Render
-	cfg.window.width, cfg.window.height =
-		glfw.get_window_size(gui.window)
-	gl.viewport(0, 0, cfg.window.width, cfg.window.height)
-	gl.clear_color(R, G, B, A)
-	gl.clear('color')
-	rear.render()
-	glfw.swap_buffers(gui.window)
-	collectgarbage()
-end
-while not glfw.window_should_close(gui.window) do
-	glfw.wait_events_timeout(1/cfg.fps)
-	rear.new_frame()
-	draw_all()
-end
-rear.shutdown()
---[[
-nk = require("moonnuklear")
-nkgl = require('backend')
-op = 'large'
-value = 0.6
-gasp = gasp or {}
-local function pad(font,text)
-	return math.ceil((font:width(font:height(),text)) + 5)
-end
-local noto = { font_name = "Noto Sans CJK JP Regular", font_size = 24 }
-function main(ctx)
-	local text, atlas, font
-	local flags = nk.WINDOW_BORDER|nk.WINDOW_MOVABLE|nk.WINDOW_CLOSABLE
-	local proc_locate_name = gasp.proc_locate_name or function() return "Fake Find DQB" end
-	if nk.window_begin(ctx, "Show", {50, 50, 220, 220}, flags ) then
+	if nk.window_begin(ctx, "Show", bounds, gui.window_flags ) then
 		-- fixed widget pixel width
-		text = "Find DQB"
-		font = nkgl.p.def_font
-		nk.layout_row_static(ctx, 40, (pad(font,text)), 1)
+		text = "Change Font"
+		nk.layout_row_static(ctx, 40, (pad_width(text)), 1)
 		if nk.button(ctx, nil, text) then
 			 -- ... event handling ...
-			 print(proc_locate_name())
-		end
-		-- fixed widget window ratio width
-		text = 'small'
-		nk.layout_row_dynamic(ctx, (pad(font,text)) * 2, 2)
-		if nk.option(ctx, text, op == text) then
-			op = text
-			noto.font_size = 20
-		end
-		text = 'large'
-		if nk.option(ctx, text, op == text) then
-			op = text
-			noto.font_size = 24
+			 gui.font = cfg_font()
 		end
 			-- custom widget pixel width
 			nk.layout_row_begin(ctx, 'static', 30, 2)
 			nk.layout_row_push(ctx, 50)
 			nk.label(ctx, "Volume:", nk.TEXT_LEFT)
 			nk.layout_row_push(ctx, 110)
-			value = nk.slider(ctx, 0, value, 1.0, 0.1)
+			value = nk.slider(ctx, 0, 0.5, 1.0, 0.1)
 			nk.layout_row_end(ctx)
 	 end
 	 nk.window_end(ctx)
 end
-mainFrame = nkgl.init(
-	640,480,"Gasp Window",true,'/usr/share/fonts/TTF',noto)
-if mainFrame then
-	nkgl.loop(main, {.13, .29, .53, 1}, 30)
+while not glfw.window_should_close(gui.window) do
+	glfw.wait_events_timeout(1/cfg.fps)
+	rear.new_frame()
+	draw_all(gui.ctx)
 end
-]]
+rear.shutdown()

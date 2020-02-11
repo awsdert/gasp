@@ -1,47 +1,4 @@
-gl = require("moongl")
-glfw = require("moonglfw")
-nk = require("moonnuklear")
-rear = require("moonnuklear.glbackend")
-
-gui = {}
-cfg = {
-	fps = 30,
-	clipboard = false,
-	anti_aliasing = false,
-	window = {
-		width = 640,
-		height = 480,
-		title = "GASP - Gaming Assistive tech for Solo Play"
-	},
-	colors = {
-		-- RGBA from 0.0 to 1.0
-		bg = { 0.1, 0.1, 0.1, 1.0 }
-	},
-	sizes = {
-		gl_vbo = 1024 * 512,
-		gl_ebo = 1024 * 128
-	},
-	dir = {
-		sys = "/usr/share",
-		usr = '~/.config/.gasp',
-		otg = "./otg"
-	}
-}
-cfg.font = {
-	-- *.ttf fonts only should be used here unless nuklear gets an upgrade
-	file = cfg.dir.sys .. "/fonts/noto/NotoSansDisplay-Regular.ttf",
-	base_size = 40,
-	use = "medium"
-}
-
-local R, G, B, A
-local atlas
-
-local function set_bgcolor(color)
-   cfg.colors.bg = color or cfg.colors.bg
-   return table.unpack(cfg.colors.bg)
-end
-R, G, B, A = set_bgcolor()
+local gui = {}
 
 -- Load fonts: if none of these are loaded a default font will be used
 gui.font_size = {}
@@ -63,7 +20,7 @@ local function pad_height(font,text)
 	return math.ceil((font:height(text)) * 1.2)
 end
 
-function draw_font_sizes_window()
+local function draw_main(ctx)
 	local normal_font = (cfg.font.use == 'medium')
 	local bounds = {0,0,cfg.window.width,cfg.window.height}
 	
@@ -71,13 +28,13 @@ function draw_font_sizes_window()
 		local used = (cfg.font.use == name)
 		local font = gui.fonts[name]
 		if used == false then
-			nk.style_push_font(gui.ctx, font)
+			nk.style_push_font(ctx, font)
 		end
-		nk.layout_row_static(gui.ctx,
+		nk.layout_row_static(ctx,
 			pad_height(font,text), pad_width(font,text), #text )
-		nk.label(gui.ctx,text,nk.WINDOW_BORDER)
+		nk.label(ctx,text,nk.WINDOW_BORDER)
 		if used == false then
-			nk.style_pop_font(gui.ctx)
+			nk.style_pop_font(ctx)
 		end
 	end
 	
@@ -85,23 +42,23 @@ function draw_font_sizes_window()
 		local used = (cfg.font.use == name)
 		local font = gui.fonts[name]
 		if used == false then
-			nk.style_push_font(gui.ctx, font)
+			nk.style_push_font(ctx, font)
 		end
-		nk.layout_row_static(gui.ctx,
+		nk.layout_row_static(ctx,
 			pad_height(font,text), pad_width(font,text), #text )
-		if nk.button(gui.ctx, nil, text) then
+		if nk.button(ctx, nil, text) then
 			 cfg.font.use = name
 		end
 		if used == false then
-			nk.style_pop_font(gui.ctx)
+			nk.style_pop_font(ctx)
 		end
 	end
 	
 	if normal_font == false then
-		nk.style_push_font(gui.ctx, gui.fonts[cfg.font.use])
+		nk.style_push_font(ctx, gui.fonts[cfg.font.use])
 	end
 	
-	if nk.window_begin(gui.ctx, "Font Size",
+	if nk.window_begin(ctx, "Font Size",
 		bounds, gui.window_flags) then
 		
 		add_label(cfg.font.use,"Change font size to:")
@@ -116,11 +73,11 @@ function draw_font_sizes_window()
 	end
 	
 	if normal_font == false then
-		nk.style_pop_font(gui.ctx)
+		nk.style_pop_font(ctx)
 	end
-	nk.window_end(gui.ctx)
+	nk.window_end(ctx)
 end
-function draw_all()
+local function draw_all(ctx)
 	cfg.window.width, cfg.window.height =
 		glfw.get_window_size(gui.window)
 	draw_font_sizes_window()
@@ -128,33 +85,30 @@ function draw_all()
 	cfg.window.width, cfg.window.height =
 		glfw.get_window_size(gui.window)
 	gl.viewport(0, 0, cfg.window.width, cfg.window.height)
-	gl.clear_color(R, G, B, A)
+	gl.clear_color(table.unpack(cfg.colors.bg))
 	gl.clear('color')
 	rear.render()
 	glfw.swap_buffers(gui.window)
 	collectgarbage()
 end
-return function()
+return function(ctx,default)
 	-- GL/GLFW inits
-	glfw.version_hint(3, 3, 'core')
 	gui.window = glfw.create_window(
 		cfg.window.width, cfg.window.height, cfg.window.title )
 	glfw.make_context_current(gui.window)
-	gl.init()
 	-- Initialize the rear
-	gui.ctx = rear.init(gui.window, {
-	   vbo_size = cfg.sizes.gl_vbo,
-	   ebo_size = cfg.sizes.gl_ebo,
-	   anti_aliasing = cfg.anti_aliasing,
-	   clipboard = cfg.clipboard,
-	   callbacks = true
-	})
-	atlas = rear.font_stash_begin()
-	for name,size in pairs(gui.font_size) do
-		size = cfg.font.base_size * size
-		gui.fonts[name] = atlas:add( size, cfg.font.file )
+	if not gui.fonts["medium"] then
+		local atlas = rear.font_stash_begin()
+		for name,size in pairs(gui.font_size) do
+			size = cfg.font.base_size * size
+			if name == "medium" then
+				gui.fonts[name] = default_font
+			else
+				gui.fonts[name] = atlas:add( size, cfg.font.file )
+			end
+		end
+		rear.font_stash_end( ctx, gui.fonts.medium )
 	end
-	rear.font_stash_end( gui.ctx, gui.fonts.medium )
 	glfw.set_key_callback(gui.window,
 	function (window, key, scancode, action, shift, control, alt, super)
 	   if key == 'escape' and action == 'press' then
@@ -169,8 +123,7 @@ return function()
 	while not glfw.window_should_close(gui.window) do
 		glfw.wait_events_timeout(1/cfg.fps)
 		rear.new_frame()
-		draw_all()
+		draw_all(ctx)
 	end
-	rear.shutdown()
 	return gui.fonts[cfg.font.use]
 end

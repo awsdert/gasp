@@ -166,13 +166,14 @@ typedef struct proc_glance {
 	nodes_t idNodes;
 	proc_notice_t notice;
 } proc_glance_t;
+#define SIZEOF_PROCDIR (sizeof(int) * CHAR_BIT)
 typedef struct proc_handle {
 	bool running, waiting;
 #ifdef _WIN32
 	HANDLE handle;
 #else
 	/* Should only hold /proc/%d or /proc/self */
-	char procdir[sizeof(int) * CHAR_BIT];
+	char procdir[SIZEOF_PROCDIR];
 #endif
 	pthread_t thread;
 	proc_notice_t notice;
@@ -207,12 +208,12 @@ proc_notice_t* proc_notice_info(
  * @param underId ID of ancestor, invalid IDs will not trigger errors
  * but will produce 0 results
 **/
-proc_notice_t* proc_glance_open(
+proc_notice_t* proc_glance_init(
 	int *err, proc_glance_t *glance, int underId );
 /** @brief Deallocates any memory, closes handles and zeroes everything
  * @param glance The glance to cleanup
 **/
-void proc_glance_shut(
+void proc_glance_term(
 	proc_glance_t *glance );
 /** @brief Searches through a glance for processes that contain
  * the given name
@@ -299,8 +300,15 @@ intptr_t proc_glance_data(
 intptr_t proc_change_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *src, size_t size );
-	
+
+typedef struct lua_gasp_func {
+	char const * name;
+	lua_CFunction addr;
+} lua_gasp_func_t;
+
 int lua_panic_cb( lua_State *L );
+int lua_proc_load_glance( lua_State *L );
+int lua_proc_free_glance( lua_State *L );
 void lua_error_cb( lua_State *L, char const *text );
 
 #endif

@@ -8,7 +8,11 @@ int main( int argc, char *argv[] ) {
 	kvpair_t *args = NULL;
 	char *HOME = NULL, *PWD = NULL, *DISPLAY = NULL, *CWD = NULL,
 		*path = NULL, *cmd = NULL, gasp[] = "gasp";
-	size_t size = 0, leng = BUFSIZ;
+	size_t leng = BUFSIZ
+#if 0
+	, size = 0
+#endif
+	;
 	if ( (ret = arguments( argc, argv, &ARGS, &leng ))
 		!= EXIT_SUCCESS ) {
 		ERRMSG( ret, "Couldn't get argument pairs" );
@@ -23,7 +27,8 @@ int main( int argc, char *argv[] ) {
 		goto cleanup;
 	}
 	if ( !(CWD = getenv("CWD")) ) CWD = PWD;
-	size = strlen(HOME) + 32;
+	leng = strlen(PWD) + 20;
+	leng += strlen(HOME) + 32;
 	leng += strlen(PWD) + 4;
 	leng += strlen(CWD) + 4;
 	leng += strlen(HOME) + 4;
@@ -37,20 +42,22 @@ int main( int argc, char *argv[] ) {
 		" -D HOME='%s' -D PWD='%s' -D CWD='%s'",
 		PWD,
 #ifdef _DEBUG
-		"debugger_gasp-d.elf",
+		"test-gasp-d.elf",
 #else
-		"private_gasp.elf",
+		"deep-gasp.elf",
 #endif
 		HOME, PWD, CWD );
 	if ( DISPLAY )
-		sprintf( path, "%s -D DISPLAY='%s'", path, DISPLAY );
+		sprintf( strchr(path,'\0'), " -D DISPLAY='%s'", DISPLAY );
 	for ( arg = 0; arg < argc; ++arg ) {
 		cmd = argv[arg];
 		if ( strstr(cmd, gasp) ) continue;
-		sprintf( path, "%s %s", path, cmd );
+		sprintf( strchr( path, '\0'), " %s", cmd );
 	}
 	fprintf(stderr, "gasp = '%s'\n", gasp);
-	puts( path );
+	fprintf(stderr,"%s\n",path);
+	fprintf(stdout,"%s\n",path);
+	//puts( path );
 	ret = system( path );
 	fprintf(stderr, "gasp = '%s'\n", gasp);
 	cleanup:

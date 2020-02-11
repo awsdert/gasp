@@ -1,5 +1,3 @@
-.DEFAULT_TARGET?=default
-.TARGET?=$(.DEFAULT_TARGET)
-
-$(.TARGET):
-	cd ../ && make
+MAKECMDGOALS?=default
+$(MAKECMDGOALS):
+	cd ../ && make --no-print-directory $(MAKEFILES) $(MAKECMDGOALS)

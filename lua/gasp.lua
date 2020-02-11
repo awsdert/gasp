@@ -65,31 +65,19 @@ gui.ctx = rear.init(gui.window, {
 
 -- Load fonts: if none of these are loaded a default font will be used
 atlas = rear.font_stash_begin()
-function gasp_add_font(size)
-	if type(size) == "number" then
-		size = cfg.font.base_size * size
-	else
-		size = cfg.font.base_size
-	end
-	return atlas:add( size, cfg.font.file )
-end
-gui.font_size_mul = {}
-gui.font_size_mul["xx-large"] = 1.6
-gui.font_size_mul["x-large"] = 1.4
-gui.font_size_mul["large"] = 1.2
-gui.font_size_mul["medium"] = 1.0
-gui.font_size_mul["small"] = 0.8
-gui.font_size_mul["x-small"] = 0.6
-gui.font_size_mul["xx-small"] = 0.4
+gui.font_size = {}
+gui.font_size["xx-large"] = 1.6
+gui.font_size["x-large"] = 1.4
+gui.font_size["large"] = 1.2
+gui.font_size["medium"] = 1
+gui.font_size["small"] = 0.8
+gui.font_size["x-small"] = 0.6
+gui.font_size["xx-small"] = 0.4
 gui.fonts = {}
-gui.fonts["xx-large"] = gasp_add_font(gui.font_size_mul["xx-large"])
-gui.fonts["x-large"] = gasp_add_font(gui.font_size_mul["x-large"])
-gui.fonts["large"] = gasp_add_font(gui.font_size_mul["xx-large"])
-gui.fonts["medium"] = gasp_add_font(gui.font_size_mul["medium"])
-gui.fonts["small"] = gasp_add_font(gui.font_size_mul["small"])
-gui.fonts["x-small"] = gasp_add_font(gui.font_size_mul["x-small"])
-gui.fonts["xx-small"] = gasp_add_font(gui.font_size_mul["xx-small"])
-gasp_add_font = nil
+for name,size in pairs(gui.font_size) do
+	size = cfg.font.base_size * size
+	gui.fonts[name] = atlas:add( size, cfg.font.file )
+end
 rear.font_stash_end( gui.ctx, gui.fonts.medium )
 
 glfw.set_key_callback(gui.window,
@@ -160,7 +148,7 @@ function draw_font_sizes_window()
 		add_button( 'x-large', 'X-Large')
 		add_button( 'large', 'Large')
 		add_button( 'medium', 'Medium')
-		add_button( 'x-small', 'Small')
+		add_button( 'small', 'Small')
 		add_button( 'x-small', 'X-Small')
 		add_button( 'xx-small', 'XX-Small')
 	end

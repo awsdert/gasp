@@ -22,7 +22,7 @@ int main( int argc, char *argv[] ) {
 			"private_gasp.elf with");
 		goto cleanup;
 	}
-	sprintf(path,"gede --args %s/private_gasp-d.elf", PWD);
+	sprintf(path,"gede --args %s/test-gasp-d.elf", PWD);
 	printf( "%s\n", path );
 	ret = system( path );
 	cleanup:

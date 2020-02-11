@@ -1,6 +1,9 @@
 #include "gasp.h"
 void error_cb( char *from, int code, char const *desc ) {
-	ERRMSG( code, desc );
+	fprintf( stderr, "%s: Error %08X\n"
+		"External Msg: '%s'\n"
+		"Internal Msg: '%s'\n",
+		from, code, strerror(code), desc );
 }
 
 void *lua_allocator( void *ud, void *ptr, size_t size, size_t want ) {
@@ -28,10 +31,16 @@ int main( int argc, char *argv[] ) {
 	proc_handle_t *handle;
 	kvpair_t *args = NULL;
 	char *HOME = NULL, *path = NULL, *PWD = NULL, gasp[] = "gasp",
-		*DISPLAY = NULL, *LUA_PATH = NULL, *LUA_CPATH = NULL;
-	size_t size = 0, leng = BUFSIZ;
+		*LUA_PATH = NULL, *LUA_CPATH = NULL;
+	size_t leng = BUFSIZ
+#if 0
+	, size = 0
+#endif
+	;
 	intptr_t addr = 0;
+#if 0
 	lua_CFunction old_lua_panic_cb;
+#endif
 	lua_State *L = NULL;
 	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != EXIT_SUCCESS ) {
 		ERRMSG( ret, "Couldn't get argument pairs" );
@@ -39,17 +48,12 @@ int main( int argc, char *argv[] ) {
 	}
 	leng += BUFSIZ;
 	args = ARGS.space.block;
-	DISPLAY = getenv("DISPLAY");
 	if ( !(HOME = getenv("HOME")) || !(PWD = getenv("PWD")) ) {
 		ret = errno;
 		ERRMSG( ret, "Couldn't get $(HOME) and/or $(PWD)" );
 		goto cleanup;
 	}
-	size = strlen(HOME) + 32;
-	leng += strlen(PWD) + 4;
-	leng += strlen(HOME) + 4;
-	leng += strlen(DISPLAY) + 4;
-	leng = strlen(PWD) + 7;
+	leng = strlen(PWD) + 20;
 	LUA_PATH = calloc( leng, 1 );
 	LUA_CPATH = calloc( leng, 1 );
 	sprintf(LUA_PATH,"%s/lua/?.lua",PWD);
@@ -61,12 +65,15 @@ int main( int argc, char *argv[] ) {
 		ERRMSG( ret, "Couldn't create lua instance" );
 		goto cleanup;
 	}
-	old_lua_panic_cb = lua_atpanic(L,lua_panic_cb);
+#if 0
+	old_lua_panic_cb =
+#endif
+	lua_atpanic(L,lua_panic_cb);
 	luaL_openlibs(L);
 	/* Just a hack for slipups upstream */
-	luaL_dostring(L,"loadlib = package.loadlib");
+	(void)luaL_dostring(L,"loadlib = package.loadlib");
+	lua_proc_load_glance(L);
 #if 1
-	leng += 10;
 	path = calloc( leng, 1 );
 	sprintf( path, "%s/lua/gasp.lua", PWD );
 	if ( luaL_dofile(L, path ) )

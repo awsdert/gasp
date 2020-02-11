@@ -150,7 +150,7 @@ void proc_handle_shut( proc_handle_t *handle ) {
 
 intptr_t proc_mapped_next(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, proc_mapped_t *mapped, int prot
+	intptr_t addr, proc_mapped_t *mapped, mode_t prot
 )
 {
 	int fd;
@@ -433,7 +433,7 @@ proc_notice_t* proc_locate_name(
 	if ( err ) *err = ret;
 	memset( nodes, 0, sizeof(nodes_t) );
 	
-	for ( notice = proc_glance_open( &ret, &glance, underId )
+	for ( notice = proc_glance_init( &ret, &glance, underId )
 		; notice; notice = proc_notice_next( &ret, &glance )
 	)
 	{
@@ -471,7 +471,7 @@ proc_notice_t* proc_locate_name(
 		(void)memcpy( noticed[i].cmdl.block, text, size );
 	}
 	
-	proc_glance_shut( &glance );
+	proc_glance_term( &glance );
 	if ( i > 0 )
 		return nodes->space.block;
 	if ( ret == EXIT_SUCCESS ) ret = ENOENT;
@@ -486,7 +486,7 @@ void proc_notice_zero( proc_notice_t *notice ) {
 	(void)less_space( NULL, &(notice->cmdl), 0 );
 }
 
-void proc_glance_shut( proc_glance_t *glance ) {
+void proc_glance_term( proc_glance_t *glance ) {
 	if ( !glance ) return;
 	(void)free_nodes( int, NULL, &(glance->idNodes) );
 	proc_notice_zero( &(glance->notice) );
@@ -497,7 +497,8 @@ void proc_notice_puts( proc_notice_t *notice ) {
 	if ( !notice )
 		return;
 	fprintf( stderr, "%s() Process %04X under %04X is named '%s'\n",
-		__func__, notice->entryId, notice->ownerId, notice->name.block );
+		__func__, notice->entryId, notice->ownerId,
+		(char*)(notice->name.block) );
 }
 
 proc_notice_t* proc_notice_info(
@@ -662,14 +663,14 @@ proc_notice_t*
 	
 
 	if ( err && *err != EXIT_SUCCESS ) {
-		proc_glance_shut( glance );
+		proc_glance_term( glance );
 		return NULL;
 	}
 	
 	if ( !(glance->idNodes.count) ) {
 		if ( err ) *err = ENODATA;
 		ERRMSG( ENODATA, "glance->idNodes.count was 0" );
-		proc_glance_shut( glance );
+		proc_glance_term( glance );
 		return NULL;
 	}
 
@@ -691,12 +692,12 @@ proc_notice_t*
 
 	glance->process = glance->idNodes.count;
 	if ( err ) *err = EXIT_SUCCESS;
-	proc_glance_shut( glance );
+	proc_glance_term( glance );
 	return NULL;
 }
 
 proc_notice_t*
-	proc_glance_open( int *err, proc_glance_t *glance, int underId ) {
+	proc_glance_init( int *err, proc_glance_t *glance, int underId ) {
 	int ret = errno = EXIT_SUCCESS;
 	DIR *dir;
 	struct dirent *ent;
@@ -742,7 +743,7 @@ proc_notice_t*
 
 size_t proc__glance_vmem(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size ) {
+	intptr_t addr, void *mem, intptr_t size ) {
 #ifdef _GNU_SOURCE
 	struct iovec internal, external;
 	intptr_t done;
@@ -783,7 +784,7 @@ intptr_t proc__glance_file(
 )
 {
 #ifdef gasp_pread
-	char path[sizeof(int) * CHAR_BIT] = {0};
+	char path[SIZEOF_PROCDIR+5] = {0};
 	intptr_t done = 0;
 	int ret, fd;
 	
@@ -843,7 +844,7 @@ intptr_t proc__glance_seek(
 	intptr_t addr, void *mem, size_t size
 )
 {
-	char path[sizeof(int) * CHAR_BIT] = {0};
+	char path[SIZEOF_PROCDIR+5] = {0};
 	intptr_t done = 0;
 	int ret, fd;
 	
@@ -937,7 +938,7 @@ intptr_t proc_glance_data(
 
 size_t proc__change_vmem(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size ) {
+	intptr_t addr, void *mem, intptr_t size ) {
 #ifdef _GNU_SOURCE
 	struct iovec internal, external;
 	intptr_t done;
@@ -978,7 +979,7 @@ intptr_t proc__change_file(
 )
 {
 #ifdef gasp_pwrite
-	char path[sizeof(int) * CHAR_BIT] = {0};
+	char path[SIZEOF_PROCDIR+5] = {0};
 	intptr_t done = 0;
 	int ret, fd;
 	
@@ -1038,7 +1039,7 @@ intptr_t proc__change_seek(
 	intptr_t addr, void *mem, size_t size
 )
 {
-	char path[sizeof(int) * CHAR_BIT] = {0};
+	char path[SIZEOF_PROCDIR+5] = {0};
 	intptr_t done = 0;
 	int ret, fd;
 	
@@ -1129,6 +1130,49 @@ intptr_t proc_change_data(
 	return done;
 }
 
+void push_global_cfunc(
+	lua_State *L, char const *key, lua_CFunction val
+)
+{
+	lua_pushcfunction(L,val);
+	lua_setglobal(L,key);
+}
+
+void push_global_str( lua_State *L, char const *key, char *val ) {
+	lua_pushstring(L,val);
+	lua_setglobal(L,key);
+}
+
+void push_global_int( lua_State *L, char const *key, int val ) {
+	lua_pushinteger(L,val);
+	lua_setglobal(L,key);
+}
+
+void push_global_num( lua_State *L, char const *key, long double val ) {
+	lua_pushnumber(L,val);
+	lua_setglobal(L,key);
+}
+
+void push_global_bool( lua_State *L, char const *key, bool val ) {
+	lua_pushboolean(L,val);
+	lua_setglobal(L,key);
+}
+
+void push_global_obj( lua_State *L, char const *key ) {
+	lua_newtable(L);
+	lua_setglobal(L,key);
+}
+
+
+void push_branch_cfunc(
+	lua_State *L, char const *key, lua_CFunction val
+)
+{
+	lua_pushstring(L,key);
+	lua_pushcfunction(L,val);
+	lua_settable(L,-3);
+}
+
 void push_branch_str( lua_State *L, char const *key, char *val ) {
 	lua_pushstring(L,key);
 	lua_pushstring(L,val);
@@ -1215,11 +1259,6 @@ bool find_branch_bool( lua_State *L, char const *key, bool *val ) {
 	return valid;
 }
 
-typedef struct lua_proc_func {
-	char const * name;
-	lua_CFunction func;
-} lua_proc_func_t;
-
 #define lua_proc_func(NAME) { #NAME, lua_proc_##NAME }
 
 int lua_panic_cb( lua_State *L ) {
@@ -1234,13 +1273,25 @@ void lua_error_cb( lua_State *L, char const *text ) {
 	lua_panic_cb(L);
 }
 
-int lua_proc_glance_open( lua_State *L ) {
-	
+#define PROC_GLANCE_CLASS "class_proc_glance"
+
+int lua_proc_glance_init( lua_State *L ) {
+	int ret = EXIT_SUCCESS, underId = 0;
+	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
+	luaL_argcheck(L,!!glance,1,"'" PROC_GLANCE_CLASS "' expeted");
+	if ( lua_isinteger(L,2) )
+		underId = lua_tointeger(L,2);
+	proc_glance_init( &ret, glance, underId );
+	lua_pushinteger(L,ret);
+	return 1;
+}
+int lua_proc_glance_term( lua_State *L ) {
+	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
+	luaL_argcheck(L,!!glance,1,"'" PROC_GLANCE_CLASS "' expeted");
+	proc_glance_term( glance );
 	return 0;
 }
-int lua_proc_glance_shut( lua_State *L ) {
-	return 0;
-}
+
 int lua_proc_notice_info( lua_State *L ) {
 	proc_notice_t notice = {0};
 	int ret = EXIT_SUCCESS, pid = -1;
@@ -1260,14 +1311,10 @@ int lua_proc_notice_info( lua_State *L ) {
 	return 1;
 }
 int lua_proc_notice_next( lua_State *L ) {
-	proc_glance_t glance = {0};
-	if ( !lua_istable(L,-1) ) {
-		lua_pushstring(L,"Expect glance table in argument 1");
-		lua_panic_cb(L);
-		return 0;
-	}
-	if ( find_branch_int( L, "underId", &(glance.underId) ) )
-		return 0;
+	int ret = EXIT_SUCCESS;
+	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
+	luaL_argcheck(L,!!glance,1,"'proc_glance_t*' expeted");
+	proc_notice_next( &ret, glance );
 	return 0;
 }
 
@@ -1304,6 +1351,31 @@ int lua_proc_locate_name( lua_State *L ) {
 	return count;
 }
 
-lua_proc_func_t lua_proc_func_list[] = {
-	lua_proc_func(glance_open),
+lua_gasp_func_t lua_class_proc_glance_func_list[] = {
+	lua_proc_func(glance_init),
+	lua_proc_func(notice_next),
+	lua_proc_func(glance_term),
 {NULL}};
+
+int lua_proc_load_glance( lua_State *L ) {
+	proc_glance_t *glance =
+		(proc_glance_t*)lua_newuserdata(L,sizeof(proc_glance_t));
+	//int mt_ref = 0;
+	int i;
+	lua_gasp_func_t *func;
+	if ( glance ) return 1;
+	luaL_newmetatable(L,PROC_GLANCE_CLASS);
+	//mt_ref =
+		lua_setmetatable(L,-2);
+	//lua_getmetatable(L,mt_ref);
+	for ( i = 0; lua_class_proc_glance_func_list[i].name; ++i ) {
+		func = lua_class_proc_glance_func_list + i;
+		push_branch_cfunc(L,func->name,func->addr);
+	}
+	return 1;
+}
+
+int lua_proc_free_glance( lua_State *L ) {
+	lua_proc_glance_term(L);
+	return 0;
+}

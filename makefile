@@ -1,5 +1,5 @@
 USE_MINGW:=
-CC=clang
+CC=cc
 
 HAS_DOS:=$(if $(COMSPEC),1,)
 
@@ -25,24 +25,25 @@ pull=$(info $(shell git -C '$1' pull))
 #see gaming companies find an excuse for exlcuding that
 #audience when they eventually find a way to block this :)
 gasp_sources=space.c nodes.c proc.c arguments.c
-gasp_objects=$(gasp_sources:%=%.o)
-gasp_dbgobjs=$(gasp_sources:%=%-d.o)
-exposed_gasp_objects:=gasp.c.o $(gasp_objects)
-exposed_gasp_dbgobjs:=gasp.c-d.o $(gasp_dbgobjs)
-debugger_gasp_dbgobjs:=debugger_gasp.c-d.o $(gasp_dbgobjs)
-private_gasp_objects:=private_gasp.c.o $(gasp_objects)
-private_gasp_dbgobjs:=private_gasp.c-d.o $(gasp_dbgobjs)
+gasp_objs=$(gasp_sources:%=%.o)
+gasp_d_objs=$(gasp_sources:%=%-d.o)
+init_gasp_objs:=gasp.c.o $(gasp_objs)
+init_gasp_d_objs:=gasp.c-d.o $(gasp_d_objs)
+test_gasp_d_objs:=test_gasp.c-d.o $(gasp_d_objs)
+deep_gasp_objs:=deep_gasp.c.o $(gasp_objs)
+deep_gasp_d_objs:=deep_gasp.c-d.o $(gasp_d_objs)
 gasp_exe:=gasp.$(exe_ext)
-gasp_dbg_exe:=gasp-d.$(exe_ext)
-debugger_gasp_exe:=debugger_$(gasp_dbg_exe)
-private_gasp_exe:=private_$(gasp_exe)
-private_gasp_dbg_exe:=private_$(gasp_dbg_exe)
+gasp_d_exe:=gasp-d.$(exe_ext)
+test_gasp_exe:=test-$(gasp_d_exe)
+deep_gasp_exe:=deep-$(gasp_exe)
+deep_gasp_d_exe:=deep-$(gasp_d_exe)
 PHONY_TARGETS:=makefile default all rebuild clean libs build debug
 PHONY_TARGETS+= run gede
 
 .PHONY: $(PHONY_TARGETS)
 default: run
 
+lua_ver=5.3
 lua_dir=cloned/lua
 moongl_dir=cloned/moongl
 moonglfw_dir=cloned/moonglfw
@@ -62,18 +63,25 @@ $(call pull,$(moongl_dir))
 $(call pull,$(moonglfw_dir))
 $(call pull,$(moonnuklear_dir))
 
-gasp_args=-D HELLO="WORLD"
-bin_flags=-fPIC
-rpath=-L'.' -Wl,-rpath,'.'
-libraries:=-ldl -lm -lpthread -llua
-exe_flags:=$(bin_flags)
-lib_flags:=$(exe_flags) -shared
-inc_flags=-I $(lua_dir)
 win32_defines=_WIN32
 linux_defines=_GNU_SOURCE LINUX LUA_USE_LINUX LUA_USE_READLINE
-defines:=$(if $(IS_LINUX),$(linux_defines),$(win32_defines))
-src_flags=$(bin_flags) -Wall -std=c99 $(defines:%=-D %) -DLUAVER=5.3
-dbg_flags=-ggdb -D _DEBUG
+sys_defines:=$(if $(IS_LINUX),$(linux_defines),$(win32_defines))
+
+src__warning:=-Wall -Wextra -Wpedantic
+src__commmon:=-std=c99
+src__defines:=$(sys_defines:%=-D %) -D LUAVER=$(lua_ver)
+src_combined:=$(src__warning) $(src__commmon) $(src__defines)
+
+ARGS=-D HELLO="WORLD"
+rpath=-L"$1" -Wl,-rpath,"$1"
+libraries:=lua dl m pthread
+LIBS:=$(libraries:%=-l%)
+LFLAGS=-L "$(lua_src_dir)"
+IFLAGS=-I $(if $(IS_WINDOWS),$(lua_dir),/usr/include/lua$(lua_ver))
+BFLAGS:=$(if $(IS_WINDOWS),-fPIC,-fpic)
+CFLAGS=$(BFLAGS) $(IFLAGS) $(src_combined)
+DFLAGS=-ggdb -D _DEBUG
+RPATH:=$(call rpath,.)
 
 all: libs build debug
 rebuild: clean libs build
@@ -106,42 +114,42 @@ clean:
 	rm -f $(moonnuklear_src_dir)/*.so
 
 leaks: build debug
-	valgrind -s ./$(private_gasp_dbg_exe) $(gasp_args)
-	valgrind -s ./$(debugger_gasp_exe) $(gasp_args)
-	valgrind -s ./$(gasp_dbg_exe) $(gasp_args)
-	valgrind -s ./$(private_gasp_exe) $(gasp_args)
-	valgrind -s ./$(gasp_exe) $(gasp_args)
+	valgrind -s ./$(deep_gasp_d_exe) $(ARGS)
+	valgrind -s ./$(test_gasp_exe) $(ARGS)
+	valgrind -s ./$(gasp_d_exe) $(ARGS)
+	valgrind -s ./$(deep_gasp_exe) $(ARGS)
+	valgrind -s ./$(gasp_exe) $(ARGS)
 
 run: build
-	./$(gasp_exe) $(gasp_args)
+	./$(gasp_exe) $(ARGS)
 
 gede: debug
-	gede --args ./$(gasp_dbg_exe) $(gasp_args)
+	gede --args ./$(gasp_d_exe) $(ARGS)
 
-build: $(gasp_exe) $(private_gasp_exe)
+build: $(gasp_exe) $(deep_gasp_exe)
 
-debug: $(gasp_dbg_exe) $(private_gasp_dbg_exe) $(debugger_gasp_exe)
+debug: $(gasp_d_exe) $(deep_gasp_d_exe) $(test_gasp_exe)
 
-$(gasp_exe): $(exposed_gasp_objects)
-	$(CC) $(exe_flags) -o $@ $(exposed_gasp_objects) $(libraries)
+$(gasp_exe): $(init_gasp_objs)
+	$(CC) $(BFLAGS) -o $@ $(init_gasp_objs) $(LIBS)
 
-$(private_gasp_exe): $(private_gasp_objects)
-	$(CC) $(exe_flags) -o $@ $(private_gasp_objects) $(libraries)
+$(deep_gasp_exe): $(deep_gasp_objs)
+	$(CC) $(BFLAGS) -o $@ $(deep_gasp_objs) $(LIBS)
 
-$(gasp_dbg_exe): $(exposed_gasp_dbgobjs)
-	$(CC) $(dbg_flags) $(exe_flags) -o $@ $(exposed_gasp_dbgobjs) $(libraries)
+$(gasp_d_exe): $(init_gasp_d_objs)
+	$(CC) $(DFLAGS) $(BFLAGS) -o $@ $(init_gasp_d_objs) $(LIBS)
 
-$(private_gasp_dbg_exe): $(private_gasp_dbgobjs)
-	$(CC) $(dbg_flags) $(exe_flags) -o $@ $(private_gasp_dbgobjs) $(libraries)
+$(deep_gasp_d_exe): $(deep_gasp_d_objs)
+	$(CC) $(DFLAGS) $(BFLAGS) -o $@ $(deep_gasp_d_objs) $(LIBS)
 
-$(debugger_gasp_exe): $(debugger_gasp_dbgobjs)
-	$(CC) $(dbg_flags) $(exe_flags) -o $@ $(debugger_gasp_dbgobjs) $(libraries)
+$(test_gasp_exe): $(test_gasp_d_objs)
+	$(CC) $(DFLAGS) $(BFLAGS) -o $@ $(test_gasp_d_objs) $(LIBS)
 
 %.o: %
-	$(CC) $(flags) $(inc_flags) $(src_flags) -o $@ -c $<
+	$(CC) $(CFLAGS) -o $@ -c $< $(LIBS)
 
 %-d.o: %
-	$(CC) $(dbg_flags) $(inc_flags) $(src_flags) -o $@ -c $<
+	$(CC) $(DFLAGS) $(CFLAGS) -o $@ -c $< $(LIBS)
 
 %.so.o:
 	@echo Why does the rule '$@' exist!?

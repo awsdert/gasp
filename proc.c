@@ -1357,6 +1357,42 @@ lua_gasp_func_t lua_class_proc_glance_func_list[] = {
 	lua_proc_func(glance_term),
 {NULL}};
 
+int lua_proc_func_index( lua_State *L ) {
+	char const *name = NULL;
+	node_t num = 0, tmp;
+	int i, len = 0;
+	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
+	lua_gasp_func_t *func;
+	if ( lua_isinteger(L,2) )
+		i = lua_tointeger(L,2);
+	else if ( lua_isstring(L,2) ) {
+		name = lua_tostring(L,2);
+		len = strlen(name);
+		if ( sscanf( name, "%d", &i ) < len ) {
+			for ( num = 0;
+				lua_class_proc_glance_func_list[num].name;
+				++num
+			)
+			{
+				func = lua_class_proc_glance_func_list + num;
+				if ( strcmp(name,func->name) == 0 )
+					return func->addr(L);
+			}
+			return 0;
+		}
+	}
+	else return 0;
+	if ( i < 1 ) return 0;
+	num = i - 1;
+	if ( num >= glance->idNodes.count )
+		return 0;
+	tmp = glance->process;
+	glance->process = num;
+	i = lua_proc_notice_next(L);
+	glance->process = tmp;
+	return i;
+}
+
 int lua_proc_load_glance( lua_State *L ) {
 	proc_glance_t *glance =
 		(proc_glance_t*)lua_newuserdata(L,sizeof(proc_glance_t));
@@ -1368,6 +1404,7 @@ int lua_proc_load_glance( lua_State *L ) {
 	//mt_ref =
 		lua_setmetatable(L,-2);
 	//lua_getmetatable(L,mt_ref);
+	push_branch_cfunc(L,"__index",lua_proc_func_index);
 	for ( i = 0; lua_class_proc_glance_func_list[i].name; ++i ) {
 		func = lua_class_proc_glance_func_list + i;
 		push_branch_cfunc(L,func->name,func->addr);

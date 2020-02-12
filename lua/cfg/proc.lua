@@ -1,7 +1,7 @@
 return function(gui,ctx,prv)
 	local ok, selected
 	if nk.tree_push( ctx, nk.TREE_NODE,
-		"Noticed Processes", false, gui.idc ) then
+		"Noticed Processes", "no", gui.idc ) then
 		gui.idc = gui.idc + 1
 		local glance = class_proc_glance()
 		if type(glance) == "userdata" then
@@ -9,7 +9,8 @@ return function(gui,ctx,prv)
 			while notice do
 				ok, selected = tree_element_push(
 					ctx, nk.TREE_NODE,
-					notice.name, false, gui.idc)
+					"" .. notice.id .. notice.name,
+					"0", gui.idc)
 				if ok then
 					gui.idc = gui.idc + 1
 					notice = glance:next()

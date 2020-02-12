@@ -9,6 +9,9 @@ nk = require("moonnuklear")
 rear = require("moonnuklear.glbackend")
 
 GUI = {
+	--[[ ID Counter, since nuklear insists on unique IDs
+	Once used increment by 1 ready for next usage]]
+	idc = 0,
 	which = "main",
 	draw = {},
 	fonts = {}
@@ -79,8 +82,15 @@ GUI.draw["main"] = function(gui,ctx)
 		 -- ... event handling ...
 		 gui.which = "cfg-font"
 	end
+	text = "Hook Process"
+	nk.layout_row_static( ctx,
+		pad_height(font,text), pad_width(font,text), 1)
+	if nk.button(ctx, nil, text) then
+		 -- ... event handling ...
+		 gui.which = "cfg-proc"
+	end
 	-- Slider Example with Custom width
-	text = "Volulme:"
+	text = "Volume:"
 	nk.layout_row_begin(ctx, 'static',
 		pad_height(font,text), 2)
 	nk.layout_row_push(ctx, pad_width(font,text))
@@ -91,6 +101,7 @@ GUI.draw["main"] = function(gui,ctx)
 	return gui
 end
 GUI.draw["cfg-font"] = require("cfg.font")
+GUI.draw["cfg-proc"] = require("cfg.proc")
 local function draw_all(gui,ctx)
 	local push_font = (cfg.font.use ~= "default")
 	if push_font == true then

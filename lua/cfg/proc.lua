@@ -41,15 +41,14 @@ return function(gui,ctx,prv)
 			gui.idc = gui.idc + 1
 			nk.layout_row_dynamic(ctx, pad_height(font,text), 1)
 			for i,notice in pairs(glance) do
-				print("type(" .. i .. ") = " .. type(notice))
 				text = "" .. notice.entryId .. " " .. notice.name
 				gui.selected[gui.idc] = nk.selectable(
 					ctx, nil, text, nk.TEXT_LEFT,
 					(gui.selected[gui.idc] or false) )
 				gui.idc = gui.idc + 1
 			end
+			nk.tree_pop(ctx)
 		end
-		nk.tree_pop(ctx)
 	end
 	nk.layout_row_dynamic(ctx, pad_height(font,text), 1 )
 	if nk.button(ctx, nil, "Done") then

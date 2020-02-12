@@ -76,15 +76,13 @@ GUI.draw["main"] = function(gui,ctx)
 	local font = get_font(gui)
 	local text
 	text = "Change Font"
-	nk.layout_row_static( ctx,
-		pad_height(font,text), pad_width(font,text), 1)
+	nk.layout_row_dynamic( ctx,
+		pad_height(font,text), 2)
 	if nk.button(ctx, nil, text) then
 		 -- ... event handling ...
 		 gui.which = "cfg-font"
 	end
 	text = "Hook Process"
-	nk.layout_row_static( ctx,
-		pad_height(font,text), pad_width(font,text), 1)
 	if nk.button(ctx, nil, text) then
 		 -- ... event handling ...
 		 gui.which = "cfg-proc"
@@ -130,9 +128,11 @@ local function draw_all(gui,ctx)
 	collectgarbage()
 	return gui
 end
+GUI.selected = {}
 while not glfw.window_should_close(GUI.window) do
 	glfw.wait_events_timeout(1/cfg.fps)
 	rear.new_frame()
+	GUI.idc = 0
 	GUI = draw_all(GUI,GUI.ctx)
 end
 rear.shutdown()

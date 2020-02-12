@@ -72,7 +72,7 @@ int main( int argc, char *argv[] ) {
 	luaL_openlibs(L);
 	/* Just a hack for slipups upstream */
 	(void)luaL_dostring(L,"loadlib = package.loadlib");
-	lua_proc_load_glance(L);
+	lua_proc_create_class(L);
 #if 1
 	path = calloc( leng, 1 );
 	sprintf( path, "%s/lua/gasp.lua", PWD );

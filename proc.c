@@ -1259,8 +1259,6 @@ bool find_branch_bool( lua_State *L, char const *key, bool *val ) {
 	return valid;
 }
 
-#define lua_proc_func(NAME) { #NAME, lua_proc_##NAME }
-
 int lua_panic_cb( lua_State *L ) {
 	puts("Error: Lua traceback...");
 	luaL_traceback(L,L,"[error]",-1);
@@ -1275,47 +1273,40 @@ void lua_error_cb( lua_State *L, char const *text ) {
 
 #define PROC_GLANCE_CLASS "class_proc_glance"
 
-int lua_proc_glance_init( lua_State *L ) {
-	int ret = EXIT_SUCCESS, underId = 0;
-	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
-	luaL_argcheck(L,!!glance,1,"'" PROC_GLANCE_CLASS "' expeted");
-	if ( lua_isinteger(L,2) )
-		underId = lua_tointeger(L,2);
-	proc_glance_init( &ret, glance, underId );
-	lua_pushinteger(L,ret);
+int lua_proc_notice_info( lua_State *L, proc_notice_t *notice )
+{
+	if ( !notice )
+		return 0;
+	lua_newtable( L );
+	push_branch_bool( L, "self", notice->self );
+	push_branch_int( L, "entryId", notice->entryId );
+	push_branch_int( L, "ownerId", notice->ownerId );
+	push_branch_str( L, "name", (char*)(notice->name.block) );
+	push_branch_str( L, "cmdl", (char*)(notice->cmdl.block) );
 	return 1;
 }
+
+int lua_proc_glance_init( lua_State *L ) {
+	int underId = 0;
+	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
+	proc_notice_t *notice;
+	if ( lua_isinteger(L,2) )
+		underId = lua_tointeger(L,2);
+	notice = proc_glance_init( NULL, glance, underId );
+	return lua_proc_notice_info( L, notice );
+}
+
 int lua_proc_glance_term( lua_State *L ) {
 	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
-	luaL_argcheck(L,!!glance,1,"'" PROC_GLANCE_CLASS "' expeted");
 	proc_glance_term( glance );
 	return 0;
 }
 
-int lua_proc_notice_info( lua_State *L ) {
-	proc_notice_t notice = {0};
-	int ret = EXIT_SUCCESS, pid = -1;
-	if ( lua_isinteger(L,-1) || lua_isnumber(L,-1) )
-		pid = lua_tointeger(L,-1);
-	if ( !proc_notice_info( &ret, pid, &notice ) ) {
-		proc_notice_zero( &notice );
-		return 0;
-	}
-	lua_newtable( L );
-	push_branch_bool( L, "self", notice.self );
-	push_branch_int( L, "entryId", notice.entryId );
-	push_branch_int( L, "ownerId", notice.ownerId );
-	push_branch_str( L, "name", (char*)(notice.name.block) );
-	push_branch_str( L, "cmdl", (char*)(notice.cmdl.block) );
-	proc_notice_zero( &notice );
-	return 1;
-}
 int lua_proc_notice_next( lua_State *L ) {
 	int ret = EXIT_SUCCESS;
 	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
-	luaL_argcheck(L,!!glance,1,"'proc_glance_t*' expeted");
-	proc_notice_next( &ret, glance );
-	return 0;
+	proc_notice_t *notice = proc_notice_next( &ret, glance );
+	return lua_proc_notice_info( L, notice );
 }
 
 int lua_proc_locate_name( lua_State *L ) {
@@ -1350,21 +1341,36 @@ int lua_proc_locate_name( lua_State *L ) {
 	free_nodes( proc_notice_t, &ret, &nodes );
 	return count;
 }
+int lua_proc_glance_text( lua_State *L ) {
+	lua_pushstring( L, "GASP_PROC_GLANCE_CLASS" );
+	return 1;
+}
+int lua_proc_glance_grab( lua_State *L ) {
+	proc_glance_t *glance =
+		(proc_glance_t*)lua_newuserdata(L,sizeof(proc_glance_t));
+	if ( !glance ) return 0;
+	luaL_setmetatable(L,PROC_GLANCE_CLASS);
+	return 1;
+}
 
-lua_gasp_func_t lua_class_proc_glance_func_list[] = {
-	lua_proc_func(glance_init),
-	lua_proc_func(notice_next),
-	lua_proc_func(glance_term),
+luaL_Reg lua_class_proc_glance_func_list[] = {
+	{ "new", lua_proc_glance_grab },
+	{ "init", lua_proc_glance_init },
+	{ "next", lua_proc_notice_next },
+	{ "term", lua_proc_glance_term },
+	{ "tostring", lua_proc_glance_text },
 {NULL}};
 
-int lua_proc_func_index( lua_State *L ) {
+int lua_proc_glance_node( lua_State *L ) {
 	char const *name = NULL;
 	node_t num = 0, tmp;
 	int i, len = 0;
 	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
-	lua_gasp_func_t *func;
+	luaL_Reg *reg;
 	if ( lua_isinteger(L,2) )
 		i = lua_tointeger(L,2);
+	else if ( lua_isnumber(L,2) )
+		i = floor( lua_tonumber(L,2) );
 	else if ( lua_isstring(L,2) ) {
 		name = lua_tostring(L,2);
 		len = strlen(name);
@@ -1374,15 +1380,21 @@ int lua_proc_func_index( lua_State *L ) {
 				++num
 			)
 			{
-				func = lua_class_proc_glance_func_list + num;
-				if ( strcmp(name,func->name) == 0 )
-					return func->addr(L);
+				reg = lua_class_proc_glance_func_list + num;
+				if ( strcmp(name,reg->name) == 0 )
+					return reg->func(L);
 			}
 			return 0;
 		}
 	}
 	else return 0;
-	if ( i < 1 ) return 0;
+	if ( i < 1 ) {
+		if ( i == 0 ) {
+			lua_pushinteger( L, glance->idNodes.count );
+			return 1;
+		}
+		return 0;
+	}
 	num = i - 1;
 	if ( num >= glance->idNodes.count )
 		return 0;
@@ -1393,26 +1405,45 @@ int lua_proc_func_index( lua_State *L ) {
 	return i;
 }
 
-int lua_proc_load_glance( lua_State *L ) {
-	proc_glance_t *glance =
-		(proc_glance_t*)lua_newuserdata(L,sizeof(proc_glance_t));
-	//int mt_ref = 0;
-	int i;
-	lua_gasp_func_t *func;
-	if ( glance ) return 1;
-	luaL_newmetatable(L,PROC_GLANCE_CLASS);
-	//mt_ref =
-		lua_setmetatable(L,-2);
-	//lua_getmetatable(L,mt_ref);
-	push_branch_cfunc(L,"__index",lua_proc_func_index);
-	for ( i = 0; lua_class_proc_glance_func_list[i].name; ++i ) {
-		func = lua_class_proc_glance_func_list + i;
-		push_branch_cfunc(L,func->name,func->addr);
-	}
-	return 1;
+int lua_proc_glance_make( lua_State *L ) {
+	(void)L;
+	return 0;
 }
 
-int lua_proc_free_glance( lua_State *L ) {
+int lua_proc_glance_free( lua_State *L ) {
 	lua_proc_glance_term(L);
 	return 0;
+}
+
+luaL_Reg lua_class_proc_glance_meta_list[] = {
+	{ "__gc", lua_proc_glance_free },
+	{ "__index",lua_proc_glance_node },
+	{ "__newindex", lua_proc_glance_make },
+{NULL,NULL}};
+
+void lua_proc_create_class( lua_State *L ) {
+	int lib_id, meta_id;
+
+	/* newclass = {} */
+	lua_createtable(L, 0, 0);
+	lib_id = lua_gettop(L);
+	
+	/* metatable = {} */
+	luaL_newmetatable(L, PROC_GLANCE_CLASS);
+	meta_id = lua_gettop(L);
+	luaL_setfuncs(L, lua_class_proc_glance_meta_list, 0);
+	
+	/* metatable.__index = _methods */
+	luaL_newlib( L, lua_class_proc_glance_func_list );
+	lua_setfield( L, meta_id, "__index" );  
+
+	/* metatable.__metatable = _meta */
+	luaL_newlib( L, lua_class_proc_glance_meta_list );
+	lua_setfield( L, meta_id, "__metatable");
+
+	/* class.__metatable = metatable */
+	lua_setmetatable( L, lib_id );
+
+	/* _G["Foo"] = newclass */
+	lua_setglobal(L, PROC_GLANCE_CLASS );
 }

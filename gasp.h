@@ -22,6 +22,7 @@
 #include <dirent.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
@@ -301,11 +302,7 @@ intptr_t proc_change_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *src, size_t size );
 
-typedef struct lua_gasp_func {
-	char const * name;
-	lua_CFunction addr;
-} lua_gasp_func_t;
-
+void lua_proc_create_class( lua_State *L );
 int lua_panic_cb( lua_State *L );
 int lua_proc_load_glance( lua_State *L );
 int lua_proc_free_glance( lua_State *L );

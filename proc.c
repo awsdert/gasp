@@ -1314,32 +1314,33 @@ int lua_proc_locate_name( lua_State *L ) {
 	char const *name;
 	nodes_t nodes = {0};
 	proc_notice_t *notice;
-	node_t i, count = 0;
+	node_t i;
 	
-	if ( lua_isinteger(L,-1) || lua_isnumber(L,-1) )
-		underId = lua_tonumber(L,-1);
+	if ( lua_isinteger(L,2) || lua_isnumber(L,2) )
+		underId = lua_tonumber(L,2);
 		
-	if ( !lua_isstring(L,-1) ) {
+	if ( !lua_isstring(L,1) ) {
 		lua_error_cb( L, "Invalid name" );
 		return 0;
 	}
 	
-	name = lua_tostring(L,-1);
+	name = lua_tostring(L,1);
 	notice = proc_locate_name( &ret, name, &nodes, underId );
-	
-	if ( nodes.count == 1 ) {
+	lua_newtable( L );
+	for ( i = 0; i < nodes.count; ++i ) {
+		lua_pushinteger(L,i+1);
 		lua_newtable( L );
 		push_branch_bool( L, "self", notice->self );
 		push_branch_int( L, "entryId", notice->entryId );
 		push_branch_int( L, "ownerId", notice->ownerId );
 		push_branch_str( L, "name", (char*)(notice->name.block) );
 		push_branch_str( L, "cmdl", (char*)(notice->cmdl.block) );
-		count = 1;
+		lua_settable(L,-3);
+		proc_notice_zero( notice );
+		++notice;
 	}
-	for ( i = 0; i < nodes.count; ++i )
-		proc_notice_zero( notice + i );
 	free_nodes( proc_notice_t, &ret, &nodes );
-	return count;
+	return 1;
 }
 int lua_proc_glance_text( lua_State *L ) {
 	lua_pushstring( L, "GASP_PROC_GLANCE_CLASS" );

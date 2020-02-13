@@ -187,11 +187,62 @@ int lua_proc_handle_term( lua_State *L ) {
 	*handle = NULL;
 	return 0;
 }
-
-int lua_proc_aobscan( lua_State *L ) {
-	char path[32] = {0};
+int lua_proc_glance_data( lua_State *L ) {
 	proc_handle_t **handle = (proc_handle_t**)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	intptr_t addr = luaL_checkinteger(L,2);
+	intptr_t size = luaL_checkinteger(L,3);
+	uchar * array;
+	if ( size < 1 ) {
+		lua_newtable(L);
+		return 1;
+	}
+	array = calloc( size, 1 );
+	size = proc_glance_data( NULL, *handle, addr, array, size );
+	if ( size < 1 ) {
+		free(array);
+		lua_newtable(L);
+		return 1;
+	}
+	luaL_createtable( L, size, 0 );
+	for ( addr = 0; addr < size; ++addr ) {
+		lua_pushinteger(L,addr+1);
+		lua_pushinteger(L,array[addr]);
+		lua_settable(L,-3);
+	}
+	free(array);
+	return 1;
+}
+int lua_proc_change_data( lua_State *L ) {
+	proc_handle_t **handle = (proc_handle_t**)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	intptr_t addr = luaL_checkinteger(L,2);
+	intptr_t size = 0;
+	uchar * array;
+	if ( !lua_istable(L,3) ) {
+		lua_pushinteger(L,0);
+		return 1;
+	}
+	size = lua_len(L,3);
+	if ( size < 1 ) {
+		lua_pushinteger(L,0);
+		return 1;
+	}
+	array = calloc( size, 1 );
+	size = proc_change_data( NULL, *handle, addr, array, size );
+	free(array);
+	if ( size < 1 ) {
+		lua_pushinteger(L,0);
+		return 1;
+	}
+	lua_pushinteger(L,0);
+	return 1;
+}
+
+int lua_proc_aobscan( lua_State *L ) {
+	proc_handle_t **handle = (proc_handle_t**)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	char path[32] = {0};
 	int fd = -1, c;
 	char const *array_str = luaL_checkstring( L, 2 );
 	node_t bytes = 0, i = 0, leng = strlen(array_str), count;
@@ -265,6 +316,8 @@ int lua_proc_handle_grab( lua_State *L ) {
 luaL_Reg lua_class_proc_handle_func_list[] = {
 	{ "new", lua_proc_handle_grab },
 	{ "init", lua_proc_handle_init },
+	{ "read", lua_proc_glance_data },
+	{ "write", lua_proc_change_data },
 	{ "aobscan", lua_proc_aobscan },
 	{ "term", lua_proc_handle_term },
 	{ "tostring", lua_proc_handle_text },

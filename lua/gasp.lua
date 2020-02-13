@@ -76,8 +76,7 @@ GUI.draw["main"] = function(gui,ctx)
 	local font = get_font(gui)
 	local text
 	text = "Change Font"
-	nk.layout_row_dynamic( ctx,
-		pad_height(font,text), 2)
+	nk.layout_row_dynamic( ctx, pad_height(font,text), 2)
 	if nk.button(ctx, nil, text) then
 		 -- ... event handling ...
 		 gui.which = "cfg-font"
@@ -89,8 +88,7 @@ GUI.draw["main"] = function(gui,ctx)
 	end
 	-- Slider Example with Custom width
 	text = "Volume:"
-	nk.layout_row_begin(ctx, 'static',
-		pad_height(font,text), 2)
+	nk.layout_row_begin(ctx, 'static', pad_height(font,text), 2)
 	nk.layout_row_push(ctx, pad_width(font,text))
 	nk.label(gui.ctx,text, nk.TEXT_LEFT)
 	nk.layout_row_push(ctx, pad_width(font,text))

@@ -1277,7 +1277,7 @@ int lua_proc_notice_info( lua_State *L, proc_notice_t *notice )
 {
 	if ( !notice )
 		return 0;
-	lua_newtable( L );
+	lua_createtable( L, 0, 5 );
 	push_branch_bool( L, "self", notice->self );
 	push_branch_int( L, "entryId", notice->entryId );
 	push_branch_int( L, "ownerId", notice->ownerId );
@@ -1287,11 +1287,9 @@ int lua_proc_notice_info( lua_State *L, proc_notice_t *notice )
 }
 
 int lua_proc_glance_init( lua_State *L ) {
-	int underId = 0;
+	int underId = luaL_optinteger(L,2,0);
 	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
 	proc_notice_t *notice;
-	if ( lua_isinteger(L,2) )
-		underId = lua_tointeger(L,2);
 	notice = proc_glance_init( NULL, glance, underId );
 	return lua_proc_notice_info( L, notice );
 }
@@ -1310,26 +1308,17 @@ int lua_proc_notice_next( lua_State *L ) {
 }
 
 int lua_proc_locate_name( lua_State *L ) {
-	int ret = EXIT_SUCCESS, underId = 0;
-	char const *name;
+	int ret = EXIT_SUCCESS, underId = luaL_optinteger(L,2,0);
+	char const *name = luaL_checkstring(L,1);
 	nodes_t nodes = {0};
 	proc_notice_t *notice;
 	node_t i;
 	
-	if ( lua_isinteger(L,2) || lua_isnumber(L,2) )
-		underId = lua_tonumber(L,2);
-		
-	if ( !lua_isstring(L,1) ) {
-		lua_error_cb( L, "Invalid name" );
-		return 0;
-	}
-	
-	name = lua_tostring(L,1);
 	notice = proc_locate_name( &ret, name, &nodes, underId );
-	lua_newtable( L );
+	lua_createtable( L, nodes.count, 0 );
 	for ( i = 0; i < nodes.count; ++i ) {
 		lua_pushinteger(L,i+1);
-		lua_newtable( L );
+		lua_createtable( L, 0, 5 );
 		push_branch_bool( L, "self", notice->self );
 		push_branch_int( L, "entryId", notice->entryId );
 		push_branch_int( L, "ownerId", notice->ownerId );

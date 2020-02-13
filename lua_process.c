@@ -204,7 +204,7 @@ int lua_proc_glance_data( lua_State *L ) {
 		lua_newtable(L);
 		return 1;
 	}
-	luaL_createtable( L, size, 0 );
+	lua_createtable( L, size, 0 );
 	for ( addr = 0; addr < size; ++addr ) {
 		lua_pushinteger(L,addr+1);
 		lua_pushinteger(L,array[addr]);
@@ -217,18 +217,25 @@ int lua_proc_change_data( lua_State *L ) {
 	proc_handle_t **handle = (proc_handle_t**)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	intptr_t addr = luaL_checkinteger(L,2);
-	intptr_t size = 0;
+	intptr_t size, i;
 	uchar * array;
 	if ( !lua_istable(L,3) ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
-	size = lua_len(L,3);
+	lua_len(L,3);
+	size = lua_tointeger(L,-1);
 	if ( size < 1 ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
 	array = calloc( size, 1 );
+	for ( i = 0; i < size; ++i ) {
+		lua_pushinteger(L,i+1);
+		lua_gettable(L,3);
+		array[i] = luaL_checkinteger(L,-1);
+		lua_pop(L,1);
+	}
 	size = proc_change_data( NULL, *handle, addr, array, size );
 	free(array);
 	if ( size < 1 ) {

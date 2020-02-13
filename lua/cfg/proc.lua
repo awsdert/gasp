@@ -1,23 +1,21 @@
-local function add_tree_node(gui,ctx,text,isparent)
+local function add_tree_node(ctx,text,selected,id,isparent)
 	local ok
-	local id = (gui.idc or 0)
-	gui.idc = id + 1
 	if isparent == true then
-		gui.selected[id] =
+		selected =
 			nk.selectable(
 			ctx, nil, text, nk.TEXT_LEFT,
-			(gui.selected[id] or false) )
-		return true, gui
+			(selected or false) )
+		return true, selected
 	end
-	ok, gui.selected[id] =
+	ok, selected =
 		nk.tree_element_push(
 		ctx, nk.TREE_NODE, text, nk.MAXIMIZED,
-		(gui.selected[id] or false), id )
+		(selected or false), id )
 	if ok then
 		nk.tree_element_pop(ctx)
-		return true, gui
+		return true, selected
 	end
-	return false, gui
+	return false, selected
 end
 local function get_all_apps(underId)
 	if type(underId) ~= "integer" or underId < 0 then
@@ -41,6 +39,9 @@ local function list_all_apps(gui,ctx,prv)
 	local ok, selected
 	local text = "Noticed Processes"
 	local glance = class_proc_glance.new()
+	if type(gui.glance) ~= "table" then
+		gui.glance = {}
+	end
 	if glance then
 		local notice = glance:init()
 		if notice then
@@ -50,7 +51,10 @@ local function list_all_apps(gui,ctx,prv)
 				gui.idc = gui.idc + 1
 				while notice do
 					text = "" .. notice.entryId  .. " " .. notice.name
-					ok, gui = add_tree_node(gui,ctx,text)
+					ok, selected = add_tree_node(
+						ctx,text,gui.idc,gui.glance[notice.entryId])
+					gui.idc = gui.idc + 1
+					gui.glance[notice.entryId] = selected
 					notice = glance:next()
 				end
 			end
@@ -65,8 +69,11 @@ local function list_all_apps(gui,ctx,prv)
 	return gui
 end
 return function(gui,ctx,prv)
-	local font = get_font(gui), ok, glance, id, i, v
+	local font = get_font(gui), ok, glance, id, i, v, selected
 	local text = "Noticed Processes"
+	if type(gui.glance) ~= "table" then
+		gui.glance = {}
+	end
 	nk.layout_row_dynamic(ctx, pad_height(font,text), 2)
 	nk.label( ctx, "Process", nk.TEXT_LEFT )
 	cfg.find_process = nk.edit_string(
@@ -77,34 +84,38 @@ return function(gui,ctx,prv)
 	else
 		glance = get_all_apps()
 	end
+	gui.idc = gui.idc or 0
 	if glance and #glance > 0 then
 		nk.layout_row_dynamic(ctx, pad_height(font,text), 1)
 		if nk.tree_push( ctx, nk.TREE_NODE,
 		text, nk.MAXIMIZED, gui.idc ) then
 			i = 1
-			gui.process = {}
 			gui.idc = gui.idc + 1
 			for i,notice in pairs(glance) do
 				id = gui.idc
 				text = "" .. notice.entryId .. " " .. notice.name
-				ok, gui = add_tree_node(gui,ctx,text,false)
+				if gui.noticed then
+					selected = (gui.noticed.entryId == notice.entryId)
+				else selected = false end
+				ok, selected = add_tree_node(ctx,text,selected,gui.idc)
+				gui.idc = gui.idc + 1
 				if ok then
-					if gui.selected[id] then
-						gui.process[i] = notice
-						i = i + 1
+					if selected then
+						gui.noticed = notice
 					end
 				else break end
 			end
 			nk.tree_pop(ctx)
-		else gui.process = nil end
-	else gui.process = nil end
+		end
+	end
 	if nk.button(ctx, nil, "Done") then
-		 gui.which = prv
-		 gui.hooks = {}
-		 for i,v in pairs(gui.process) do
-			-- Hooking is not yet supported via lua
-			gui.hooks[i] = nil
-		 end
+		gui.which = prv
+		if gui.noticed then
+			gui.handle = class_proc_handle.new()
+			if not gui.handle:init( gui.noticed.entryId ) then
+				gui.handle = nil
+			end
+		end
 	end
 	return gui
 end

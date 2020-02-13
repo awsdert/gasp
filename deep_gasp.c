@@ -31,7 +31,7 @@ int main( int argc, char *argv[] ) {
 	proc_handle_t *handle;
 	kvpair_t *args = NULL;
 	char *HOME = NULL, *path = NULL, *PWD = NULL, gasp[] = "gasp",
-		*LUA_PATH = NULL, *LUA_CPATH = NULL;
+		*LUA_PATH = NULL, *LUA_CPATH = NULL, *GASP_PATH = NULL;
 	size_t leng = BUFSIZ
 #if 0
 	, size = 0
@@ -53,11 +53,15 @@ int main( int argc, char *argv[] ) {
 		ERRMSG( ret, "Couldn't get $(HOME) and/or $(PWD)" );
 		goto cleanup;
 	}
-	leng = strlen(PWD) + 20;
+	leng = strlen(HOME) + 100;
+	GASP_PATH = calloc( leng, 1 );
+	sprintf( GASP_PATH, "%s/gasp", HOME );
+	leng += strlen(PWD) + 20;
 	LUA_PATH = calloc( leng, 1 );
 	LUA_CPATH = calloc( leng, 1 );
-	sprintf(LUA_PATH,"%s/lua/?.lua",PWD);
+	sprintf(LUA_PATH,"%s/lua/?.lua;%s/?.lua",PWD,GASP_PATH);
 	sprintf(LUA_CPATH,"%s/?.so",PWD);
+	setenv("GASP_PATH",GASP_PATH,0);
 	setenv("LUA_PATH",LUA_PATH,0);
 	setenv("LUA_CPATH",LUA_CPATH,0);
 	if ( !(L = luaL_newstate()) ) {

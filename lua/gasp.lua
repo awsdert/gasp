@@ -64,6 +64,39 @@ end)
 collectgarbage()
 collectgarbage('stop')
 
+-- Copy pasted exists(), isdir() and scandir() from online
+
+--- Check if a file or directory exists in this path
+function exists(file)
+   local ok, err, code = os.rename(file, file)
+   if not ok then
+      if code == 13 then
+         -- Permission denied, but it exists
+         return true
+      end
+   end
+   return ok, err
+end
+
+--- Check if a directory exists in this path
+function isdir(path)
+   -- "/" works on both Unix and Windows
+   return exists(path.."/")
+end
+
+function scandir(path)
+    local i = 0
+    local t = {}
+    local d = isdir( path )
+    if not d or d == false then return end
+    d = io.popen('dir "'.. path ..'" /b')
+    for filename in d:lines() do
+        i = i + 1
+        t[i] = filename
+    end
+    return t
+end
+
 function pad_width(font,text)
 	return math.ceil((font:width(font:height(),text)) * 1.2)
 end
@@ -74,7 +107,7 @@ end
 GUI.which = "main"
 GUI.draw["main"] = function(gui,ctx)
 	local font = get_font(gui)
-	local text
+	local text, file, dir
 	text = "Change Font"
 	nk.layout_row_dynamic( ctx, pad_height(font,text), 2)
 	if nk.button(ctx, nil, text) then
@@ -90,10 +123,61 @@ GUI.draw["main"] = function(gui,ctx)
 	text = "Volume:"
 	nk.layout_row_begin(ctx, 'static', pad_height(font,text), 2)
 	nk.layout_row_push(ctx, pad_width(font,text))
-	nk.label(gui.ctx,text, nk.TEXT_LEFT)
+	nk.label(ctx,text, nk.TEXT_LEFT)
 	nk.layout_row_push(ctx, pad_width(font,text))
 	cfg.volume = nk.slider(ctx, 0, cfg.volume, 1.0, 0.1)
 	nk.layout_row_end(ctx)
+	if gui.noticed then
+		text = "Hooked:"
+		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
+		nk.label( ctx, text, nk.TEXT_LEFT )
+		if gui.handle then text = "true" else text = "false" end
+		nk.label( ctx, text, nk.TEXT_LEFT )
+		text = "Selected:"
+		nk.layout_row_dynamic(ctx,pad_height(font,text),1)
+		nk.label( ctx, text, nk.TEXT_LEFT )
+		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
+		for i,v in pairs(gui.noticed) do
+			nk.label( ctx, i .. ":", nk.TEXT_LEFT )
+			if type(v) == "boolean" then
+				if v == true then text = "true"
+				else text = "false" end
+			elseif not v then text = "(nil)"
+			else text = "" .. v end
+			nk.label( ctx, text, nk.TEXT_LEFT )
+		end
+		text = os.getenv("PWD") or os.getenv("CWD")
+		dir = scandir( text .. "/cheats" )
+		if not dir then
+			text = os.getenv("GASP_PATH")
+			dir = isdir(text)
+			if not dir or dir == false then
+				io.popen('mkdir "' .. text .. '"')
+			end
+			text = text .. "/cheats"
+			dir = scandir(text)
+			if not dir then
+				io.popen('mkdir "' .. text .. '"')
+				dir = {}
+			end
+		end
+		if dir and #dir > 0 then
+			for i,v in pairs(dir) do
+				if gui.cheatfile then
+					i = (gui.cheatfile == v)
+				else
+					i = false
+				end
+				i = nk.selectable( ctx, nil, v, nk.TEXT_LEFT, i )
+				if i == true then
+					gui.cheatfile = v
+				end
+			end
+		end
+		if gui.cheatfile then
+			gui.cheat = dofile("cheat." .. gui.cheatfile)
+		end
+	end
 	return gui
 end
 GUI.draw["cfg-font"] = require("cfg.font")

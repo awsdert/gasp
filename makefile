@@ -25,6 +25,7 @@ pull=$(info $(shell git -C '$1' pull))
 #see gaming companies find an excuse for exlcuding that
 #audience when they eventually find a way to block this :)
 gasp_sources=space.c nodes.c proc.c arguments.c
+gasp_sources+= lua_common.c lua_process.c
 gasp_objs=$(gasp_sources:%=%.o)
 gasp_d_objs=$(gasp_sources:%=%-d.o)
 init_gasp_objs:=gasp.c.o $(gasp_objs)

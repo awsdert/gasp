@@ -302,7 +302,7 @@ intptr_t proc_change_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *src, size_t size );
 
-void lua_proc_create_class( lua_State *L );
+void lua_proc_create_classes( lua_State *L );
 int lua_proc_locate_name( lua_State *L );
 int lua_panic_cb( lua_State *L );
 int lua_proc_load_glance( lua_State *L );

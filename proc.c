@@ -593,7 +593,7 @@ proc_notice_t* proc_notice_info(
 		return NULL;
 	}
 	
-	if ( !more_space( &ret, full, size )) {
+	if ( !more_space( &ret, full, size * 2 )) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't allocate memory to read into" );
 		proc_notice_puts(notice);
@@ -621,12 +621,20 @@ proc_notice_t* proc_notice_info(
 		return NULL;
 	}
 	
-	n = k = full->block;
+	k = full->block;
 	while ( size > 0 ) {
-		n = strchr( n, '\n' );
-		*n = 0;
-		size -= strlen(k) + 1;
+		n = strchr( k, '\n' );
 		v = strchr( k, ':' );
+		if ( !v ) {
+			if ( n ) {
+				k = ++n;
+				continue;
+			}
+			break;
+		}
+		if ( n )
+			*n = 0;
+		size -= strlen(k) + 1;
 		*v = 0;
 		/* We only care about the name and ppid at the moment */
 		if ( strcmp( k, "Name" ) == 0 )
@@ -634,7 +642,8 @@ proc_notice_t* proc_notice_info(
 		if ( strcmp( k, "PPid" ) == 0 )
 			notice->ownerId = strtol( v + 2, NULL, 10 );
 		*v = ':';
-		*n = '\n';
+		if ( n )
+			*n = '\n';
 		k = ++n;
 	}
 	
@@ -1314,7 +1323,10 @@ int lua_proc_locate_name( lua_State *L ) {
 	proc_notice_t *notice;
 	node_t i;
 	
-	notice = proc_locate_name( &ret, name, &nodes, underId );
+	if ( !(notice = proc_locate_name( &ret, name, &nodes, underId )) ) {
+		lua_newtable(L);
+		return 1;
+	}
 	lua_createtable( L, nodes.count, 0 );
 	for ( i = 0; i < nodes.count; ++i ) {
 		lua_pushinteger(L,i+1);

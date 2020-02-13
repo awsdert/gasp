@@ -1,4 +1,7 @@
-local function example(gui,ctx,prv)
+local function add_tree_node(gui,ctx)
+	-- Will modify after upload of working example
+end
+local function list_all_apps(gui,ctx,prv)
 	local font = get_font(gui)
 	local ok, selected
 	local text = "Noticed Processes"
@@ -30,7 +33,7 @@ local function example(gui,ctx,prv)
 	return gui
 end
 return function(gui,ctx,prv)
-	local font = get_font(gui)
+	local font = get_font(gui), ok
 	local text = "Noticed Processes"
 	nk.layout_row_dynamic(ctx, pad_height(font,text), 1)
 	local glance = proc_locate_name("gasp")
@@ -41,10 +44,13 @@ return function(gui,ctx,prv)
 			gui.idc = gui.idc + 1
 			for i,notice in pairs(glance) do
 				text = "" .. notice.entryId .. " " .. notice.name
-				gui.selected[gui.idc] = nk.selectable(
-					ctx, nil, text, nk.TEXT_LEFT,
-					(gui.selected[gui.idc] or false) )
+				ok, gui.selected[gui.idc] =
+					nk.tree_element_push(
+					ctx, nk.TREE_NODE, text, nk.MAXIMIZED,
+					(gui.selected[gui.idc] or false), gui.idc )
 				gui.idc = gui.idc + 1
+				if ok then nk.tree_element_pop(ctx)
+				else break end
 			end
 			nk.tree_pop(ctx)
 		end

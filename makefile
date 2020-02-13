@@ -38,7 +38,7 @@ test_gasp_exe:=test-$(gasp_d_exe)
 deep_gasp_exe:=deep-$(gasp_exe)
 deep_gasp_d_exe:=deep-$(gasp_d_exe)
 PHONY_TARGETS:=makefile default all rebuild clean libs build debug
-PHONY_TARGETS+= run gede
+PHONY_TARGETS+= run gede test
 
 .PHONY: $(PHONY_TARGETS)
 default: run
@@ -125,6 +125,9 @@ run: build
 
 gede: debug
 	gede --args ./$(gasp_d_exe) $(ARGS)
+
+test: $(deep_gasp_d_exe)
+	gede --args $(deep_gasp_d_exe)
 
 build: $(gasp_exe) $(deep_gasp_exe)
 

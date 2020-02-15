@@ -46,7 +46,7 @@ int lua_proc_locate_name( lua_State *L ) {
 		lua_newtable(L);
 		return 1;
 	}
-	lua_createtable( L, nodes.count, 0 );
+	lua_createtable( L, nodes.count + 1, 0 );
 	for ( i = 0; i < nodes.count; ++i ) {
 		lua_pushinteger(L,i+1);
 		lua_createtable( L, 0, 5 );

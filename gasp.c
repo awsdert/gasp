@@ -7,7 +7,7 @@ int main( int argc, char *argv[] ) {
 	nodes_t nodes = {0}, ARGS = {0};
 	kvpair_t *args = NULL;
 	char *HOME = NULL, *PWD = NULL, *DISPLAY = NULL, *CWD = NULL,
-		*path = NULL, *cmd = NULL, gasp[] = "gasp";
+		*path = NULL, *cmd = NULL, gasp[] = "gasp", *launch;
 	size_t leng = BUFSIZ
 #if 0
 	, size = 0
@@ -38,15 +38,14 @@ int main( int argc, char *argv[] ) {
 		ERRMSG( errno, "Couldn't allocate path" );
 		goto cleanup;
 	}
+#ifdef _DEBUG
+	launch = "test-gasp-d.elf";
+#else
+	launch = "deep-gasp.elf";
+#endif
 	sprintf( path, "pkexec %s/%s"
 		" -D HOME='%s' -D PWD='%s' -D CWD='%s'",
-		PWD,
-#ifdef _DEBUG
-		"test-gasp-d.elf",
-#else
-		"deep-gasp.elf",
-#endif
-		HOME, PWD, CWD );
+		PWD, launch, HOME, PWD, CWD );
 	if ( DISPLAY )
 		sprintf( strchr(path,'\0'), " -D DISPLAY='%s'", DISPLAY );
 	for ( arg = 0; arg < argc; ++arg ) {

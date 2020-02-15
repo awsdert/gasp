@@ -157,7 +157,7 @@ end
 GUI.which = "main"
 GUI.draw["main"] = function(gui,ctx)
 	local font = get_font(gui)
-	local text, file, dir
+	local text, file, dir, tmp
 	text = "Change Font"
 	nk.layout_row_dynamic( ctx, pad_height(font,text), 2)
 	if nk.button(ctx, nil, text) then
@@ -185,16 +185,18 @@ GUI.draw["main"] = function(gui,ctx)
 		text = os.getenv("PWD") or os.getenv("CWD")
 		dir = scandir( text .. "/cheats" )
 		if not dir then
-			text = os.getenv("GASP_PATH")
+			text = cfg.cheatdir or os.getenv("GASP_PATH")
 			dir = gasp.path_isdir(text)
 			if dir == 0 then
-				io.popen('mkdir "' .. text .. '"')
+				io.popen('mkdir "' .. text .. '/"')
 			elseif dir == -1 then
-				error("Couldn't access '" .. text .. '"' )
+				error("Couldn't access '" .. text .. '/"' )
 				nk.shutdown()
 				return nil
 			end
-			text = text .. "/cheats"
+			if text ~= cfg.cheatdir then
+				text = text .. "/cheats"
+			end
 			dir = gasp.path_isdir(text)
 			if dir == 0 then
 				io.popen('mkdir "' .. text .. '"')
@@ -206,26 +208,35 @@ GUI.draw["main"] = function(gui,ctx)
 			dir = gasp.path_files(text)
 		end
 		if #dir > 0 then
+			nk.layout_row_dynamic(ctx,pad_height(font,text),2)
+			nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)
+			nk.label(ctx, text, nk.TEXT_LEFT)
+			nk.layout_row_dynamic( ctx, pad_height(font,text),1)
 			for i,v in pairs(dir) do
-				if gui.cheatfile then
-					i = (gui.cheatfile == v)
-				else
-					i = false
-				end
-				i = nk.selectable( ctx, nil, v, nk.TEXT_LEFT, i )
-				if i == true then
-					gui.cheatfile = v
+				if gasp.path_isfile(text .. '/' .. v) == 1 then
+					if gui.cheatfile then
+						i = (gui.cheatfile == v)
+					else
+						i = false
+					end
+					i = nk.selectable( ctx, nil, v, nk.TEXT_LEFT, i )
+					if i == true then
+						gui.cheatfile = v
+					end
 				end
 			end
-		end
-		if gui.cheatfile then
-			if gui.oldcheatfile == gui.cheatfile then
-				gui = draw_cheats(gui,ctx,gui.cheat or
-					dofile(text .. "/" .. gui.cheatfile))
-			else
-				gui.oldcheatfile = gui.cheatfile
-				gui = draw_cheats(gui,ctx,
-					dofile(text .. "/" .. gui.cheatfile))
+			if gui.cheatfile then
+				tmp = package.path
+				package.path = text .. '/?.lua;' .. tmp
+				if gui.oldcheatfile == gui.cheatfile then
+					gui = draw_cheats(gui,ctx,gui.cheat or
+						dofile(text .. "/" .. gui.cheatfile))
+				else
+					gui.oldcheatfile = gui.cheatfile
+					gui = draw_cheats(gui,ctx,
+						dofile(text .. "/" .. gui.cheatfile))
+				end
+				package.path = tmp
 			end
 		end
 	end

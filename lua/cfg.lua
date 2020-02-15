@@ -3,6 +3,7 @@ cfg = {
 	volume = 0.5,
 	clipboard = false,
 	anti_aliasing = false,
+	cheatdir = '/mnt/HOME/cheats/gasp',
 	window = {
 		width = 1600,
 		height = 900,

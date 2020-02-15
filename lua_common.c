@@ -163,7 +163,8 @@ int lua_path_isdir( lua_State *L ) {
 	struct stat info = {0};
 	if ( stat( path, &info ) == 0 )
 		lua_pushinteger( L, ((info.st_mode & S_IFMT) == S_IFDIR) );
-	else lua_pushinteger( L, -1 );
+	else lua_pushinteger( L,
+		(errno == ENOENT || errno == ENOTDIR) ? 0 : -1 );
 	return 1;
 }
 int lua_path_isfile( lua_State *L ) {
@@ -171,7 +172,8 @@ int lua_path_isfile( lua_State *L ) {
 	struct stat info = {0};
 	if ( stat( path, &info ) == 0 )
 		lua_pushinteger( L, ((info.st_mode & S_IFMT) == S_IFREG) );
-	else lua_pushinteger( L, -1 );
+	else lua_pushinteger( L,
+		(errno == ENOENT || errno == ENOTDIR) ? 0 : -1 );
 	return 1;
 }
 int lua_path_files( lua_State *L ) {

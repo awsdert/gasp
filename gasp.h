@@ -175,6 +175,9 @@ typedef struct proc_handle {
 #else
 	/* Should only hold /proc/%d or /proc/self */
 	char procdir[SIZEOF_PROCDIR];
+#ifdef gasp_pread
+	int memfd, perm;
+#endif
 #endif
 	pthread_t thread;
 	proc_notice_t notice;
@@ -222,10 +225,12 @@ void proc_glance_term(
  * @param name The name to look for
  * @param nodes Where to place all the noticed processes
  * @param underId ID of ancestor all must have
+ * @param usecase If true then is case sensitive search
  * @return nodes->space.block
 **/
 proc_notice_t* proc_locate_name(
-	int *err, char const *name, nodes_t *nodes, int underId );
+	int *err, char const *name, nodes_t *nodes, int underId,
+	bool usecase );
 /** @brief opens a file, seeks to end takes the offset then closes it
  * @param err Where to pass errors back to
  * @param path Path of file to get size of

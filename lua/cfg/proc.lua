@@ -54,9 +54,9 @@ return function(gui,ctx,prv)
 		nk.layout_row_dynamic(ctx, pad_height(font,text), 1)
 		if nk.tree_push( ctx, nk.TREE_NODE,
 		text, nk.MAXIMIZED, gui.idc ) then
-			i = 1
 			gui.idc = gui.idc + 1
-			for i,notice in pairs(glance) do
+			for i = 1,#glance,1 do
+				notice=glance[i]
 				id = gui.idc
 				text = "" .. notice.entryId .. " " .. notice.cmdl
 				if gui.noticed then

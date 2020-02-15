@@ -1,44 +1,8 @@
-local function add_tree_node(ctx,text,selected,id,isparent)
-	local ok
-	if isparent == true then
-		selected =
-			nk.selectable(
-			ctx, nil, text, nk.TEXT_LEFT,
-			(selected or false) )
-		return true, selected
-	end
-	ok, selected =
-		nk.tree_element_push(
-		ctx, nk.TREE_NODE, text, nk.MAXIMIZED,
-		(selected or false), id )
-	if ok then
-		nk.tree_element_pop(ctx)
-		return true, selected
-	end
-	return false, selected
-end
-local function get_all_apps(underId)
-	if type(underId) ~= "integer" or underId < 0 then
-		underId = 0
-	end
-	local t = {}
-	local i = 1
-	local glance = class_proc_glance.new()
-	if glance then
-		t[i] = glance:init(underId)
-		while t[i] do
-			i = i + 1
-			t[i] = glance:next()
-		end
-		glance:term()
-	end
-	return t
-end
 local function list_all_apps(gui,ctx,prv)
 	local font = get_font(gui)
 	local ok, selected
 	local text = "Noticed Processes"
-	local glance = class_proc_glance.new()
+	local glance = gasp.new_glance()
 	if type(gui.glance) ~= "table" then
 		gui.glance = {}
 	end
@@ -80,9 +44,10 @@ return function(gui,ctx,prv)
 		ctx, nk.EDIT_SIMPLE, (cfg.find_process or ""), 100 )
 	nk.layout_row_dynamic(ctx, pad_height(font,text), 1)
 	if #(cfg.find_process) > 0 then
-		glance = proc_locate_name(cfg.find_process)
+		glance = gasp.locate_app(cfg.find_process)
 	else
-		glance = get_all_apps()
+		glance = gasp.locate_app()
+		--glance = get_all_apps()
 	end
 	gui.idc = gui.idc or 0
 	if glance and #glance > 0 then
@@ -93,7 +58,7 @@ return function(gui,ctx,prv)
 			gui.idc = gui.idc + 1
 			for i,notice in pairs(glance) do
 				id = gui.idc
-				text = "" .. notice.entryId .. " " .. notice.name
+				text = "" .. notice.entryId .. " " .. notice.cmdl
 				if gui.noticed then
 					selected = (gui.noticed.entryId == notice.entryId)
 				else selected = false end
@@ -111,7 +76,7 @@ return function(gui,ctx,prv)
 	if nk.button(ctx, nil, "Done") then
 		gui.which = prv
 		if gui.noticed then
-			gui.handle = class_proc_handle.new()
+			gui.handle = gasp.new_handle()
 			if not gui.handle:init( gui.noticed.entryId ) then
 				gui.handle = nil
 			end

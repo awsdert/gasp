@@ -73,7 +73,7 @@ src__commmon:=-std=c99
 src__defines:=$(sys_defines:%=-D %) -D LUAVER=$(lua_ver)
 src_combined:=$(src__warning) $(src__commmon) $(src__defines)
 
-ARGS=-D HELLO="WORLD"
+ARGS=
 rpath=-L"$1" -Wl,-rpath,"$1"
 libraries:=lua dl m pthread
 LIBS:=$(libraries:%=-l%)

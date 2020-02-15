@@ -432,18 +432,18 @@ proc_notice_t* proc_locate_name(
 
 	if ( err ) *err = ret;
 	memset( nodes, 0, sizeof(nodes_t) );
-	
 	for ( notice = proc_glance_init( &ret, &glance, underId )
 		; notice; notice = proc_notice_next( &ret, &glance )
 	)
 	{
-		text = notice->name.block;
-		if ( !strstr( text, name ) ) {
-			text = notice->cmdl.block;
-			if ( !strstr( text, name ) )
-				continue;
+		if ( name && *name ) {
+			text = notice->name.block;
+			if ( !strstr( text, name ) && strcmp(text,name) != 0 ) {
+				text = notice->cmdl.block;
+				if ( !strstr( text, name ) && strcmp(text,name) != 0 )
+					continue;
+			}
 		}
-			
 		if ( (ret = add_node( nodes, &i, sizeof(proc_notice_t) ))
 			!= EXIT_SUCCESS )
 			break;
@@ -750,6 +750,34 @@ proc_notice_t*
 	return NULL;
 }
 
+size_t proc__glance_peek(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, intptr_t size ) {
+	intptr_t done = 0, dst = 0;
+	int ret;
+	uchar *m = mem;
+	size_t temp;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+
+	errno = EXIT_SUCCESS;
+	
+	while ( done < size ) {
+		dst = ptrace( PTRACE_PEEKDATA,
+			handle->notice.entryId, addr + done, NULL );
+		temp = size - done;
+		if ( temp > sizeof(int) ) temp = sizeof(int);
+		memcpy( m + done, &dst, temp );
+		done += temp;
+	}
+	
+	return done;
+}
+
 size_t proc__glance_vmem(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *mem, intptr_t size ) {
@@ -904,7 +932,7 @@ intptr_t proc_glance_data(
 	}
 	errno = EXIT_SUCCESS;
 	
-	ptrace( PTRACE_ATTACH, handle->notice.entryId, NULL, NULL );
+	ptrace( PTRACE_SEIZE, handle->notice.entryId, NULL, NULL );
 	
 	if ( (perm = proc_mapped_addr( &ret, handle, addr, 0777, NULL )) == 0
 		&& ret != EXIT_SUCCESS ) {
@@ -923,13 +951,15 @@ intptr_t proc_glance_data(
 		return done;
 	}
 	
-	if ( (done = proc__glance_vmem( err, handle, addr, mem, size ))
+	if ( (done = proc__glance_peek( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	if ( (done = proc__glance_file( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	if ( (done = proc__glance_self( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	if ( (done = proc__glance_seek( err, handle, addr, mem, size ))
+		> 0 ) goto success;
+	if ( (done = proc__glance_vmem( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	
 	ptrace( PTRACE_DETACH, handle->notice.entryId, NULL, NULL );
@@ -942,6 +972,36 @@ intptr_t proc_glance_data(
 	if ( proc_mapped_addr( &ret, handle, addr, perm, NULL ) == 0
 		&& ret != EXIT_SUCCESS && err )
 		*err = ret;
+	return done;
+}
+
+size_t proc__change_poke(
+	int *err, proc_handle_t *handle,
+	intptr_t addr, void *mem, intptr_t size ) {
+	intptr_t done = 0, dst = 0;
+	int ret;
+	uchar *m = mem;
+	size_t temp;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+
+	errno = EXIT_SUCCESS;
+	
+	while ( done < size ) {
+		dst = ptrace( PTRACE_PEEKDATA,
+			handle->notice.entryId, addr + done, NULL );
+		temp = size - done;
+		if ( temp > sizeof(int) ) temp = sizeof(int);
+		memcpy( &dst, m + done, temp );
+		ptrace( PTRACE_POKEDATA,
+			handle->notice.entryId, addr + done, &dst );
+		done += temp;
+	}
+	
 	return done;
 }
 
@@ -1099,7 +1159,7 @@ intptr_t proc_change_data(
 	}
 	errno = EXIT_SUCCESS;
 	
-	ptrace( PTRACE_ATTACH, handle->notice.entryId, NULL, NULL );
+	ptrace( PTRACE_SEIZE, handle->notice.entryId, NULL, NULL );
 	
 	if ( (perm = proc_mapped_addr( &ret, handle, addr, 0777, NULL ))
 		== 0 && ret != EXIT_SUCCESS ) {
@@ -1117,13 +1177,15 @@ intptr_t proc_change_data(
 		return done;
 	}
 	
-	if ( (done = proc__change_vmem( &ret, handle, addr, mem, size ))
+	if ( (done = proc__change_poke( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	if ( (done = proc__change_file( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	if ( (done = proc__change_self( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	if ( (done = proc__change_seek( err, handle, addr, mem, size ))
+		> 0 ) goto success;
+	if ( (done = proc__change_vmem( &ret, handle, addr, mem, size ))
 		> 0 ) goto success;
 	
 	ptrace( PTRACE_DETACH, handle->notice.entryId, NULL, NULL );

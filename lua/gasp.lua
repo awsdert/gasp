@@ -64,37 +64,10 @@ end)
 collectgarbage()
 collectgarbage('stop')
 
--- Copy pasted exists(), isdir() and scandir() from online
-
---- Check if a file or directory exists in this path
-function exists(file)
-   local ok, err, code = os.rename(file, file)
-   if not ok then
-      if code == 13 then
-         -- Permission denied, but it exists
-         return true
-      end
-   end
-   return ok, err
-end
-
---- Check if a directory exists in this path
-function isdir(path)
-   -- "/" works on both Unix and Windows
-   return exists(path.."/")
-end
-
 function scandir(path)
-    local i = 0
-    local t = {}
-    local d = isdir( path )
-    if not d or d == false then return end
-    d = io.popen('dir "'.. path ..'" /b')
-    for filename in d:lines() do
-        i = i + 1
-        t[i] = filename
-    end
-    return t
+    if gasp.path_isdir( path ) == 1 then
+		return gasp.path_files(path)
+	end
 end
 
 function pad_width(font,text)
@@ -104,6 +77,83 @@ end
 function pad_height(font,text)
 	return math.ceil((font:height(text)) * 1.2)
 end
+function add_tree_node(ctx,text,selected,id,isparent)
+	local ok
+	if isparent == true then
+		selected =
+			nk.selectable(
+			ctx, nil, text, nk.TEXT_LEFT,
+			(selected or false) )
+		return true, selected
+	end
+	ok, selected =
+		nk.tree_element_push(
+		ctx, nk.TREE_NODE, text, nk.MAXIMIZED,
+		(selected or false), id )
+	if ok then
+		nk.tree_element_pop(ctx)
+		return true, selected
+	end
+	return false, selected
+end
+local function bytes2int(bytes)
+	local int = 0
+	local i,v
+	for i,v in pairs(bytes) do
+		int = int << 8
+		int = int | v
+	end
+	return int
+end
+local function draw_cheats(gui,ctx,root)
+	local i, v, id, text, j, k, tmp, font
+	font = get_font(gui)
+	id = gui.idc
+	gui.idc = gui.idc + 1
+	gui.cheat = root
+	if nk.tree_push( ctx, nk.TREE_NODE,
+		"Cheats", nk.MAXIMIZED, id ) then
+		if root.endian then
+			text = "Endian"
+			nk.layout_row_dynamic(ctx,pad_height(font,text),3)
+			nk.label(ctx,text,nk.TEXT_LEFT)
+			nk.label(ctx,root.endian,nk.TEXT_LEFT)
+		end
+		if root.list then
+			for i,v in pairs(root.list) do
+				nk.layout_row_dynamic(ctx,pad_height(font,"="),3)
+				nk.label(ctx,(v.method or "="),nk.TEXT_LEFT)
+				nk.label(ctx,(v.desc or "{???}"),nk.TEXT_LEFT)
+				if v.signed then
+					text = gui.handle:read( v.addr or 0, v.signed )
+					if text then
+						--[[Flip Big Endian to Little Endian,
+							no native awareness yet]]
+						if root.endian == "Big" then
+							j,k = 1,#text
+							while j < k do
+								tmp = text[j]
+								text[j] = text[k]
+								text[k] = tmp
+							end
+						end
+						text = "" .. (bytes2int(text))
+					else text = "" end
+				elseif v.bytes then
+					text = gui.handle:read( v.addr or 0, v.bytes )
+					if text then text = gasp.totxtbytes(text)
+					else text = "" end
+				else
+					text = ""
+				end
+				nk.edit_string(ctx,nk.EDIT_SIMPLE,text,100)
+			end
+		end
+		nk.tree_pop(ctx)
+	end
+	return gui
+end
+
 GUI.which = "main"
 GUI.draw["main"] = function(gui,ctx)
 	local font = get_font(gui)
@@ -127,41 +177,35 @@ GUI.draw["main"] = function(gui,ctx)
 	nk.layout_row_push(ctx, pad_width(font,text))
 	cfg.volume = nk.slider(ctx, 0, cfg.volume, 1.0, 0.1)
 	nk.layout_row_end(ctx)
-	if gui.noticed then
+	if gui.handle then
 		text = "Hooked:"
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
 		nk.label( ctx, text, nk.TEXT_LEFT )
-		if gui.handle then text = "true" else text = "false" end
-		nk.label( ctx, text, nk.TEXT_LEFT )
-		text = "Selected:"
-		nk.layout_row_dynamic(ctx,pad_height(font,text),1)
-		nk.label( ctx, text, nk.TEXT_LEFT )
-		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
-		for i,v in pairs(gui.noticed) do
-			nk.label( ctx, i .. ":", nk.TEXT_LEFT )
-			if type(v) == "boolean" then
-				if v == true then text = "true"
-				else text = "false" end
-			elseif not v then text = "(nil)"
-			else text = "" .. v end
-			nk.label( ctx, text, nk.TEXT_LEFT )
-		end
+		nk.label( ctx, gui.noticed.name, nk.TEXT_LEFT )
 		text = os.getenv("PWD") or os.getenv("CWD")
 		dir = scandir( text .. "/cheats" )
 		if not dir then
 			text = os.getenv("GASP_PATH")
-			dir = isdir(text)
-			if not dir or dir == false then
+			dir = gasp.path_isdir(text)
+			if dir == 0 then
 				io.popen('mkdir "' .. text .. '"')
+			elseif dir == -1 then
+				error("Couldn't access '" .. text .. '"' )
+				nk.shutdown()
+				return nil
 			end
 			text = text .. "/cheats"
-			dir = scandir(text)
-			if not dir then
+			dir = gasp.path_isdir(text)
+			if dir == 0 then
 				io.popen('mkdir "' .. text .. '"')
-				dir = {}
+			elseif dir == -1 then
+				error("Couldn't access '" .. text .. '"' )
+				nk.shutdown()
+				return nil
 			end
+			dir = gasp.path_files(text)
 		end
-		if dir and #dir > 0 then
+		if #dir > 0 then
 			for i,v in pairs(dir) do
 				if gui.cheatfile then
 					i = (gui.cheatfile == v)
@@ -175,7 +219,14 @@ GUI.draw["main"] = function(gui,ctx)
 			end
 		end
 		if gui.cheatfile then
-			gui.cheat = dofile("cheat." .. gui.cheatfile)
+			if gui.oldcheatfile == gui.cheatfile then
+				gui = draw_cheats(gui,ctx,gui.cheat or
+					dofile(text .. "/" .. gui.cheatfile))
+			else
+				gui.oldcheatfile = gui.cheatfile
+				gui = draw_cheats(gui,ctx,
+					dofile(text .. "/" .. gui.cheatfile))
+			end
 		end
 	end
 	return gui

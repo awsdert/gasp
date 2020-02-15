@@ -37,7 +37,7 @@ int lua_proc_notice_next( lua_State *L ) {
 
 int lua_proc_locate_name( lua_State *L ) {
 	int ret = EXIT_SUCCESS, underId = luaL_optinteger(L,2,0);
-	char const *name = luaL_checkstring(L,1);
+	char const *name = luaL_optstring(L,1,NULL);
 	nodes_t nodes = {0};
 	proc_notice_t *notice;
 	node_t i;
@@ -396,7 +396,7 @@ void lua_proc_create_handle_class( lua_State *L ) {
 	/* _G["Foo"] = newclass */
 	lua_setglobal(L, PROC_HANDLE_CLASS );
 }
-void lua_proc_create_classes( lua_State *L ) {
+void lua_create_proc_classes( lua_State *L ) {
 	lua_proc_create_glance_class(L);
 	lua_proc_create_handle_class(L);
 }

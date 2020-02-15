@@ -160,10 +160,14 @@ int lua_path_exists( lua_State *L ) {
 }
 int lua_path_isdir( lua_State *L ) {
 	char const *path = luaL_checkstring(L,1);
-	struct stat info = {0};
-	if ( stat( path, &info ) == 0 )
-		lua_pushinteger( L, ((info.st_mode & S_IFMT) == S_IFDIR) );
-	else lua_pushinteger( L,
+	DIR *dir = opendir(path);
+	errno = EXIT_SUCCESS;
+	if ( dir ) {
+		lua_pushinteger(L,1);
+		closedir(dir);
+		return 1;
+	}
+	lua_pushinteger( L,
 		(errno == ENOENT || errno == ENOTDIR) ? 0 : -1 );
 	return 1;
 }
@@ -209,10 +213,10 @@ int lua_totxtbytes( lua_State *L ) {
 	sprintf( text, "%02X",
 		(unsigned int)luaL_checkinteger(L,-1));
 	for ( i = 1; i < size; ++i ) {
-		lua_pushinteger( L, i + 1 );
-		lua_gettable(L,1);
+		lua_geti(L,1,i+1);
 		sprintf( strchr(text,'\0'), " %02X",
 			(unsigned int)luaL_checkinteger(L,-1));
+		lua_pop(L,1);
 	}
 	lua_pushstring(L,text);
 	free(text);

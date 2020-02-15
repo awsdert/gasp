@@ -42,7 +42,7 @@ int lua_proc_locate_name( lua_State *L ) {
 	proc_notice_t *notice;
 	node_t i;
 	
-	if ( !(notice = proc_locate_name( &ret, name, &nodes, underId )) ) {
+	if ( !(notice = proc_locate_name( &ret, name, &nodes, underId, 0 )) ) {
 		lua_newtable(L);
 		return 1;
 	}
@@ -136,8 +136,15 @@ int lua_proc_glance_free( lua_State *L ) {
 	return 0;
 }
 
+int lua_proc_glance_leng( lua_State *L ) {
+	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
+	lua_pushinteger(L,glance->idNodes.count);
+	return 1;
+}
+
 luaL_Reg lua_class_proc_glance_meta_list[] = {
 	{ "__gc", lua_proc_glance_free },
+	{ "__len", lua_proc_glance_leng },
 	{ "__index",lua_proc_glance_node },
 	{ "__newindex", lua_proc_glance_make },
 {NULL,NULL}};
@@ -229,7 +236,10 @@ int lua_proc_change_data( lua_State *L ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
-	array = calloc( size, 1 );
+	if ( !(array = calloc( size, 1 )) ) {
+		lua_pushinteger(L,0);
+		return 1;
+	}
 	for ( i = 0; i < size; ++i ) {
 		lua_pushinteger(L,i+1);
 		lua_gettable(L,3);

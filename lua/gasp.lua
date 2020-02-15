@@ -153,6 +153,40 @@ local function draw_cheats(gui,ctx,root)
 	end
 	return gui
 end
+function mkdir(path)
+	if not path then return end
+	local ret = gasp.path_isdir( path )
+	if ret == 1 then
+		return path
+	elseif ret == 0 then
+		io.popen("mkdir '" .. path .. "'")
+		if gasp.path_isdir( path ) == 1 then
+			return path
+		end
+	end
+end
+local function find_cheat_dir()
+	local text = (os.getenv("PWD") or os.getenv("CWD")) .. '/cheats'
+	if mkdir(text) then
+		return text
+	end
+	if mkdir(cfg.cheatdir) then
+		return cfg.cheatdir
+	end
+	text = os.getenv("GASP_PATH")
+	if mkdir(text) then
+		text = text .. '/cheats'	
+		if mkdir(text) then
+			return text
+		end
+	end
+	-- Should never reach here, also should handle in less drastic way
+	nk.shutdown()
+end
+local function list_cheat_files()
+	local text = find_cheat_dir()
+	return scandir( text ), text
+end
 
 GUI.which = "main"
 GUI.draw["main"] = function(gui,ctx)
@@ -182,61 +216,39 @@ GUI.draw["main"] = function(gui,ctx)
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
 		nk.label( ctx, text, nk.TEXT_LEFT )
 		nk.label( ctx, gui.noticed.name, nk.TEXT_LEFT )
-		text = os.getenv("PWD") or os.getenv("CWD")
-		dir = scandir( text .. "/cheats" )
-		if not dir then
-			text = cfg.cheatdir or os.getenv("GASP_PATH")
-			dir = gasp.path_isdir(text)
-			if dir == 0 then
-				io.popen('mkdir "' .. text .. '/"')
-			elseif dir == -1 then
-				error("Couldn't access '" .. text .. '/"' )
-				nk.shutdown()
-				return nil
+		text = find_cheat_dir()
+		if gui.cheatfile then
+			tmp = package.path
+			package.path = text .. '/?.lua;' .. tmp
+			if gui.oldcheatfile == gui.cheatfile then
+				gui = draw_cheats(gui,ctx,gui.cheat or
+					dofile(text .. "/" .. gui.cheatfile))
+			else
+				gui.oldcheatfile = gui.cheatfile
+				gui = draw_cheats(gui,ctx,
+					dofile(text .. "/" .. gui.cheatfile))
 			end
-			if text ~= cfg.cheatdir then
-				text = text .. "/cheats"
-			end
-			dir = gasp.path_isdir(text)
-			if dir == 0 then
-				io.popen('mkdir "' .. text .. '"')
-			elseif dir == -1 then
-				error("Couldn't access '" .. text .. '"' )
-				nk.shutdown()
-				return nil
-			end
-			dir = gasp.path_files(text)
-		end
-		if #dir > 0 then
-			nk.layout_row_dynamic(ctx,pad_height(font,text),2)
-			nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)
-			nk.label(ctx, text, nk.TEXT_LEFT)
-			nk.layout_row_dynamic( ctx, pad_height(font,text),1)
-			for i,v in pairs(dir) do
-				if gasp.path_isfile(text .. '/' .. v) == 1 then
-					if gui.cheatfile then
-						i = (gui.cheatfile == v)
-					else
-						i = false
-					end
-					i = nk.selectable( ctx, nil, v, nk.TEXT_LEFT, i )
-					if i == true then
-						gui.cheatfile = v
+			package.path = tmp
+		else
+			dir, text = list_cheat_files()
+			if #dir > 0 then
+				nk.layout_row_dynamic(ctx,pad_height(font,text),2)
+				nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)
+				nk.label(ctx, text, nk.TEXT_LEFT)
+				nk.layout_row_dynamic( ctx, pad_height(font,text),1)
+				for i,v in pairs(dir) do
+					if gasp.path_isfile(text .. '/' .. v) == 1 then
+						if gui.cheatfile then
+							i = (gui.cheatfile == v)
+						else
+							i = false
+						end
+						i = nk.selectable( ctx, nil, v, nk.TEXT_LEFT, i )
+						if i == true then
+							gui.cheatfile = v
+						end
 					end
 				end
-			end
-			if gui.cheatfile then
-				tmp = package.path
-				package.path = text .. '/?.lua;' .. tmp
-				if gui.oldcheatfile == gui.cheatfile then
-					gui = draw_cheats(gui,ctx,gui.cheat or
-						dofile(text .. "/" .. gui.cheatfile))
-				else
-					gui.oldcheatfile = gui.cheatfile
-					gui = draw_cheats(gui,ctx,
-						dofile(text .. "/" .. gui.cheatfile))
-				end
-				package.path = tmp
 			end
 		end
 	end

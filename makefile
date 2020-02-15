@@ -70,7 +70,8 @@ sys_defines:=$(if $(IS_LINUX),$(linux_defines),$(win32_defines))
 
 src__warning:=-Wall -Wextra -Wpedantic
 src__commmon:=-std=c99
-src__defines:=$(sys_defines:%=-D %) -D LUAVER=$(lua_ver)
+src__defines:=$(sys_defines:%=-D %)
+src__defines+=-D LUAVER=$(lua_ver) -D _FILE_OFFSET_BITS=64
 src_combined:=$(src__warning) $(src__commmon) $(src__defines)
 
 ARGS=

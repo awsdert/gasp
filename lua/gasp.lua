@@ -79,7 +79,7 @@ function pad_height(font,text)
 end
 function add_tree_node(ctx,text,selected,id,isparent)
 	local ok
-	if isparent == true then
+	if isparent ~= true then
 		selected =
 			nk.selectable(
 			ctx, nil, text, nk.TEXT_LEFT,
@@ -105,22 +105,33 @@ local function bytes2int(bytes)
 	end
 	return int
 end
-local function draw_cheats(gui,ctx,root)
+local function draw_cheats(gui,ctx)
 	local i, v, id, text, j, k, tmp, font
 	font = get_font(gui)
 	id = gui.idc
 	gui.idc = gui.idc + 1
-	gui.cheat = root
+	if not gui.cheat then
+		gui.cheat = {}
+	end
 	if nk.tree_push( ctx, nk.TREE_NODE,
 		"Cheats", nk.MAXIMIZED, id ) then
-		if root.endian then
-			text = "Endian"
-			nk.layout_row_dynamic(ctx,pad_height(font,text),3)
-			nk.label(ctx,text,nk.TEXT_LEFT)
-			nk.label(ctx,root.endian,nk.TEXT_LEFT)
+		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
+		text = "Game"
+		nk.label(ctx,text,nk.TEXT_LEFT)
+		if gui.cheat.emu then
+			nk.label(ctx,gui.cheat.emu.desc,nk.TEXT_LEFT)
+		elseif gui.cheat.app then
+			nk.label(ctx,gui.cheat.app.desc,nk.TEXT_LEFT)
+		else
+			nk.label(ctx,"Undescribed",nk.TEXT_LEFT)
 		end
-		if root.list then
-			for i,v in pairs(root.list) do
+		if gui.cheat.endian then
+			text = "Endian"
+			nk.label(ctx,text,nk.TEXT_LEFT)
+			nk.label(ctx,gui.cheat.endian,nk.TEXT_LEFT)
+		end
+		if gui.cheat.list then
+			for i,v in pairs(gui.cheat.list) do
 				nk.layout_row_dynamic(ctx,pad_height(font,"="),3)
 				nk.label(ctx,(v.method or "="),nk.TEXT_LEFT)
 				nk.label(ctx,(v.desc or "{???}"),nk.TEXT_LEFT)
@@ -129,7 +140,7 @@ local function draw_cheats(gui,ctx,root)
 					if text then
 						--[[Flip Big Endian to Little Endian,
 							no native awareness yet]]
-						if root.endian == "Big" then
+						if gui.cheat.endian == "Big" then
 							j,k = 1,#text
 							while j < k do
 								tmp = text[j]
@@ -141,7 +152,7 @@ local function draw_cheats(gui,ctx,root)
 					else text = "" end
 				elseif v.bytes then
 					text = gui.handle:read( v.addr or 0, v.bytes )
-					if text then text = gasp.totxtbytes(text)
+					if #text > 0 then text = gasp.totxtbytes(text)
 					else text = "" end
 				else
 					text = ""
@@ -165,7 +176,7 @@ function mkdir(path)
 		end
 	end
 end
-local function find_cheat_dir()
+function get_cheat_dir()
 	local text = (os.getenv("PWD") or os.getenv("CWD")) .. '/cheats'
 	if mkdir(text) then
 		return text
@@ -187,23 +198,39 @@ local function list_cheat_files()
 	local text = find_cheat_dir()
 	return scandir( text ), text
 end
+function hook_process(gui)
+	if gui.noticed then
+		if not gui.handle then
+			gui.handle = gasp.new_handle()
+		end
+		if not gui.handle then
+			return gui
+		end
+		if gui.handle:valid() == true then
+			return gui
+		end
+		if gui.handle:init( gui.noticed.entryId ) == true then
+			return gui
+		end
+		print( "Error: Could not open handle" )
+	end
+	return gui
+end
 
 GUI.which = "main"
-GUI.draw["main"] = function(gui,ctx)
+GUI.draw["main"] = { desc = "Main", func = function(gui,ctx)
 	local font = get_font(gui)
-	local text, file, dir, tmp
-	text = "Change Font"
-	nk.layout_row_dynamic( ctx, pad_height(font,text), 2)
-	if nk.button(ctx, nil, text) then
-		 -- ... event handling ...
-		 gui.which = "cfg-font"
+	local text, file, dir, tmp, i, v
+	nk.layout_row_dynamic( ctx, pad_height(font,text), 1)
+	for i,v in pairs(GUI.draw) do
+		if i ~= "main" then
+			text = v.desc
+			if nk.button(ctx, nil, text) then
+				 gui.which = i
+			end
+		end
 	end
-	text = "Hook Process"
-	if nk.button(ctx, nil, text) then
-		 -- ... event handling ...
-		 gui.which = "cfg-proc"
-	end
-	-- Slider Example with Custom width
+	--[[ Slider Example with Custom width
 	text = "Volume:"
 	nk.layout_row_begin(ctx, 'static', pad_height(font,text), 2)
 	nk.layout_row_push(ctx, pad_width(font,text))
@@ -211,51 +238,45 @@ GUI.draw["main"] = function(gui,ctx)
 	nk.layout_row_push(ctx, pad_width(font,text))
 	cfg.volume = nk.slider(ctx, 0, cfg.volume, 1.0, 0.1)
 	nk.layout_row_end(ctx)
-	if gui.handle then
+	--]]
+	if gui.handle and gui.handle:valid() == true then
 		text = "Hooked:"
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
 		nk.label( ctx, text, nk.TEXT_LEFT )
 		nk.label( ctx, gui.noticed.name, nk.TEXT_LEFT )
-		text = find_cheat_dir()
-		if gui.cheatfile then
-			tmp = package.path
-			package.path = text .. '/?.lua;' .. tmp
-			if gui.oldcheatfile == gui.cheatfile then
-				gui = draw_cheats(gui,ctx,gui.cheat or
-					dofile(text .. "/" .. gui.cheatfile))
-			else
-				gui.oldcheatfile = gui.cheatfile
-				gui = draw_cheats(gui,ctx,
-					dofile(text .. "/" .. gui.cheatfile))
-			end
-			package.path = tmp
+		nk.layout_row_dynamic(ctx,pad_height(font,text),1)
+		if nk.button( ctx, nil, "Unhook" ) then
+			gui.handle:term()
+			gui.donothook = true
 		else
-			dir, text = list_cheat_files()
-			if #dir > 0 then
-				nk.layout_row_dynamic(ctx,pad_height(font,text),2)
-				nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)
-				nk.label(ctx, text, nk.TEXT_LEFT)
-				nk.layout_row_dynamic( ctx, pad_height(font,text),1)
-				for i,v in pairs(dir) do
-					if gasp.path_isfile(text .. '/' .. v) == 1 then
-						if gui.cheatfile then
-							i = (gui.cheatfile == v)
-						else
-							i = false
-						end
-						i = nk.selectable( ctx, nil, v, nk.TEXT_LEFT, i )
-						if i == true then
-							gui.cheatfile = v
-						end
-					end
-				end
-			end
+			gui = draw_cheats( gui, ctx )
 		end
+	elseif gui.noticed then
+		text = "Selected:"
+		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
+		nk.label( ctx, text, nk.TEXT_LEFT )
+		nk.label( ctx, gui.noticed.name, nk.TEXT_LEFT )
+		nk.layout_row_dynamic(ctx,pad_height(font,text),1)
+		if not gui.donothook then gui.donothook = false end
+		if gui.donothook == true then
+			if nk.button( ctx, nil, "Hook" ) then
+				gui.donothook = false
+				gui = hook_process(gui)
+			end
+		else
+			nk.label( ctx, "Trying to hook...", nk.TEXT_LEFT );
+			gui = hook_process(gui)
+		end
+	else
+		nk.layout_row_dynamic(ctx,pad_height(font,text),1)
+		nk.label( ctx, "Nothing selected", nk.TEXT_LEFT )
 	end
 	return gui
 end
-GUI.draw["cfg-font"] = require("cfg.font")
-GUI.draw["cfg-proc"] = require("cfg.proc")
+}
+GUI.draw["cfg-font"] = { desc = "Change Font", func = require("cfg.font") }
+GUI.draw["cfg-proc"] = { desc = "Hook App", func = require("cfg.proc") }
+GUI.draw["cfg-cheatfile"] = { desc = "Load Cheatfile", func = require("cfg.cheatfile") }
 local function draw_all(gui,ctx)
 	local push_font = (cfg.font.use ~= "default")
 	if push_font == true then
@@ -267,7 +288,7 @@ local function draw_all(gui,ctx)
 		{0,0,cfg.window.width,cfg.window.height},
 		nk.WINDOW_BORDER | nk.WINDOW_SCALABLE
 	) then
-		gui = gui.draw[gui.which](gui,gui.ctx,"main")
+		gui = gui.draw[gui.which].func(gui,gui.ctx,"main")
 	end
 	nk.window_end(ctx)
 	if push_font == true then

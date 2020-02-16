@@ -1,4 +1,21 @@
 #include "gasp.h"
+#if 1
+#define STOP_PROC(PID) kill( PID, SIGSTOP );
+#define CONT_PROC(PID) kill( PID, SIGCONT );
+#elif 1
+#define STOP_PROC(PID) ptrace( PTRACE_INTERRUPT, PID, NULL, NULL );
+#define CONT_PROC(PID) ptrace( PTRACE_CONT, PID, NULL, NULL );
+#else
+#define STOP_PROC(PID)
+#define CONT_PROC(PID)
+#endif
+#if 1
+#define GRAB_PROC(PID) ptrace( PTRACE_ATTACH, PID, NULL, NULL )
+#define FREE_PROC(PID) ptrace( PTRACE_DETACH, PID, NULL, NULL );
+#else
+#define GRAB_PROC(PID) 0
+#define FREE_PROC(PID)
+#endif
 mode_t file_glance_perm( int *err, char const *path) {
 	struct stat st;
 	if ( stat( path, &st ) == 0 )
@@ -56,6 +73,7 @@ size_t file_glance_size( int *err, char const *path )
 	
 	return size;
 }
+
 void* proc_handle_wait( void *data ) {
 	proc_handle_t *handle = data;
 	int status = 0;
@@ -75,12 +93,17 @@ void* proc_handle_wait( void *data ) {
 void* proc_handle_catch_sigstop_on_attach( void *data ) {
 	int status = 0;
 	proc_handle_t *handle = data;
+	handle->waiting = 1;
 	handle->running = 1;
-	while ( 1 ) {
-		waitpid( handle->notice.entryId, &status, 0 );
-		if ( WIFEXITED(status) || WIFSIGNALED(status) ) {
-			handle->running = 0;
-			break;
+	while ( handle->waiting ) {
+		if ( handle->running ) {
+			waitpid( handle->notice.entryId, &status, WNOHANG | WNOWAIT );
+			if ( WIFEXITED(status) || WIFSIGNALED(status) ) {
+				handle->running = 0;
+				handle->exited = 1;
+			}
+			if ( WIFSTOPPED(status) )
+				handle->running = 0;
 		}
 	}
 	return data;
@@ -112,13 +135,41 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 		return NULL;
 	}
 	
+#if 1
+	if ( pthread_create( &(handle->thread), NULL,
+		proc_handle_catch_sigstop_on_attach, handle ) != 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't start thread for handle" );
+		proc_handle_shut(handle);
+		free(handle);
+		return NULL;
+	}
+	
+	/* Make sure the thread has started looking for SIGSTOP signal */
+	while ( !(handle->waiting) );
+#endif
+	
 	if ( handle->notice.self )
 		sprintf( handle->procdir, "/proc/self" );
 	else {
 		sprintf( handle->procdir, "/proc/%d", pid );
-#ifdef PTRACE_SIEZE
-		ptrace( PTRACE_SEIZE, pid, NULL, NULL );
+#if 0
+		if ( ptrace( PTRACE_ATTACH, pid, NULL, NULL ) < 0 ) {
+			if ( err ) *err = errno;
+			proc_handle_shut(handle);
+			return NULL;
+		}
+#if 1
+		/* Wait for thread to detect stopped or exited status */
+		while ( handle->running );
 #endif
+		/* We're don't need it stopped yet, prevent it from
+		 * being treated as a hanging app and killed for it */
+		CONT_PROC( pid )
+		/* Tell the thread to start looking for SIGSTOP again */
+		handle->running = 1;
+#endif
+#if 0
 #ifdef gasp_pread
 		sprintf( path, "/proc/%d/mem", pid );
 		handle->memfd = open( path, O_RDWR );
@@ -130,9 +181,10 @@ proc_handle_t* proc_handle_open( int *err, int pid )
 				handle->perm = 0;
 		}
 #endif
+#elif defined( gasp_pread )
+		(void)path;
+#endif
 	}
-	
-	handle->running = 1;
 	
 	return handle;
 }
@@ -153,6 +205,12 @@ void proc_handle_shut( proc_handle_t *handle ) {
 	
 	if ( handle->memfd >= 0 )
 		close( handle->memfd );
+	
+	if ( handle->attached )
+		ptrace( PTRACE_DETACH, handle->notice.entryId, NULL, NULL );
+	
+	/* Just in case it's still in the stopped state */
+	kill( handle->notice.entryId, SIGCONT );
 	
 	/* Cleanup noticed info */
 	proc_notice_zero( &(handle->notice) );
@@ -914,6 +972,7 @@ intptr_t proc__glance_file(
 	int ret, fd;
 	mode_t perm;
 	proc_mapped_t mapped = {0};
+	char path[64] = {0};
 	
 	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
 	{
@@ -921,16 +980,26 @@ intptr_t proc__glance_file(
 		return 0;
 	}
 	
-#if 0
-	(void)fd;
+#if 1
 	(void)perm;
 	(void)mapped;
-	if ( (handle->perm != O_RDWR && handle->perm != O_RDONLY)
-		|| handle->memfd < 0 )
-		return 0;
+	(void)temp;
+	(void)next;
+	if ( handle->memfd >= 0 )
+		fd = handle->memfd;
+	else {
+		sprintf( path, "%s/mem", handle->procdir );
+		if ( (fd = open(path,O_RDONLY)) < 0 ) {
+			if ( err ) *err = errno;
+			return 0;
+		}
+	}
 	
-	done = gasp_pread( handle->memfd, mem, size, addr );
+	done = gasp_pread( fd, mem, size, addr );
+	if ( handle->memfd < 0 )
+		close(fd);
 #else
+	(void)path;
 	perm = proc_mapped_addr( &ret, handle, addr, 0, &fd, &mapped );
 	if ( ret != EXIT_SUCCESS ) {
 		if ( err ) *err = ret;
@@ -1043,21 +1112,6 @@ intptr_t proc__glance_seek(
 	return 0;
 }
 
-#if 1
-#if !defined( PTRACE_SEIZE )
-#define HOOK(PID) ptrace( PTRACE_ATTACH, PID, NULL, NULL );
-#define UNHOOK(PID) ptrace( PTRACE_DETACH, PID, NULL, NULL );
-#else
-//#define HOOK(PID) ptrace( PTRACE_INTERRUPT, PID, NULL, NULL );
-#define HOOK(PID) kill( PID, SIGSTOP );
-//#define UNHOOK(PID) ptrace( PTRACE_CONT, PID, NULL, NULL );
-#define UNHOOK(PID) kill( PID, SIGCONT );
-#endif
-#else
-#define HOOK(PID)
-#define UNHOOK(PID)
-#endif
-
 intptr_t proc_glance_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *mem, size_t size
@@ -1071,13 +1125,44 @@ intptr_t proc_glance_data(
 		return 0;
 	}
 	errno = EXIT_SUCCESS;
+	
+	/* This prevents hanging */
+	if ( !(handle->waiting) ) {
+		ret = ENOTSUP;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Process API not used as intended");
+		return 0;
+	}
 
-	HOOK(handle->notice.entryId)
+	STOP_PROC(handle->notice.entryId)
+	if ( errno != EXIT_SUCCESS ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't stop the process");
+		return 0;
+	}
+	
+	while ( handle->running );
+	if ( errno != EXIT_SUCCESS ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't stop the process");
+		return 0;
+	}
+	
+	if ( GRAB_PROC(handle->notice.entryId) < 0 || errno != EXIT_SUCCESS ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't attach to process" );
+		return 0;
+	}
+	handle->running = 1;
+	STOP_PROC(handle->notice.entryId)
+	while ( handle->running );
+	
+	handle->attached = 1;
 	
 	/* Aviod fiddling with own memory file */
 	if ( (done = proc__glance_self( err, handle, addr, mem, size ))
 		> 0 ) goto success;
-#if 1
+#if 0
 	fputs( "Next: pread()\n", stderr );
 	/* gasp_pread() */
 	if ( (done = proc__glance_file( err, handle, addr, mem, size ))
@@ -1090,7 +1175,7 @@ intptr_t proc_glance_data(
 		> 0 ) goto success;
 #endif
 #if 0
-	fputs( "Next: process_vm_read()\n", stderr );
+	fputs( "Next: process_vm_readv()\n", stderr );
 	/* Last ditch effort to avoid ptrace */
 	if ( (done = proc__glance_vmem( err, handle, addr, mem, size ))
 		> 0 ) goto success;
@@ -1100,13 +1185,12 @@ intptr_t proc_glance_data(
 	if ( (done = proc__glance_peek( err, handle, addr, mem, size ))
 		> 0 ) goto success;
 	
-	UNHOOK(handle->notice.entryId)
-	
-	return 0;
+	/* Detatch and ensure continued activity */
 	success:
-
-	UNHOOK(handle->notice.entryId)
-
+	FREE_PROC(handle->notice.entryId)
+	handle->attached = 0;
+	CONT_PROC(handle->notice.entryId)
+	handle->running = 1;
 	return done;
 }
 
@@ -1286,7 +1370,22 @@ intptr_t proc_change_data(
 	}
 	errno = EXIT_SUCCESS;
 	
-	HOOK(handle->notice.entryId)
+	/* This prevents hanging */
+	if ( !(handle->waiting) ) {
+		ret = ENOTSUP;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Process API not used as intended");
+		return 0;
+	}
+	
+	STOP_PROC(handle->notice.entryId)
+	while ( handle->running );
+	if ( GRAB_PROC(handle->notice.entryId) < 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't attach to process" );
+		return 0;
+	}
+	handle->attached = 1;
 	
 	/* Avoid fiddling with own memory file */
 	if ( (done = proc__change_self( err, handle, addr, mem, size ))
@@ -1303,13 +1402,11 @@ intptr_t proc_change_data(
 	/* ptrace */
 	if ( (done = proc__change_poke( err, handle, addr, mem, size ))
 		> 0 ) goto success;
-
-	UNHOOK(handle->notice.entryId)
-
-	return 0;
-	success:
 	
-	UNHOOK(handle->notice.entryId)
+	success:
+	FREE_PROC(handle->notice.entryId)
+	handle->attached = 0;
+	CONT_PROC(handle->notice.entryId)
 
 	return done;
 }

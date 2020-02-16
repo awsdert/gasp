@@ -178,15 +178,6 @@ void lua_proc_create_glance_class( lua_State *L ) {
 
 #define PROC_HANDLE_CLASS "class_proc_handle"
 
-int lua_proc_handle_init( lua_State *L ) {
-	int pid = luaL_checkinteger(L,2);
-	proc_handle_t **handle = (proc_handle_t**)
-		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	*handle = proc_handle_open( NULL, pid );
-	lua_pushboolean( L, !!handle );
-	return 1;
-}
-
 int lua_proc_handle_term( lua_State *L ) {
 	proc_handle_t **handle = (proc_handle_t**)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
@@ -194,13 +185,30 @@ int lua_proc_handle_term( lua_State *L ) {
 	*handle = NULL;
 	return 0;
 }
+
+int lua_proc_handle_valid( lua_State *L ) {
+	proc_handle_t **handle = (proc_handle_t**)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	lua_pushboolean( L, *handle != NULL );
+	return 1;
+}
+
+int lua_proc_handle_init( lua_State *L ) {
+	int pid = luaL_checkinteger(L,2), ret = EXIT_SUCCESS;
+	proc_handle_t **handle = (proc_handle_t**)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	if ( *handle ) lua_proc_handle_term( L );
+	*handle = proc_handle_open( &ret, pid );
+	return lua_proc_handle_valid(L);
+}
+
 int lua_proc_glance_data( lua_State *L ) {
 	proc_handle_t **handle = (proc_handle_t**)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	intptr_t addr = luaL_checkinteger(L,2);
 	intptr_t size = luaL_checkinteger(L,3);
 	uchar * array;
-	if ( size < 1 ) {
+	if ( !(*handle) || size < 1 ) {
 		lua_newtable(L);
 		return 1;
 	}
@@ -226,7 +234,7 @@ int lua_proc_change_data( lua_State *L ) {
 	intptr_t addr = luaL_checkinteger(L,2);
 	intptr_t size, i;
 	uchar * array;
-	if ( !lua_istable(L,3) ) {
+	if ( !(*handle) || !lua_istable(L,3) ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
@@ -267,12 +275,13 @@ int lua_proc_aobscan( lua_State *L ) {
 	intptr_t from = luaL_optinteger(L,3,0);
 	intptr_t upto = luaL_optinteger(L,4,INTPTR_MAX);
 	_Bool writable = 1;
-	if ( lua_isboolean(L,5) )
-		writable = lua_toboolean(L,5);
-	if ( !array ) {
+	if ( !(*handle) || !array ) {
 		lua_newtable(L);
+		if ( array ) free(array);
 		return 1;
 	}
+	if ( lua_isboolean(L,5) )
+		writable = lua_toboolean(L,5);
 	++leng;
 	for ( i = 0; i < leng; ++i ) {
 		c = *array_str;
@@ -288,6 +297,7 @@ int lua_proc_aobscan( lua_State *L ) {
 			luaL_dostring(L,"print(debug.traceback())\n"
 				"error('Beyond scope of native byte')");
 			lua_newtable(L);
+			free(array);
 			return 1;
 		}
 		array[bytes] <<= CHAR_BIT;
@@ -301,6 +311,7 @@ int lua_proc_aobscan( lua_State *L ) {
 			luaL_dostring(L,"print(debug.traceback())\n"
 				"error('Bytes only use Hexadecimal')");
 			lua_newtable(L);
+			free(array);
 			return 1;
 		}
 	}
@@ -326,6 +337,7 @@ int lua_proc_handle_grab( lua_State *L ) {
 	proc_handle_t **handle =
 		(proc_handle_t**)lua_newuserdata(L,sizeof(proc_handle_t*));
 	if ( !handle ) return 0;
+	*handle = NULL;
 	luaL_setmetatable(L,PROC_HANDLE_CLASS);
 	return 1;
 }
@@ -333,6 +345,7 @@ int lua_proc_handle_grab( lua_State *L ) {
 luaL_Reg lua_class_proc_handle_func_list[] = {
 	{ "new", lua_proc_handle_grab },
 	{ "init", lua_proc_handle_init },
+	{ "valid", lua_proc_handle_valid },
 	{ "read", lua_proc_glance_data },
 	{ "write", lua_proc_change_data },
 	{ "aobscan", lua_proc_aobscan },

@@ -169,7 +169,7 @@ typedef struct proc_glance {
 } proc_glance_t;
 #define SIZEOF_PROCDIR (sizeof(int) * CHAR_BIT)
 typedef struct proc_handle {
-	bool running, waiting;
+	bool running, waiting, attached, exited;
 #ifdef _WIN32
 	HANDLE handle;
 #else

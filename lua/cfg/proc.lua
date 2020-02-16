@@ -1,37 +1,3 @@
-local function list_all_apps(gui,ctx,prv)
-	local font = get_font(gui)
-	local ok, selected
-	local text = "Noticed Processes"
-	local glance = gasp.new_glance()
-	if type(gui.glance) ~= "table" then
-		gui.glance = {}
-	end
-	if glance then
-		local notice = glance:init()
-		if notice then
-			nk.layout_row_dynamic(ctx, pad_height(font,text), 1)
-			if nk.tree_push( ctx, nk.TREE_NODE,
-			text, nk.MAXIMIZED, gui.idc ) then
-				gui.idc = gui.idc + 1
-				while notice do
-					text = "" .. notice.entryId  .. " " .. notice.name
-					ok, selected = add_tree_node(
-						ctx,text,gui.idc,gui.glance[notice.entryId])
-					gui.idc = gui.idc + 1
-					gui.glance[notice.entryId] = selected
-					notice = glance:next()
-				end
-			end
-			nk.tree_pop(ctx)
-		end
-		glance:term()
-	end
-	nk.layout_row_dynamic(ctx, pad_height(font,text), 1 )
-	if nk.button(ctx, nil, "Done") then
-		 gui.which = prv
-	end
-	return gui
-end
 return function(gui,ctx,prv)
 	local font = get_font(gui), ok, glance, id, i, v, selected
 	local text = "Noticed Processes"
@@ -75,12 +41,7 @@ return function(gui,ctx,prv)
 	end
 	if nk.button(ctx, nil, "Done") then
 		gui.which = prv
-		if gui.noticed then
-			gui.handle = gasp.new_handle()
-			if not gui.handle:init( gui.noticed.entryId ) then
-				gui.handle = nil
-			end
-		end
+		gui = hook_process(gui)
 	end
 	return gui
 end

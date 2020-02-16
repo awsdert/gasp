@@ -22,6 +22,53 @@ void *lua_allocator( void *ud, void *ptr, size_t size, size_t want ) {
 	return malloc( want );
 }
 
+int set_scope( char const *path, int set ) {
+	FILE *file;
+	int get = -1;
+	if ( set < 0 ) set = 0;
+	if ( access( path, F_OK ) != 0 ) {
+		get = 0;
+		if ( (file = fopen( path, "w" )) ) {
+			fprintf( file, "%d", set );
+			fflush( file );
+			fclose( file );
+			return 0;
+		}
+		goto fail_open;
+	}
+	if ( !(file = fopen(path,"rw")) ) {
+		fail_open:
+		if ( set < 1 ) {
+			fprintf( stderr, "%s:1:0: Could not set %d"
+				", might not be able to hook apps\n", path, set );
+		}
+		else {
+			fprintf( stderr, "%s:1:0: Could not restore %d"
+				", need to manually restore!\n", path, set );
+		}
+		return 0;
+	}
+	fscanf( file, "%d", &get );
+	if ( set < get ) {
+		fprintf( stderr, "%s:1:0: ptrace scope is restrained by"
+		" value %d,\nAttempting to override to %d, "
+		"Do this manually if gasp fails\n", path, get, set );
+		fseek( file, 0, SEEK_SET );
+		fprintf( file, "%d", set );
+		fflush( file );
+	}
+	else if ( set > get ) {
+		fprintf( stderr, "%s:1:0: Attempting to restore %d"
+				", manually restore if fail!\n", path, set );
+		fseek( file, 0, SEEK_SET );
+		fprintf( file, "%d", set );
+		fflush( file );
+	}
+	fclose( file );
+	file = NULL;
+	return get;
+}
+
 int main( int argc, char *argv[] ) {
 	int ret = EXIT_SUCCESS, into;
 	int arg;
@@ -30,6 +77,9 @@ int main( int argc, char *argv[] ) {
 	proc_notice_t *noticed;
 	proc_handle_t *handle;
 	kvpair_t *args = NULL;
+	int scope, conf;
+	char const *ptrace_scope = "/proc/sys/kernel/yama/ptrace_scope",
+		*ptrace_conf = "/etc/sysctl.d/10-ptrace.conf";
 	char *HOME = NULL, *path = NULL, *PWD = NULL, gasp[] = "gasp",
 		*LUA_PATH = NULL, *LUA_CPATH = NULL, *GASP_PATH = NULL;
 	size_t leng = BUFSIZ
@@ -42,6 +92,9 @@ int main( int argc, char *argv[] ) {
 	lua_CFunction old_lua_panic_cb;
 #endif
 	lua_State *L = NULL;
+	
+	scope = set_scope( ptrace_scope, 0 );
+	conf = set_scope( ptrace_conf, 0 );
 	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != EXIT_SUCCESS ) {
 		ERRMSG( ret, "Couldn't get argument pairs" );
 		goto cleanup;
@@ -162,6 +215,13 @@ int main( int argc, char *argv[] ) {
 	(void)addr;
 #endif
 	cleanup:
+#if 0
+	set_scope( ptrace_scope, scope );
+	set_scope( ptrace_conf, conf );
+#else
+	(void)scope;
+	(void)conf;
+#endif
 	if ( path ) free( path );
 	if ( ret != EXIT_SUCCESS ) {
 		ERRMSG( ret, "Test failed" );

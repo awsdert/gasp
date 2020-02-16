@@ -237,35 +237,29 @@ int lua_proc_change_data( lua_State *L ) {
 	proc_handle_t **handle = (proc_handle_t**)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	intptr_t addr = luaL_checkinteger(L,2);
-	intptr_t size, i;
-	uchar * array;
-	if ( !(*handle) || !lua_istable(L,3) ) {
+	intptr_t size = luaL_checkinteger(L,3), i;
+	uchar * array = NULL;
+	
+	if ( !(*handle) || !lua_istable(L,4) || size < 1 ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
-	lua_len(L,3);
-	size = lua_tointeger(L,-1);
-	if ( size < 1 ) {
-		lua_pushinteger(L,0);
-		return 1;
-	}
+	
 	if ( !(array = calloc( size, 1 )) ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
+	
 	for ( i = 0; i < size; ++i ) {
-		lua_pushinteger(L,i+1);
-		lua_gettable(L,3);
-		array[i] = luaL_checkinteger(L,-1);
+		lua_geti(L,4,i+1);
+		array[i] = lua_tointeger(L,-1);
 		lua_pop(L,1);
 	}
-	size = proc_change_data( NULL, *handle, addr, array, size );
+	
+	size = i ? proc_change_data( NULL, *handle, addr, array, i ) : 0;
+	
 	free(array);
-	if ( size < 1 ) {
-		lua_pushinteger(L,0);
-		return 1;
-	}
-	lua_pushinteger(L,0);
+	lua_pushinteger(L,(size > 0) ? size : 0);
 	return 1;
 }
 
@@ -423,6 +417,125 @@ void lua_proc_create_handle_class( lua_State *L ) {
 
 	/* _G["Foo"] = newclass */
 	lua_setglobal(L, PROC_HANDLE_CLASS );
+}
+#define PROC_MEMORY_CLASS "class_proc_memory"
+
+int lua_proc_memory_term( lua_State *L ) {
+	space_t *space = (space_t*)
+		luaL_checkudata(L,1,PROC_MEMORY_CLASS);
+	less_space( NULL, space, 0 );
+	return 0;
+}
+
+int lua_proc_memory_init( lua_State *L ) {
+	int want = luaL_checkinteger(L,2);
+	space_t *space = (space_t*)
+		luaL_checkudata(L,1,PROC_MEMORY_CLASS);
+	if ( space ) lua_proc_memory_term( L );
+	lua_pushboolean( L, !!more_space( NULL, space, want ) );
+	return 1;
+}
+
+int lua_proc_memory_text( lua_State *L ) {
+	lua_pushstring( L, PROC_MEMORY_CLASS );
+	return 1;
+}
+int lua_proc_memory_grab( lua_State *L ) {
+	space_t *space = lua_newuserdata(L,sizeof(space_t));
+	if ( !space ) return 0;
+	space->given = 0;
+	space->block = NULL;
+	luaL_setmetatable(L,PROC_MEMORY_CLASS);
+	return 1;
+}
+
+luaL_Reg lua_class_proc_memory_func_list[] = {
+	{ "new", lua_proc_memory_grab },
+	{ "init", lua_proc_memory_init },
+	{ "term", lua_proc_memory_term },
+	{ "tostring", lua_proc_memory_text },
+{NULL}};
+
+int lua_proc_memory_node( lua_State *L ) {
+	char const *name = NULL;
+	space_t *space = (space_t*)
+		luaL_checkudata(L,1,PROC_MEMORY_CLASS);
+	node_t num = 0;
+	int i, len = 0;
+	luaL_Reg *reg;
+	if ( lua_isinteger(L,2) ) {
+		i = lua_tointeger(L,2);
+		if ( (size_t)i < space->given ) {
+			lua_pushinteger(L,((uchar*)(space->block))[i]);
+			return 1;
+		}
+		return 0;
+	}
+	if ( lua_isstring(L,2) ) {
+		name = lua_tostring(L,2);
+		if ( strcmp(name,"__len") == 0 ) {
+			lua_pushinteger( L, space->given );
+			return 1;
+		}
+		len = strlen(name);
+		
+		if ( sscanf( name, "%d", &i ) < len ) {
+			for ( num = 0;
+				lua_class_proc_memory_func_list[num].name;
+				++num
+			)
+			{
+				reg = lua_class_proc_memory_func_list + num;
+				if ( strcmp(name,reg->name) == 0 )
+					return reg->func(L);
+			}
+			return 0;
+		}
+	}
+	return 0;
+}
+
+int lua_proc_memory_make( lua_State *L ) {
+	(void)L;
+	return 0;
+}
+
+int lua_proc_memory_free( lua_State *L ) {
+	lua_proc_memory_term(L);
+	return 0;
+}
+
+luaL_Reg lua_class_proc_memory_meta_list[] = {
+	{ "__gc", lua_proc_memory_free },
+	{ "__index",lua_proc_memory_node },
+	{ "__newindex", lua_proc_memory_make },
+{NULL,NULL}};
+
+void lua_proc_create_memory_class( lua_State *L ) {
+	int lib_id, meta_id;
+
+	/* newclass = {} */
+	lua_createtable(L, 0, 0);
+	lib_id = lua_gettop(L);
+	
+	/* metatable = {} */
+	luaL_newmetatable(L, PROC_MEMORY_CLASS);
+	meta_id = lua_gettop(L);
+	luaL_setfuncs(L, lua_class_proc_memory_meta_list, 0);
+	
+	/* metatable.__index = _methods */
+	luaL_newlib( L, lua_class_proc_memory_func_list );
+	lua_setfield( L, meta_id, "__index" );  
+
+	/* metatable.__metatable = _meta */
+	luaL_newlib( L, lua_class_proc_memory_meta_list );
+	lua_setfield( L, meta_id, "__metatable");
+
+	/* class.__metatable = metatable */
+	lua_setmetatable( L, lib_id );
+
+	/* _G["Foo"] = newclass */
+	lua_setglobal(L, PROC_MEMORY_CLASS );
 }
 void lua_create_proc_classes( lua_State *L ) {
 	lua_proc_create_glance_class(L);

@@ -218,6 +218,21 @@ int lua_get_endian( lua_State *L ) {
 	return 0;
 }
 
+int lua_int2bytes( lua_State *L ) {
+	lua_Integer val = luaL_checkinteger(L,1);
+	size_t size = luaL_checkinteger(L,2), i = 0;
+	char *v = (char*)&val;
+	if ( size > sizeof(lua_Integer) )
+		size = sizeof(lua_Integer);
+	lua_createtable(L,size,0);
+	for ( i = 0; i < size; ++i ) {
+		lua_pushinteger(L,i+1);
+		lua_pushinteger(L,v[i]);
+		lua_settable(L,-3);
+	}
+	return 1;
+}
+
 int lua_tointbytes( lua_State *L ) {
 	char const *text = luaL_checkstring(L,1);
 	size_t leng = strlen(text), size = 0, i;
@@ -252,6 +267,7 @@ int lua_tointbytes( lua_State *L ) {
 	lua_pushinteger(L,++size);
 	lua_pushinteger(L,value);
 	lua_settable(L,-3);
+	push_branch_int( L, "__len", size );
 	return 1;
 }
 
@@ -297,6 +313,7 @@ void lua_create_gasp(lua_State *L) {
 	push_branch_cfunc(L,"get_endian",lua_get_endian);
 	push_branch_cfunc(L,"totxtbytes",lua_totxtbytes);
 	push_branch_cfunc(L,"tointbytes",lua_tointbytes);
+	push_branch_cfunc(L,"int2bytes",lua_int2bytes);
 	for ( i = 0; lua_path_funcs[i].name; ++i ) {
 		reg = lua_path_funcs + i;
 		push_branch_cfunc(L,reg->name,reg->func);

@@ -5,8 +5,8 @@ cfg = {
 	anti_aliasing = false,
 	cheatdir = '/mnt/HOME/cheats/gasp',
 	window = {
-		width = 1600,
-		height = 900,
+		width = 480,
+		height = 640,
 		title = "GASP - Gaming Assistive tech for Solo Play"
 	},
 	colors = {

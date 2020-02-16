@@ -1206,14 +1206,17 @@ size_t proc__change_self(
 	}
 	
 	if ( handle->notice.self ) {
+		errno = EXIT_SUCCESS;
 		(void)memmove( (void*)addr, mem, size );
-		if ( err ) *err = errno;
-		if ( errno != EXIT_SUCCESS )
+		if ( errno != EXIT_SUCCESS ) {
+			if ( err ) *err = errno;
 			ERRMSG( errno, "Couldn't override VM" );
-		return ret;
+			return 0;
+		}
+		return size;
 	}
 	
-	return ENOSYS;
+	return 0;
 }
 
 intptr_t proc__change_seek(

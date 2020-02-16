@@ -96,9 +96,9 @@ function add_tree_node(ctx,text,selected,id,isparent)
 	end
 	return false, selected
 end
-local function bytes2int(bytes)
+local function bytes2int(bytes,size)
 	local int = 0
-	local i = #bytes
+	local i = size
 	while i > 0 do
 		int = int << 8
 		int = int | bytes[i]
@@ -106,19 +106,9 @@ local function bytes2int(bytes)
 	end
 	return int
 end
-local function int2bytes( int, size )
+local function flipbytes( bytes, size )
 	local i = 1
-	local t = {}
-	while i < size do
-		t[i] = int & 0xFF
-		int = int >> 8
-		i = i + 1
-	end
-	return t
-end
-local function flipbytes( bytes )
-	local i = 1
-	local j = #bytes
+	local j = size
 	local b
 	while i < j do
 		b = bytes[i]
@@ -160,16 +150,18 @@ local function draw_cheats(gui,ctx)
 				nk.layout_row_dynamic(ctx,pad_height(font,"="),3)
 				nk.label(ctx,(v.method or "="),nk.TEXT_LEFT)
 				nk.label(ctx,(v.desc or "{???}"),nk.TEXT_LEFT)
-				if gui.handle and gui.handle:valid() == true then
+				if gui.cheat_text and gui.cheat_addr == v.addr then
+					text = gui.cheat_text
+				elseif gui.handle and gui.handle:valid() == true then
 					if v.signed then
 						text = gui.handle:read( v.addr or 0, v.signed )
 						if text then
 							--[[Flip Big Endian to Little Endian,
 								no native awareness yet]]
 							if gui.cheat.endian == "Big" then
-								text = flipbytes(text)
+								text = flipbytes(text,v.signed)
 							end
-							text = "" .. (bytes2int(text))
+							text = "" .. (bytes2int(text,v.signed))
 						else text = "" end
 					elseif v.bytes then
 						text = gui.handle:read( v.addr or 0, v.bytes )
@@ -184,20 +176,25 @@ local function draw_cheats(gui,ctx)
 				tmp = nk.edit_string(ctx,nk.EDIT_SIMPLE,text,100)
 				if gui.handle and gui.handle:valid() == true then
 					if tmp ~= text then
+						gui.cheat_text = tmp
+						gui.cheat_addr = v.addr
 						if v.signed then
-							tmp = int2bytes(tmp,v.signed)
+							tmp = gasp.int2bytes(tonumber(tmp) or 0,v.signed)
 							if gui.endian == "Big" then
-								tmp = flipbytes(tmp)
+								tmp = flipbytes(tmp,v.signed)
 							end
+							j = v.signed
 						elseif v.bytes then
 							tmp = gasp.tointbytes(tmp)
+							j = v.bytes
 						else
 							tmp = {}
+							j = 0
 						end
-						text = gui.handle:write( v.addr or 0, tmp)
-						if text ~= #tmp then
-							print( "Did " .. text .. ", Should've done " .. #tmp )
-						end
+						tmp = gui.handle:write( v.addr or 0, j, tmp )
+					elseif gui.cheat.addr == v.addr then
+						gui.cheat_text = nil
+						gui.cheat_addr = nil
 					end
 				end
 			end

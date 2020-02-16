@@ -72,6 +72,7 @@ src__warning:=-Wall -Wextra -Wpedantic
 src__commmon:=-std=c99
 src__defines:=$(sys_defines:%=-D %)
 src__defines+=-D LUAVER=$(lua_ver) -D _FILE_OFFSET_BITS=64
+src__defines+=-D _DEFAULT_SOURCE
 src_combined:=$(src__warning) $(src__commmon) $(src__defines)
 
 ARGS=

@@ -25,6 +25,14 @@ return function(gui,ctx,prv)
 		gui.which = prv
 		if gui.cheatfile then
 			gui.cheat = dofile(text .. "/" .. gui.cheatfile)
+			if gui.cheat then
+				if gui.cheat.app then
+					cfg.find_process =
+						gui.cheat.app.name or cfg.find_process
+				end
+			else
+				gui.cheat = {}
+			end
 		else
 			gui.cheat = {}
 		end

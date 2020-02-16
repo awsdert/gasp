@@ -105,8 +105,22 @@ local function bytes2int(bytes)
 	end
 	return int
 end
+local function flipbytes( bytes )
+	local i = 1
+	local j = #bytes
+	local b
+	while i < j do
+		b = bytes[i]
+		bytes[i] = bytes[j]
+		bytes[j] = b
+		i = i + 1
+		j = j - 1
+	end
+	return bytes
+end
 local function draw_cheats(gui,ctx)
 	local i, v, id, text, j, k, tmp, font
+	glfw.wait_events_timeout(cfg.rps or 0.5)
 	font = get_font(gui)
 	id = gui.idc
 	gui.idc = gui.idc + 1
@@ -135,25 +149,24 @@ local function draw_cheats(gui,ctx)
 				nk.layout_row_dynamic(ctx,pad_height(font,"="),3)
 				nk.label(ctx,(v.method or "="),nk.TEXT_LEFT)
 				nk.label(ctx,(v.desc or "{???}"),nk.TEXT_LEFT)
-				if v.signed then
-					text = gui.handle:read( v.addr or 0, v.signed )
-					if text then
-						--[[Flip Big Endian to Little Endian,
-							no native awareness yet]]
-						if gui.cheat.endian == "Big" then
-							j,k = 1,#text
-							while j < k do
-								tmp = text[j]
-								text[j] = text[k]
-								text[k] = tmp
+				if gui.handle and gui.handle:valid() == true then
+					if v.signed then
+						text = gui.handle:read( v.addr or 0, v.signed )
+						if text then
+							--[[Flip Big Endian to Little Endian,
+								no native awareness yet]]
+							if gui.cheat.endian == "Big" then
+								text = flipbytes(text)
 							end
-						end
-						text = "" .. (bytes2int(text))
-					else text = "" end
-				elseif v.bytes then
-					text = gui.handle:read( v.addr or 0, v.bytes )
-					if #text > 0 then text = gasp.totxtbytes(text)
-					else text = "" end
+							text = "" .. (bytes2int(text))
+						else text = "" end
+					elseif v.bytes then
+						text = gui.handle:read( v.addr or 0, v.bytes )
+						if #text > 0 then text = gasp.totxtbytes(text)
+						else text = "" end
+					else
+						text = ""
+					end
 				else
 					text = ""
 				end
@@ -248,8 +261,6 @@ GUI.draw["main"] = { desc = "Main", func = function(gui,ctx)
 		if nk.button( ctx, nil, "Unhook" ) then
 			gui.handle:term()
 			gui.donothook = true
-		else
-			gui = draw_cheats( gui, ctx )
 		end
 	elseif gui.noticed then
 		text = "Selected:"
@@ -271,6 +282,7 @@ GUI.draw["main"] = { desc = "Main", func = function(gui,ctx)
 		nk.layout_row_dynamic(ctx,pad_height(font,text),1)
 		nk.label( ctx, "Nothing selected", nk.TEXT_LEFT )
 	end
+	gui = draw_cheats( gui, ctx )
 	return gui
 end
 }

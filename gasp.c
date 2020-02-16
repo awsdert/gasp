@@ -43,7 +43,7 @@ int main( int argc, char *argv[] ) {
 #else
 	launch = "deep-gasp.elf";
 #endif
-	sprintf( path, "pkexec %s/%s"
+	sprintf( path, "pkexec sudo %s/%s"
 		" -D HOME='%s' -D PWD='%s' -D CWD='%s'",
 		PWD, launch, HOME, PWD, CWD );
 	if ( DISPLAY )
@@ -54,7 +54,7 @@ int main( int argc, char *argv[] ) {
 		sprintf( strchr( path, '\0'), " %s", cmd );
 	}
 	fprintf(stderr, "gasp = '%s'\n", gasp);
-	puts(path);
+	fprintf(stderr,"%s\n",path);
 	ret = system( path );
 	fprintf(stderr, "gasp = '%s'\n", gasp);
 	cleanup:

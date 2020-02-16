@@ -213,6 +213,11 @@ int lua_proc_glance_data( lua_State *L ) {
 		return 1;
 	}
 	array = calloc( size, 1 );
+	if ( !array ) {
+		ERRMSG( errno, "Couldn't allocate memory" );
+		lua_newtable(L);
+		return 1;
+	}
 	size = proc_glance_data( NULL, *handle, addr, array, size );
 	if ( size < 1 ) {
 		free(array);

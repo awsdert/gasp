@@ -98,12 +98,23 @@ function add_tree_node(ctx,text,selected,id,isparent)
 end
 local function bytes2int(bytes)
 	local int = 0
-	local i,v
-	for i,v in pairs(bytes) do
+	local i = #bytes
+	while i > 0 do
 		int = int << 8
-		int = int | v
+		int = int | bytes[i]
+		i = i - 1
 	end
 	return int
+end
+local function int2bytes( int, size )
+	local i = 1
+	local t = {}
+	while i < size do
+		t[i] = int & 0xFF
+		int = int >> 8
+		i = i + 1
+	end
+	return t
 end
 local function flipbytes( bytes )
 	local i = 1
@@ -170,7 +181,25 @@ local function draw_cheats(gui,ctx)
 				else
 					text = ""
 				end
-				nk.edit_string(ctx,nk.EDIT_SIMPLE,text,100)
+				tmp = nk.edit_string(ctx,nk.EDIT_SIMPLE,text,100)
+				if gui.handle and gui.handle:valid() == true then
+					if tmp ~= text then
+						if v.signed then
+							tmp = int2bytes(tmp,v.signed)
+							if gui.endian == "Big" then
+								tmp = flipbytes(tmp)
+							end
+						elseif v.bytes then
+							tmp = gasp.tointbytes(tmp)
+						else
+							tmp = {}
+						end
+						text = gui.handle:write( v.addr or 0, tmp)
+						if text ~= #tmp then
+							print( "Did " .. text .. ", Should've done " .. #tmp )
+						end
+					end
+				end
 			end
 		end
 		nk.tree_pop(ctx)

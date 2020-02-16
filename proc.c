@@ -930,10 +930,8 @@ intptr_t proc__glance_file(
 )
 {
 #ifdef gasp_pread
-	intptr_t done = 0, next, temp;
+	intptr_t done = 0;
 	int ret, fd;
-	mode_t perm;
-	proc_mapped_t mapped = {0};
 	char path[64] = {0};
 	
 	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
@@ -1172,6 +1170,7 @@ intptr_t proc__change_file(
 	intptr_t done = 0;
 	int ret, fd;
 	
+	(void)fd;
 	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
 	{
 		if ( err ) *err = ret;

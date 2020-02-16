@@ -201,21 +201,58 @@ int lua_path_files( lua_State *L ) {
 }
 
 int lua_get_endian( lua_State *L ) {
-	long val = 0x12345678
+	long val = 0x12345678;
 	uchar *bytes = (uchar*)&val;
 	switch ( *bytes ) {
 	case 0x78: lua_pushstring(L, "Little"); return 1;
 	case 0x12: lua_pushstring(L, "Big"); return 1;
-	case 0x56: lua_pushstring(L, "BPDP"); return 1;
-	case 0x34: lua_pushstring(L, "LPDP"); return 1;
+	case 0x56: lua_pushstring(L, "LPDP"); return 1;
+	case 0x34: lua_pushstring(L, "BPDP"); return 1;
 	}
 	switch ( bytes[4] ) {
 	case 0x78: lua_pushstring(L, "Little"); return 1;
 	case 0x12: lua_pushstring(L, "Big"); return 1;
-	case 0x56: lua_pushstring(L, "BPDP"); return 1;
-	case 0x34: lua_pushstring(L, "LPDP"); return 1;
+	case 0x56: lua_pushstring(L, "LPDP"); return 1;
+	case 0x34: lua_pushstring(L, "BPDP"); return 1;
 	}
 	return 0;
+}
+
+int lua_tointbytes( lua_State *L ) {
+	char const *text = luaL_checkstring(L,1);
+	size_t leng = strlen(text), size = 0, i;
+	int value = 0;
+	
+	lua_newtable(L);
+	for ( i = 0; i < leng; ++i ) {
+		if ( text[i] == ' ' ) {
+			lua_pushinteger(L,++size);
+			lua_pushinteger(L,value);
+			lua_settable(L,-3);
+			value = 0;
+			continue;
+		}
+		
+		value <<= CHAR_BIT;
+		if ( value > UCHAR_MAX ) {
+			lua_error_cb( L, "Invalid value" );
+			return 1;
+		}
+		if ( text[i] >= '0' && text[i] <= '9' )
+			value |= (text[i] - '0');
+		else if ( text[i] >= 'A' && text[i] <= 'F' )
+			value |= (text[i] - 'A');
+		else if ( text[i] >= 'a' && text[i] <= 'a' )
+			value |= (text[i] - 'a');
+		else {
+			lua_error_cb( L, "Invalid value" );
+			return 1;
+		}
+	}
+	lua_pushinteger(L,++size);
+	lua_pushinteger(L,value);
+	lua_settable(L,-3);
+	return 1;
 }
 
 int lua_totxtbytes( lua_State *L ) {
@@ -259,6 +296,7 @@ void lua_create_gasp(lua_State *L) {
 	push_branch_cfunc(L,"new_handle",lua_proc_handle_grab);
 	push_branch_cfunc(L,"get_endian",lua_get_endian);
 	push_branch_cfunc(L,"totxtbytes",lua_totxtbytes);
+	push_branch_cfunc(L,"tointbytes",lua_tointbytes);
 	for ( i = 0; lua_path_funcs[i].name; ++i ) {
 		reg = lua_path_funcs + i;
 		push_branch_cfunc(L,reg->name,reg->func);

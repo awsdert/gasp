@@ -1,12 +1,12 @@
 cfg = {
-	fps = 30,
+	fps = 60,
 	volume = 0.5,
 	clipboard = false,
 	anti_aliasing = false,
 	cheatdir = '/mnt/HOME/cheats/gasp',
 	window = {
-		width = 480,
-		height = 640,
+		width = 640,
+		height = 480,
 		title = "GASP - Gaming Assistive tech for Solo Play"
 	},
 	colors = {

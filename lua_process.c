@@ -247,133 +247,26 @@ int lua_proc_glance_data( lua_State *L ) {
 int lua_proc_change_data( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	intptr_t addr = luaL_checkinteger(L,2);
-	intptr_t size = luaL_checkinteger(L,3), i;
+	intptr_t addr = luaL_checkinteger(L,2), size;
 	uchar * array = NULL;
+	nodes_t *nodes;
 	
-	if ( !(handle->handle) || !lua_istable(L,4) || size < 1 ) {
+	if ( !(handle->handle) ) {
+		lua_pushinteger(L,0);
+		return 1;
+	}
+	nodes = &(handle->bytes);
+	
+	if ( !(array = lua_extract_bytes(
+		NULL, L, lua_istable(L,4) ? 4 : 3, nodes)) ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
 	
-	if ( !(array = calloc( size, 1 )) ) {
-		lua_pushinteger(L,0);
-		return 1;
-	}
-	
-	for ( i = 0; i < size; ++i ) {
-		lua_geti(L,4,i+1);
-		array[i] = lua_tointeger(L,-1);
-		lua_pop(L,1);
-	}
-	
-	size = i ? proc_change_data( NULL, handle->handle, addr, array, i ) : 0;
-	
-	free(array);
+	size = proc_change_data( NULL, handle->handle, addr, array, nodes->count );
+
 	lua_pushinteger(L,(size > 0) ? size : 0);
 	return 1;
-}
-
-void* lua_extract_bytes(
-	int *err, lua_State *L, int index, nodes_t *dst ) {
-	char const *text, *traceback_text = "print(debug.traceback())\n";
-	char unexpected[64] = {0};
-	lua_Integer ival;
-	lua_Number	fval;
-	uchar *array;
-	node_t i, leng;
-	size_t value = 0;
-	if ( !(array =
-		more_nodes( uchar, err, dst, BUFSIZ )) )
-		return NULL;
-	if ( lua_isstring(L,index) ) {
-		text = lua_tostring(L,index);
-		leng = strlen(text);
-		if ( !(array =
-			more_nodes( uchar, err, dst, leng )) )
-			return NULL;
-		for ( i = 0; i < leng; ++i ) {
-			if ( value > UCHAR_MAX ) {
-				sprintf( unexpected,
-					"%serror('Byte %lu too big at argument #%d'",
-					traceback_text, (ulong)(dst->count), index );
-				luaL_dostring(L,unexpected);
-				return NULL;
-			}
-			if ( text[i] == ' ' ) {
-				array[dst->count] = value;
-				dst->count++;
-				value = 0;
-				continue;
-			}
-			value <<= 8;
-			if ( text[i] >= '0' && text[i] <= '9' )
-				value |= (text[i] - '0');
-			else if ( text[i] >= 'A' && text[i] <= 'F' )
-				value |= (text[i] - 'A') + 10;
-			else if ( text[i] >= 'a' && text[i] <= 'f' )
-				value |= (text[i] - 'a') + 10;
-			else {
-				sprintf( unexpected,
-					"%serror('Invalid character in argument #%d"
-					"at position %lu'",
-					traceback_text, index, (ulong)i );
-				luaL_dostring(L,unexpected);
-				return NULL;
-			}
-		}
-		if ( text[--i] != ' ' ) {
-			if ( value > UCHAR_MAX ) {
-				sprintf( unexpected,
-					"%serror('Byte %lu too big at argument #%d'",
-					traceback_text, (ulong)(dst->count), index );
-				luaL_dostring(L,unexpected);
-				return NULL;
-			}
-			if ( text[i] == ' ' ) {
-				array[dst->count] = value;
-				dst->count++;
-				value = 0;
-			}
-		}
-		return array;
-	}
-	else if ( lua_isinteger(L,index) ) {
-		ival = lua_tointeger(L,index);
-		dst->count = sizeof(lua_Integer);
-		memcpy( array, &ival, sizeof(lua_Integer) );
-		return array;
-	}
-	else if ( lua_isnumber(L,index) ) {
-		fval = lua_tonumber(L,index);
-		dst->count = sizeof(lua_Number);
-		memcpy( array, &fval, sizeof(lua_Number) );
-		return array;
-	}
-	else if ( lua_istable(L,index) ) {
-		ival = luaL_checkinteger(L,index-1);
-		for ( i = 0; i < dst->total; i++ ) {
-			lua_geti(L,index,i+1);
-			array[i] = luaL_checkinteger(L,-1);
-			lua_pop(L,1);
-		}
-		dst->count = i;
-		return array;
-	}
-	else if ( lua_isuserdata(L,index ) ) {
-		sprintf( unexpected,
-			"%serror('unexpected userdata in argument #%d')",
-			traceback_text, index
-		);
-		luaL_dostring(L,unexpected);
-		return NULL;
-	}
-	else {
-		dst->count = 1;
-		array[0] = lua_isnil(L,index) ? 0 : lua_toboolean(L,index);
-		return array;
-	}
-	return NULL;
 }
 
 int lua_proc_aobscan( lua_State *L ) {
@@ -393,8 +286,8 @@ int lua_proc_aobscan( lua_State *L ) {
 		lua_newtable(L);
 		return 1;
 	}
-	if ( !(array =
-		lua_extract_bytes( NULL, L, index, &(handle->bytes) ))
+	if ( !(array = lua_extract_bytes(
+		NULL, L, index, &(handle->bytes) ))
 	)
 	{
 		lua_newtable(L);
@@ -417,7 +310,6 @@ int lua_proc_aobscan( lua_State *L ) {
 		lua_pushinteger( L, i+1 );
 		lua_pushstring( L, path );
 		lua_settable(L,-3);
-		lua_pop(L,1);
 	}
 	return 1;
 }

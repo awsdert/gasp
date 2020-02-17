@@ -1,4 +1,89 @@
 #include "gasp.h"
+
+void* lua_extract_bytes(
+	int *err, lua_State *L, int index, nodes_t *dst ) {
+	char const *text, *traceback_text = "print(debug.traceback())\n";
+	char unexpected[64] = {0};
+	lua_Integer ival;
+	lua_Number	fval;
+	uchar *array;
+	node_t i, leng;
+	size_t value = 0;
+	if ( !(array =
+		more_nodes( uchar, err, dst, BUFSIZ )) )
+		return NULL;
+	if ( lua_isstring(L,index) ) {
+		text = lua_tostring(L,index);
+		leng = strlen(text);
+		if ( !leng || !(array =
+			more_nodes( uchar, err, dst, leng )) )
+			return NULL;
+		for ( i = 0; i < leng; ++i ) {
+			if ( text[i] == ' ' )
+				continue;
+			value <<= 8;
+			if ( value > UCHAR_MAX ) {
+				array[dst->count] = value >> 8;
+				dst->count++;
+				value = 0;
+			}
+			if ( text[i] >= '0' && text[i] <= '9' )
+				value |= (text[i] - '0');
+			else if ( text[i] >= 'A' && text[i] <= 'F' )
+				value |= (text[i] - 'A') + 10;
+			else if ( text[i] >= 'a' && text[i] <= 'f' )
+				value |= (text[i] - 'a') + 10;
+			else {
+				sprintf( unexpected,
+					"%serror('Invalid character in argument #%d"
+					"at position %lu'",
+					traceback_text, index, (ulong)i );
+				luaL_dostring(L,unexpected);
+				return NULL;
+			}
+		}
+		array[dst->count] = value;
+		dst->count++;
+		return array;
+	}
+	else if ( lua_isinteger(L,index) ) {
+		ival = lua_tointeger(L,index);
+		dst->count = sizeof(lua_Integer);
+		memcpy( array, &ival, sizeof(lua_Integer) );
+		return array;
+	}
+	else if ( lua_isnumber(L,index) ) {
+		fval = lua_tonumber(L,index);
+		dst->count = sizeof(lua_Number);
+		memcpy( array, &fval, sizeof(lua_Number) );
+		return array;
+	}
+	else if ( lua_istable(L,index) ) {
+		ival = luaL_checkinteger(L,index-1);
+		for ( i = 0; i < dst->total; i++ ) {
+			lua_geti(L,index,i+1);
+			array[i] = luaL_checkinteger(L,-1);
+			lua_pop(L,1);
+		}
+		dst->count = i;
+		return array;
+	}
+	else if ( lua_isuserdata(L,index ) ) {
+		sprintf( unexpected,
+			"%serror('unexpected userdata in argument #%d')",
+			traceback_text, index
+		);
+		luaL_dostring(L,unexpected);
+		return NULL;
+	}
+	else {
+		dst->count = 1;
+		array[0] = lua_isnil(L,index) ? 0 : lua_toboolean(L,index);
+		return array;
+	}
+	return NULL;
+}
+
 int lua_panic_cb( lua_State *L ) {
 	puts("Error: Lua traceback...");
 	luaL_traceback(L,L,"[error]",-1);
@@ -219,78 +304,68 @@ int lua_get_endian( lua_State *L ) {
 }
 
 int lua_int2bytes( lua_State *L ) {
-	lua_Integer val = luaL_checkinteger(L,1);
-	size_t size = luaL_checkinteger(L,2), i = 0;
-	char *v = (char*)&val;
-	if ( size > sizeof(lua_Integer) )
-		size = sizeof(lua_Integer);
-	lua_createtable(L,size,0);
-	for ( i = 0; i < size; ++i ) {
-		lua_pushinteger(L,i+1);
-		lua_pushinteger(L,v[i]);
-		lua_settable(L,-3);
+	node_t i, limit = luaL_optinteger(L,2,sizeof(lua_Integer));
+	nodes_t nodes = {0};
+	uchar *array;
+	luaL_checkinteger(L,1);
+	if ( !(array = lua_extract_bytes( NULL, L, 1, &nodes )) ) {
+		free_nodes( uchar, NULL, &nodes );
+		lua_newtable(L);
+		return 1;
 	}
+	lua_createtable(L,limit,1);
+	//push_branch_int( L, "__len", limit );
+	for ( i = 0; i < limit; ++i ) {
+		lua_pushinteger(L,i+1);
+		lua_pushinteger(L,array[i]);
+		lua_settable(L,-3);
+		lua_pop(L,1);
+	}
+	free_nodes( uchar, NULL, &nodes );
 	return 1;
 }
 
 int lua_tointbytes( lua_State *L ) {
-	char const *text = luaL_checkstring(L,1);
-	size_t leng = strlen(text), size = 0, i;
-	int value = 0;
-	
-	lua_newtable(L);
-	for ( i = 0; i < leng; ++i ) {
-		if ( text[i] == ' ' ) {
-			lua_pushinteger(L,++size);
-			lua_pushinteger(L,value);
-			lua_settable(L,-3);
-			value = 0;
-			continue;
-		}
-		
-		value <<= CHAR_BIT;
-		if ( value > UCHAR_MAX ) {
-			lua_error_cb( L, "Invalid value" );
-			return 1;
-		}
-		if ( text[i] >= '0' && text[i] <= '9' )
-			value |= (text[i] - '0');
-		else if ( text[i] >= 'A' && text[i] <= 'F' )
-			value |= (text[i] - 'A');
-		else if ( text[i] >= 'a' && text[i] <= 'a' )
-			value |= (text[i] - 'a');
-		else {
-			lua_error_cb( L, "Invalid value" );
-			return 1;
-		}
+	node_t i;
+	nodes_t nodes = {0};
+	uchar *array;
+	if ( !(array = lua_extract_bytes(
+		NULL, L, lua_istable(L,1) ? 2 : 1, &nodes ))
+	) 
+	{
+		free_nodes( uchar, NULL, &nodes );
+		lua_newtable(L);
+		return 1;
 	}
-	lua_pushinteger(L,++size);
-	lua_pushinteger(L,value);
-	lua_settable(L,-3);
-	push_branch_int( L, "__len", size );
+	lua_createtable(L,nodes.count,1);
+	for ( i = 0; i < nodes.count; ++i ) {
+		lua_pushinteger(L,i+1);
+		lua_pushinteger(L,array[i]);
+		lua_settable(L,-3);
+	}
+	free_nodes( uchar, NULL, &nodes );
 	return 1;
 }
 
 int lua_totxtbytes( lua_State *L ) {
-	size_t i, size;
-	char *text;
-	if ( !lua_istable(L,1) )
-		return 0;
-	lua_len(L,1);
-	size = lua_tointeger(L,-1);
-	text = calloc((size+1) * 3,1);
-	lua_pushinteger( L, 1 );
-	lua_gettable(L,1);
-	sprintf( text, "%02X",
-		(unsigned int)luaL_checkinteger(L,-1));
-	for ( i = 1; i < size; ++i ) {
-		lua_geti(L,1,i+1);
-		sprintf( strchr(text,'\0'), " %02X",
-			(unsigned int)luaL_checkinteger(L,-1));
-		lua_pop(L,1);
+	node_t i;
+	nodes_t nodes = {0}, text = {0};
+	uchar *array;
+	char *txt;
+	if ( !(array = lua_extract_bytes(
+		NULL, L, lua_istable(L,1) ? 2 : 1, &nodes ))
+		|| !(txt = more_nodes(
+		char, NULL, &text, nodes.count * CHAR_BIT )) ) {
+		free_nodes( uchar, NULL, &nodes );
+		lua_pushstring(L,"");
+		return 1;
 	}
-	lua_pushstring(L,text);
-	free(text);
+	sprintf( txt, "%02X", *array );
+	for ( i = 1; i < nodes.count; ++i )
+		sprintf( strchr(txt,'\0'), " %02X", array[i] );
+	lua_pushstring(L,txt);
+	free_nodes( uchar, NULL, &nodes );
+	free_nodes( uchar, NULL, &text );
 	return 1;
 }
 

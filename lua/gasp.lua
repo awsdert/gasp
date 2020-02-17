@@ -2,6 +2,11 @@
 -- Simple example that shows how to change font when drawing widgets.
 -- Uses the GLFW/OpenGL rear shipped with MoonNuklear.
 
+function trace()
+	return print(debug.traceback())
+end
+debug.sethook(trace,"*")
+
 cfg = require("cfg")
 gl = require("moongl")
 glfw = require("moonglfw")
@@ -110,6 +115,10 @@ local function flipbytes( bytes, size )
 	local i = 1
 	local j = size
 	local b
+	if type(bytes) == "string" then
+		print(debug.traceback())
+		return nil
+	end
 	while i < j do
 		b = bytes[i]
 		bytes[i] = bytes[j]
@@ -119,40 +128,94 @@ local function flipbytes( bytes, size )
 	end
 	return bytes
 end
+local function calc_cheat_bounds(font,text,prev)
+	local t = { x = 0, y = 0,
+		w = pad_width(font,text),
+		h = pad_height(font,text)
+	}
+	if prev then
+		t.x = t.x + t.w
+	end
+	return t
+end
 local function draw_cheat(gui,ctx,font,v)
-	local text, j, k, x, tmp, bytes, test
-	nk.layout_row_dynamic(ctx,pad_height(font,"="),3)
-	nk.label(ctx,(v.method or "="),nk.TEXT_LEFT)
-	nk.label(ctx,(v.desc or "{???}"),nk.TEXT_LEFT)
-	if gui.cheat_text and
-	gui.cheat_addr and gui.cheat_addr == v.addr then
+	local prv, now, nxt, text, j, k, x, tmp, bytes, test
+	
+	-- Method of changing the value
+	nk.label(ctx,v.method or "=",nk.TEXT_LEFT)
+	
+	-- Description of the cheat
+	nk.label(ctx,v.desc or "{???}",nk.TEXT_LEFT)
+	
+	if v.offset then
+		text = string.format( "%X", v.offset )
+		-- Give user a chance to edit the offset
+		text  = nk.edit_string(ctx,nk.EDIT_FIELD | nk.TEXT_RIGHT,text,16)
+		v.offset = tonumber( text, 16 )
+	else
+		text = string.format( "%X", v.addr )
+		if v.generated == true then
+			-- Generated addresses should not be editable
+			nk.label(ctx,text,nk.TEXT_LEFT)
+		else
+			-- Give user a chance to edit the address
+			text  = nk.edit_string(ctx,nk.EDIT_FIELD | nk.TEXT_RIGHT,text,16)
+			v.addr = tonumber( text, 16 )
+		end
+	end
+	
+	if v.list then
+		nk.label( ctx, "", nk.TEXT_LEFT )
+		for k,x in pairs(v.list) do
+			if x.offset then
+				x.addr = v.addr + x.offset
+				x.generated = true
+			end
+			gui = draw_cheat(gui,ctx,font,x)
+		end
+		return gui
+	end
+	
+	-- Editing in progress
+	if gui.cheat_text and gui.cheat_addr == v.addr then
 		text = gui.cheat_text
+		k = (v.signed or v.bytes or 0) * 3
+		if k == 0 then k = 1 end
+	--[[ Only a cheat with count should generate this and only
+	when the value of the top cheat is edited ]]
 	elseif v.value then
 		text = v.value
+		k = (v.signed or v.bytes or 0) * 3
+		if k == 0 then k = 1 end
+	-- Read the value of the app and display that
 	elseif gui.handle and gui.handle:valid() == true then
 		if v.signed then
+			k = v.signed * 3
 			test = 'signed'
-			text = gui.handle:read( v.addr or 0, v.signed )
+			text = gui.handle:read( v.addr, v.signed )
 			if text then
-				--[[Flip Big Endian to Little Endian,
-					no native awareness yet]]
-				if gui.cheat.endian == "Big" then
+				--[[Flip Big Endian to Little Endian or vise versa,
+					minimal native awareness]]
+				if gui.cheat.endian ~= gasp.get_endian() then
 					text = flipbytes(text,v.signed)
 				end
 				text = "" .. (bytes2int(text,v.signed))
 			else text = "" end
 		elseif v.bytes then
+			k = v.bytes * 3
 			test = 'bytes'
-			text = gui.handle:read( v.addr or 0, v.bytes )
-			if #text > 0 then text = gasp.totxtbytes(text)
+			text = gui.handle:read( v.addr, v.bytes )
+			if #text > 0 then text = gasp.totxtbytes(v.bytes,text)
 			else text = "" end
 		else
 			text = ""
+			k = 1
 		end
 	else
 		text = ""
+		k = 1
 	end
-	tmp = nk.edit_string(ctx,nk.EDIT_SIMPLE,text,100)
+	tmp = nk.edit_string(ctx,nk.EDIT_FIELD,text,k)
 	if gui.handle and gui.handle:valid() == true then
 		if tmp ~= text then
 			v.edited = tmp
@@ -172,9 +235,9 @@ local function draw_cheat(gui,ctx,font,v)
 				j = 0
 			end
 			tmp = gui.handle:write( v.addr or 0, j, tmp )
-		elseif gui.cheat.addr == v.addr then
-			gui.cheat_text = nil
+		elseif v.addr == gui.cheat_addr and tmp == gui.cheat_text then
 			gui.cheat_addr = nil
+			gui.cheat_text = nil
 		end
 	end
 	if v.count then
@@ -185,28 +248,32 @@ local function draw_cheat(gui,ctx,font,v)
 			if v.split then
 				bytes = 0
 				for k,x in pairs(v.split) do
-					x.desc = text .. ':' .. (x.desc or '???')
-					x.addr = tmp + bytes
+					k = {}
+					k.desc = text .. ':' .. (x.desc or '???')
+					k.addr = tmp + bytes
+					k.signed = x.signed
+					k.bytes = x.bytes
+					k.generated = true
 					if x[test] == v[test] then
-						x.value = v.edited
+						k.value = v.edited
 					end
-					gui = draw_cheat(gui,ctx,font,x)
-					bytes = bytes + (x.bytes or 1)
+					gui = draw_cheat(gui,ctx,font,k)
+					bytes = bytes + (x.signed or x.bytes or 1)
+					k = nil
 				end
 			else
-				x = v
-				x.count = nil
-				x.split = nil
-				x.desc = text
-				x.addr = tmp
-				if x[test] == v[test] then
-					x.value = v.edited
-				end
-				gui = draw_cheat( gui, ctx, font, x )
+				k = {}
+				k.desc = text
+				k.addr = tmp
+				k.signed = v.signed
+				k.bytes = v.bytes
+				k.generated = true
+				gui = draw_cheat( gui, ctx, font, k )
 			end
 			j = j + 1
 		end
 	end
+	v.edited = nil
 	return gui
 end
 local function draw_cheats(gui,ctx)
@@ -230,12 +297,17 @@ local function draw_cheats(gui,ctx)
 		else
 			nk.label(ctx,"Undescribed",nk.TEXT_LEFT)
 		end
-		if gui.cheat.endian then
-			text = "Endian"
-			nk.label(ctx,text,nk.TEXT_LEFT)
-			nk.label(ctx,gui.cheat.endian,nk.TEXT_LEFT)
-		end
+		gui.cheat.endian = gui.cheat.endian or gasp.get_endian()
+		text = "Endian"
+		nk.label(ctx,text,nk.TEXT_LEFT)
+		nk.label(ctx,gui.cheat.endian,nk.TEXT_LEFT)
 		if gui.cheat.list then
+			nk.layout_row_template_begin(ctx, pad_height(font,"="))
+			nk.layout_row_template_push_static(ctx, pad_width(font,"="))
+			nk.layout_row_template_push_dynamic(ctx)
+			nk.layout_row_template_push_static(ctx, pad_width(font,"0000000000000000"))
+			nk.layout_row_template_push_static(ctx, pad_width(font,"00 00 00 00 "))
+			nk.layout_row_template_end(ctx)
 			for i,v in pairs(gui.cheat.list) do
 				gui = draw_cheat(gui,ctx,font,v)
 			end
@@ -292,7 +364,6 @@ function hook_process(gui)
 		if gui.handle:init( gui.noticed.entryId ) == true then
 			return gui
 		end
-		print( "Error: Could not open handle" )
 	end
 	return gui
 end
@@ -361,11 +432,8 @@ local function draw_all(gui,ctx)
 	if push_font == true then
 		nk.style_push_font( ctx, get_font(gui) )
 	end
-	cfg.window.width, cfg.window.height =
-		glfw.get_window_size(gui.window)
 	if nk.window_begin(ctx, "Show",
-		{0,0,cfg.window.width,cfg.window.height},
-		nk.WINDOW_BORDER | nk.WINDOW_SCALABLE
+		{0,0,cfg.window.width,cfg.window.height}, nk.WINDOW_BORDER
 	) then
 		gui = gui.draw[gui.which].func(gui,gui.ctx,"main")
 	end
@@ -373,9 +441,6 @@ local function draw_all(gui,ctx)
 	if push_font == true then
 		nk.style_pop_font(ctx)
 	end
-	-- Render
-	cfg.window.width, cfg.window.height =
-		glfw.get_window_size(gui.window)
 	gl.viewport(0, 0, cfg.window.width, cfg.window.height)
 	gl.clear_color(R, G, B, A)
 	gl.clear('color')
@@ -386,6 +451,8 @@ local function draw_all(gui,ctx)
 end
 GUI.selected = {}
 while not glfw.window_should_close(GUI.window) do
+	cfg.window.width, cfg.window.height =
+		glfw.get_window_size(GUI.window)
 	glfw.wait_events_timeout(1/cfg.fps)
 	rear.new_frame()
 	GUI.idc = 0

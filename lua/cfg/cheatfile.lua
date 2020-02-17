@@ -24,17 +24,20 @@ return function(gui,ctx,prv)
 	if nk.button( ctx, nil, "Done" ) then
 		gui.which = prv
 		if gui.cheatfile then
-			gui.cheat = dofile(text .. "/" .. gui.cheatfile)
-			if gui.cheat then
-				if gui.cheat.app then
-					cfg.find_process =
-						gui.cheat.app.name or cfg.find_process
-				end
-			else
-				gui.cheat = {}
-			end
+			gui.cheat = dofile(text .. "/" .. gui.cheatfile) or {}
 		else
 			gui.cheat = {}
+		end
+	end
+	if gui.cheat.app then
+		-- Auto fill search box when the process list is opened
+		cfg.find_process =
+			gui.cheat.app.name or cfg.find_process
+		dir = gasp.locate_app(cfg.find_process)
+		-- Auto hook process
+		if #dir == 1 then
+			gui.noticed = dir[1]
+			gui = hook_process(gui)
 		end
 	end
 	return gui

@@ -119,6 +119,96 @@ local function flipbytes( bytes, size )
 	end
 	return bytes
 end
+local function draw_cheat(gui,ctx,font,v)
+	local text, j, k, x, tmp, bytes, test
+	nk.layout_row_dynamic(ctx,pad_height(font,"="),3)
+	nk.label(ctx,(v.method or "="),nk.TEXT_LEFT)
+	nk.label(ctx,(v.desc or "{???}"),nk.TEXT_LEFT)
+	if gui.cheat_text and
+	gui.cheat_addr and gui.cheat_addr == v.addr then
+		text = gui.cheat_text
+	elseif v.value then
+		text = v.value
+	elseif gui.handle and gui.handle:valid() == true then
+		if v.signed then
+			test = 'signed'
+			text = gui.handle:read( v.addr or 0, v.signed )
+			if text then
+				--[[Flip Big Endian to Little Endian,
+					no native awareness yet]]
+				if gui.cheat.endian == "Big" then
+					text = flipbytes(text,v.signed)
+				end
+				text = "" .. (bytes2int(text,v.signed))
+			else text = "" end
+		elseif v.bytes then
+			test = 'bytes'
+			text = gui.handle:read( v.addr or 0, v.bytes )
+			if #text > 0 then text = gasp.totxtbytes(text)
+			else text = "" end
+		else
+			text = ""
+		end
+	else
+		text = ""
+	end
+	tmp = nk.edit_string(ctx,nk.EDIT_SIMPLE,text,100)
+	if gui.handle and gui.handle:valid() == true then
+		if tmp ~= text then
+			v.edited = tmp
+			gui.cheat_text = tmp
+			gui.cheat_addr = v.addr
+			if v.signed then
+				tmp = gasp.int2bytes(tonumber(tmp) or 0,v.signed)
+				if gui.endian == "Big" then
+					tmp = flipbytes(tmp,v.signed)
+				end
+				j = v.signed
+			elseif v.bytes then
+				tmp = gasp.tointbytes(tmp)
+				j = v.bytes
+			else
+				tmp = {}
+				j = 0
+			end
+			tmp = gui.handle:write( v.addr or 0, j, tmp )
+		elseif gui.cheat.addr == v.addr then
+			gui.cheat_text = nil
+			gui.cheat_addr = nil
+		end
+	end
+	if v.count then
+		j = 0
+		while j < v.count do
+			text = v.desc .. '#' .. (j + 1)
+			tmp = v.addr + (j * v.size)
+			if v.split then
+				bytes = 0
+				for k,x in pairs(v.split) do
+					x.desc = text .. ':' .. (x.desc or '???')
+					x.addr = tmp + bytes
+					if x[test] == v[test] then
+						x.value = v.edited
+					end
+					gui = draw_cheat(gui,ctx,font,x)
+					bytes = bytes + (x.bytes or 1)
+				end
+			else
+				x = v
+				x.count = nil
+				x.split = nil
+				x.desc = text
+				x.addr = tmp
+				if x[test] == v[test] then
+					x.value = v.edited
+				end
+				gui = draw_cheat( gui, ctx, font, x )
+			end
+			j = j + 1
+		end
+	end
+	return gui
+end
 local function draw_cheats(gui,ctx)
 	local i, v, id, text, j, k, tmp, font
 	glfw.wait_events_timeout(cfg.rps or 0.5)
@@ -147,56 +237,7 @@ local function draw_cheats(gui,ctx)
 		end
 		if gui.cheat.list then
 			for i,v in pairs(gui.cheat.list) do
-				nk.layout_row_dynamic(ctx,pad_height(font,"="),3)
-				nk.label(ctx,(v.method or "="),nk.TEXT_LEFT)
-				nk.label(ctx,(v.desc or "{???}"),nk.TEXT_LEFT)
-				if gui.cheat_text and gui.cheat_addr == v.addr then
-					text = gui.cheat_text
-				elseif gui.handle and gui.handle:valid() == true then
-					if v.signed then
-						text = gui.handle:read( v.addr or 0, v.signed )
-						if text then
-							--[[Flip Big Endian to Little Endian,
-								no native awareness yet]]
-							if gui.cheat.endian == "Big" then
-								text = flipbytes(text,v.signed)
-							end
-							text = "" .. (bytes2int(text,v.signed))
-						else text = "" end
-					elseif v.bytes then
-						text = gui.handle:read( v.addr or 0, v.bytes )
-						if #text > 0 then text = gasp.totxtbytes(text)
-						else text = "" end
-					else
-						text = ""
-					end
-				else
-					text = ""
-				end
-				tmp = nk.edit_string(ctx,nk.EDIT_SIMPLE,text,100)
-				if gui.handle and gui.handle:valid() == true then
-					if tmp ~= text then
-						gui.cheat_text = tmp
-						gui.cheat_addr = v.addr
-						if v.signed then
-							tmp = gasp.int2bytes(tonumber(tmp) or 0,v.signed)
-							if gui.endian == "Big" then
-								tmp = flipbytes(tmp,v.signed)
-							end
-							j = v.signed
-						elseif v.bytes then
-							tmp = gasp.tointbytes(tmp)
-							j = v.bytes
-						else
-							tmp = {}
-							j = 0
-						end
-						tmp = gui.handle:write( v.addr or 0, j, tmp )
-					elseif gui.cheat.addr == v.addr then
-						gui.cheat_text = nil
-						gui.cheat_addr = nil
-					end
-				end
+				gui = draw_cheat(gui,ctx,font,v)
 			end
 		end
 		nk.tree_pop(ctx)

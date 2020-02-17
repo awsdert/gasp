@@ -956,7 +956,8 @@ intptr_t proc__glance_file(
 
 	if ( done < 0 ) {
 		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't read process memory" );
+		if ( errno != ESPIPE && errno != EIO )
+			ERRMSG( errno, "Couldn't read process memory" );
 		return 0;
 	}
 	return done;
@@ -1033,7 +1034,8 @@ intptr_t proc__glance_seek(
 	if ( handle->memfd < 0 )
 		close(fd);
 	if ( err ) *err = errno;
-	ERRMSG( errno, "Couldn't read process memory" );
+	if ( errno != ESPIPE && errno != EIO )
+		ERRMSG( errno, "Couldn't read process memory" );
 	return 0;
 }
 

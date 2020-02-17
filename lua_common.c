@@ -2,22 +2,22 @@
 
 void* lua_extract_bytes(
 	int *err, lua_State *L, int index, nodes_t *dst ) {
-	char const *text, *traceback_text = "print(debug.traceback())\n";
+	char const *text;
 	char unexpected[64] = {0};
-	lua_Integer ival;
+	uintmax_t ival;
 	lua_Number	fval;
 	uchar *array;
 	node_t i, leng;
 	size_t value = 0;
-	if ( !(array =
-		more_nodes( uchar, err, dst, BUFSIZ )) )
+	if ( !(array = more_nodes( uchar, err, dst, BUFSIZ )) )
 		return NULL;
-	if ( lua_isstring(L,index) ) {
+	if ( lua_isstring(L,index) > 0 ) {
+		if ( err )
+			ERRMSG( EXIT_SUCCESS, "String" );
 		text = lua_tostring(L,index);
 		leng = strlen(text);
-		if ( !leng || !(array =
-			more_nodes( uchar, err, dst, leng )) )
-			return NULL;
+		if ( !leng || !(array = more_nodes( uchar, err, dst, leng )) )
+			goto fail;
 		for ( i = 0; i < leng; ++i ) {
 			if ( text[i] == ' ' )
 				continue;
@@ -35,11 +35,10 @@ void* lua_extract_bytes(
 				value |= (text[i] - 'a') + 10;
 			else {
 				sprintf( unexpected,
-					"%serror('Invalid character in argument #%d"
-					"at position %lu'",
-					traceback_text, index, (ulong)i );
+					"error('Invalid character in argument #%d"
+					"at position %lu')", index, (ulong)i );
 				luaL_dostring(L,unexpected);
-				return NULL;
+				goto fail;
 			}
 		}
 		array[dst->count] = value;
@@ -48,8 +47,9 @@ void* lua_extract_bytes(
 	}
 	else if ( lua_isinteger(L,index) ) {
 		ival = lua_tointeger(L,index);
-		dst->count = sizeof(lua_Integer);
-		memcpy( array, &ival, sizeof(lua_Integer) );
+		for ( i = 0; i < sizeof(lua_Integer); ++i )
+			array[i] = (ival >> (i * CHAR_BIT)) & UCHAR_MAX;
+		dst->count = i;
 		return array;
 	}
 	else if ( lua_isnumber(L,index) ) {
@@ -60,27 +60,27 @@ void* lua_extract_bytes(
 	}
 	else if ( lua_istable(L,index) ) {
 		ival = luaL_checkinteger(L,index-1);
-		for ( i = 0; i < dst->total; i++ ) {
+		for ( i = 0; i < ival; ++i ) {
 			lua_geti(L,index,i+1);
-			array[i] = luaL_checkinteger(L,-1);
+			array[i] = lua_isnil(L,-1) ? 0 : luaL_checkinteger(L,-1);
 			lua_pop(L,1);
 		}
 		dst->count = i;
 		return array;
 	}
 	else if ( lua_isuserdata(L,index ) ) {
-		sprintf( unexpected,
-			"%serror('unexpected userdata in argument #%d')",
-			traceback_text, index
-		);
-		luaL_dostring(L,unexpected);
-		return NULL;
+		ERRMSG( EXIT_SUCCESS, "Unexpected userdata value" );
+		fprintf( stderr, "In argument #%d\n", index );
+		goto fail;
 	}
 	else {
 		dst->count = 1;
 		array[0] = lua_isnil(L,index) ? 0 : lua_toboolean(L,index);
 		return array;
 	}
+	fail:
+	if ( err )
+		ERRMSG( EXIT_SUCCESS, "Fail" );
 	return NULL;
 }
 
@@ -185,7 +185,7 @@ bool find_branch_str( lua_State *L, char const *key, char const **val ) {
 		return 0;
 	}
 	*val = lua_isstring(L,-1) ? lua_tostring(L,-1) : NULL;
-	lua_pop(L,-1);
+	lua_pop(L,1);
 	return (*val != NULL);
 }
 
@@ -197,7 +197,7 @@ bool find_branch_int( lua_State *L, char const *key, int *val ) {
 	}
 	*val = (valid = (lua_isinteger(L,-1) || lua_isnumber(L,-1)))
 		? lua_tointeger(L,-1) : 0;
-	lua_pop(L,-1);
+	lua_pop(L,1);
 	return valid;
 }
 
@@ -209,7 +209,7 @@ bool find_branch_num( lua_State *L, char const *key, long double *val ) {
 	}
 	*val = (valid = (lua_isnumber(L,-1) || lua_isinteger(L,-1)))
 		? lua_tonumber(L,-1) : 0;
-	lua_pop(L,-1);
+	lua_pop(L,1);
 	return valid;
 }
 
@@ -221,7 +221,7 @@ bool find_branch_bool( lua_State *L, char const *key, bool *val ) {
 	}
 	*val = (valid = (lua_isboolean(L,-1)))
 		? lua_toboolean(L,-1) : 0;
-	lua_pop(L,-1);
+	lua_pop(L,1);
 	return valid;
 }
 
@@ -314,12 +314,11 @@ int lua_int2bytes( lua_State *L ) {
 		return 1;
 	}
 	lua_createtable(L,limit,1);
-	//push_branch_int( L, "__len", limit );
+	push_branch_int( L, "__len", limit );
 	for ( i = 0; i < limit; ++i ) {
 		lua_pushinteger(L,i+1);
 		lua_pushinteger(L,array[i]);
 		lua_settable(L,-3);
-		lua_pop(L,1);
 	}
 	free_nodes( uchar, NULL, &nodes );
 	return 1;
@@ -347,13 +346,33 @@ int lua_tointbytes( lua_State *L ) {
 	return 1;
 }
 
+int lua_flipbytes( lua_State *L ) {
+	nodes_t nodes = {0};
+	node_t i, j;
+	uchar * array;
+	if ( !(array = lua_extract_bytes(
+		NULL, L, lua_istable(L,2) ? 2 : 1, &nodes )) ) {
+		free_nodes( uchar, NULL, &nodes );
+		lua_newtable(L);
+		return 1;
+	}
+	lua_createtable(L,nodes.count,1);
+	for ( i = 0, j = nodes.count - 1; i < nodes.count; ++i, --j ) {
+		lua_pushinteger(L,i+1);
+		lua_pushinteger(L,array[j]);
+		lua_settable(L,-3);
+	}
+	free_nodes( uchar, NULL, &nodes );
+	return 1;
+}
+
 int lua_totxtbytes( lua_State *L ) {
 	node_t i;
 	nodes_t nodes = {0}, text = {0};
 	uchar *array;
 	char *txt;
 	if ( !(array = lua_extract_bytes(
-		NULL, L, lua_istable(L,1) ? 2 : 1, &nodes ))
+		NULL, L, lua_istable(L,2) ? 2 : 1, &nodes ))
 		|| !(txt = more_nodes(
 		char, NULL, &text, nodes.count * CHAR_BIT )) ) {
 		free_nodes( uchar, NULL, &nodes );
@@ -366,6 +385,26 @@ int lua_totxtbytes( lua_State *L ) {
 	lua_pushstring(L,txt);
 	free_nodes( uchar, NULL, &nodes );
 	free_nodes( uchar, NULL, &text );
+	return 1;
+}
+
+int lua_bytes2int( lua_State *L ) {
+	node_t i;
+	nodes_t nodes = {0};
+	uchar *array;
+	uintmax_t val = 0;
+	if ( !(array = lua_extract_bytes(
+		NULL, L, lua_istable(L,2) ? 2 : 1, &nodes )) ) {
+		free_nodes( uchar, NULL, &nodes );
+		lua_pushinteger(L,0);
+		return 1;
+	}
+	for ( i = 0; i < nodes.count; ++i ) {
+		val <<= CHAR_BIT;
+		val |= array[i];
+	}
+	lua_pushinteger(L,val);
+	free_nodes( uchar, NULL, &nodes );
 	return 1;
 }
 
@@ -389,6 +428,8 @@ void lua_create_gasp(lua_State *L) {
 	push_branch_cfunc(L,"totxtbytes",lua_totxtbytes);
 	push_branch_cfunc(L,"tointbytes",lua_tointbytes);
 	push_branch_cfunc(L,"int2bytes",lua_int2bytes);
+	push_branch_cfunc(L,"bytes2int",lua_bytes2int);
+	push_branch_cfunc(L,"flipbytes",lua_flipbytes);
 	for ( i = 0; lua_path_funcs[i].name; ++i ) {
 		reg = lua_path_funcs + i;
 		push_branch_cfunc(L,reg->name,reg->func);

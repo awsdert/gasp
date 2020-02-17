@@ -178,37 +178,48 @@ void lua_proc_create_glance_class( lua_State *L ) {
 
 #define PROC_HANDLE_CLASS "class_proc_handle"
 
+typedef struct lua_proc_handle {
+	proc_handle_t *handle;
+	int aobscan_fd;
+	nodes_t bytes;
+} lua_proc_handle_t;
+
 int lua_proc_handle_term( lua_State *L ) {
-	proc_handle_t **handle = (proc_handle_t**)
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	proc_handle_shut( *handle );
-	*handle = NULL;
+	proc_handle_shut( handle->handle );
+	handle->handle = NULL;
+	free_nodes( uchar, NULL, &(handle->bytes) );
+	if ( handle->aobscan_fd >= 0 ) {
+		close( handle->aobscan_fd );
+		handle->aobscan_fd = -1;
+	}
 	return 0;
 }
 
 int lua_proc_handle_valid( lua_State *L ) {
-	proc_handle_t **handle = (proc_handle_t**)
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushboolean( L, *handle != NULL );
+	lua_pushboolean( L, handle->handle != NULL );
 	return 1;
 }
 
 int lua_proc_handle_init( lua_State *L ) {
 	int pid = luaL_checkinteger(L,2), ret = EXIT_SUCCESS;
-	proc_handle_t **handle = (proc_handle_t**)
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	if ( *handle ) lua_proc_handle_term( L );
-	*handle = proc_handle_open( &ret, pid );
+	if ( handle->handle ) lua_proc_handle_term( L );
+	handle->handle = proc_handle_open( &ret, pid );
 	return lua_proc_handle_valid(L);
 }
 
 int lua_proc_glance_data( lua_State *L ) {
-	proc_handle_t **handle = (proc_handle_t**)
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	intptr_t addr = luaL_checkinteger(L,2);
 	intptr_t size = luaL_checkinteger(L,3);
 	uchar * array;
-	if ( !(*handle) || size < 1 ) {
+	if ( !(handle->handle) || size < 1 ) {
 		lua_newtable(L);
 		return 1;
 	}
@@ -218,7 +229,7 @@ int lua_proc_glance_data( lua_State *L ) {
 		lua_newtable(L);
 		return 1;
 	}
-	size = proc_glance_data( NULL, *handle, addr, array, size );
+	size = proc_glance_data( NULL, handle->handle, addr, array, size );
 	if ( size < 1 ) {
 		free(array);
 		lua_newtable(L);
@@ -234,13 +245,13 @@ int lua_proc_glance_data( lua_State *L ) {
 	return 1;
 }
 int lua_proc_change_data( lua_State *L ) {
-	proc_handle_t **handle = (proc_handle_t**)
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	intptr_t addr = luaL_checkinteger(L,2);
 	intptr_t size = luaL_checkinteger(L,3), i;
 	uchar * array = NULL;
 	
-	if ( !(*handle) || !lua_istable(L,4) || size < 1 ) {
+	if ( !(handle->handle) || !lua_istable(L,4) || size < 1 ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
@@ -256,74 +267,157 @@ int lua_proc_change_data( lua_State *L ) {
 		lua_pop(L,1);
 	}
 	
-	size = i ? proc_change_data( NULL, *handle, addr, array, i ) : 0;
+	size = i ? proc_change_data( NULL, handle->handle, addr, array, i ) : 0;
 	
 	free(array);
 	lua_pushinteger(L,(size > 0) ? size : 0);
 	return 1;
 }
 
+void* lua_extract_bytes(
+	int *err, lua_State *L, int index, nodes_t *dst ) {
+	char const *text, *traceback_text = "print(debug.traceback())\n";
+	char unexpected[64] = {0};
+	lua_Integer ival;
+	lua_Number	fval;
+	uchar *array;
+	node_t i, leng;
+	size_t value = 0;
+	if ( !(array =
+		more_nodes( uchar, err, dst, BUFSIZ )) )
+		return NULL;
+	if ( lua_isstring(L,index) ) {
+		text = lua_tostring(L,index);
+		leng = strlen(text);
+		if ( !(array =
+			more_nodes( uchar, err, dst, leng )) )
+			return NULL;
+		for ( i = 0; i < leng; ++i ) {
+			if ( value > UCHAR_MAX ) {
+				sprintf( unexpected,
+					"%serror('Byte %lu too big at argument #%d'",
+					traceback_text, (ulong)(dst->count), index );
+				luaL_dostring(L,unexpected);
+				return NULL;
+			}
+			if ( text[i] == ' ' ) {
+				array[dst->count] = value;
+				dst->count++;
+				value = 0;
+				continue;
+			}
+			value <<= 8;
+			if ( text[i] >= '0' && text[i] <= '9' )
+				value |= (text[i] - '0');
+			else if ( text[i] >= 'A' && text[i] <= 'F' )
+				value |= (text[i] - 'A') + 10;
+			else if ( text[i] >= 'a' && text[i] <= 'f' )
+				value |= (text[i] - 'a') + 10;
+			else {
+				sprintf( unexpected,
+					"%serror('Invalid character in argument #%d"
+					"at position %lu'",
+					traceback_text, index, (ulong)i );
+				luaL_dostring(L,unexpected);
+				return NULL;
+			}
+		}
+		if ( text[--i] != ' ' ) {
+			if ( value > UCHAR_MAX ) {
+				sprintf( unexpected,
+					"%serror('Byte %lu too big at argument #%d'",
+					traceback_text, (ulong)(dst->count), index );
+				luaL_dostring(L,unexpected);
+				return NULL;
+			}
+			if ( text[i] == ' ' ) {
+				array[dst->count] = value;
+				dst->count++;
+				value = 0;
+			}
+		}
+		return array;
+	}
+	else if ( lua_isinteger(L,index) ) {
+		ival = lua_tointeger(L,index);
+		dst->count = sizeof(lua_Integer);
+		memcpy( array, &ival, sizeof(lua_Integer) );
+		return array;
+	}
+	else if ( lua_isnumber(L,index) ) {
+		fval = lua_tonumber(L,index);
+		dst->count = sizeof(lua_Number);
+		memcpy( array, &fval, sizeof(lua_Number) );
+		return array;
+	}
+	else if ( lua_istable(L,index) ) {
+		ival = luaL_checkinteger(L,index-1);
+		for ( i = 0; i < dst->total; i++ ) {
+			lua_geti(L,index,i+1);
+			array[i] = luaL_checkinteger(L,-1);
+			lua_pop(L,1);
+		}
+		dst->count = i;
+		return array;
+	}
+	else if ( lua_isuserdata(L,index ) ) {
+		sprintf( unexpected,
+			"%serror('unexpected userdata in argument #%d')",
+			traceback_text, index
+		);
+		luaL_dostring(L,unexpected);
+		return NULL;
+	}
+	else {
+		dst->count = 1;
+		array[0] = lua_isnil(L,index) ? 0 : lua_toboolean(L,index);
+		return array;
+	}
+	return NULL;
+}
+
 int lua_proc_aobscan( lua_State *L ) {
-	proc_handle_t **handle = (proc_handle_t**)
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	char path[32] = {0};
-	int fd = -1, c;
-	char const *array_str = luaL_checkstring( L, 2 );
-	node_t bytes = 0, i = 0, leng = strlen(array_str), count;
-	uchar *array = calloc(leng,1);
-	intptr_t from = luaL_optinteger(L,3,0);
-	intptr_t upto = luaL_optinteger(L,4,INTPTR_MAX);
-	_Bool writable = 1;
-	if ( !(*handle) || !array ) {
+	int c, index = lua_istable(L,3) ? 3 : 2;
+	node_t bytes = 0, i = 0;
+	uchar *array;
+	intptr_t from = luaL_optinteger(L,index+1,0);
+	intptr_t upto = luaL_optinteger(L,index+2,INTPTR_MAX);
+	_Bool writable = lua_isboolean(L,index+3) ?
+		lua_toboolean(L,index+3) : 1;
+	node_t limit = luaL_optinteger(L,index+4,100), count;
+	if ( limit > LONG_MAX ) limit = 100;
+	if ( !(handle->handle) ) {
 		lua_newtable(L);
-		if ( array ) free(array);
 		return 1;
 	}
-	if ( lua_isboolean(L,5) )
-		writable = lua_toboolean(L,5);
-	++leng;
-	for ( i = 0; i < leng; ++i ) {
-		c = *array_str;
-		if ( c == 0 ) {
-			++bytes;
-			break;
-		}
-		if ( isspace(c) ) {
-			++bytes;
-			continue;
-		}
-		if ( array[bytes] & UCHAR_MAX << CHAR_BIT ) {
-			luaL_dostring(L,"print(debug.traceback())\n"
-				"error('Beyond scope of native byte')");
-			lua_newtable(L);
-			free(array);
-			return 1;
-		}
-		array[bytes] <<= CHAR_BIT;
-		if ( c >= '0' && c <= '9' )
-			array[bytes] |= (c - '0');
-		else if ( c >= 'A' && c <= 'F' )
-			array[bytes] |= (c - 'A');
-		else if ( c >= 'a' && c <= 'f' )
-			array[bytes] |= (c - 'a');
-		else {
-			luaL_dostring(L,"print(debug.traceback())\n"
-				"error('Bytes only use Hexadecimal')");
-			lua_newtable(L);
-			free(array);
-			return 1;
-		}
+	if ( !(array =
+		lua_extract_bytes( NULL, L, index, &(handle->bytes) ))
+	)
+	{
+		lua_newtable(L);
+		return 1;
 	}
-	--leng;
-	c = time(NULL);
-	sprintf( path, "/tmp/%06X.aobscan", rand_r((unsigned int *)(&c)) );
-	fd = open( path, O_CREAT | O_RDWR );
+	if ( handle->aobscan_fd < 0 ) {
+		c = time(NULL);
+		sprintf( path, "/tmp/%06X.aobscan", rand_r((unsigned int *)(&c)) );
+		handle->aobscan_fd = open( path, O_CREAT | O_RDWR );
+	}
 	count = proc_aobscan(
-		NULL, fd, *handle, array, bytes, from, upto, writable );
-	free(array);
+		NULL, handle->aobscan_fd, handle->handle,
+		array, bytes, from, upto, writable );
+	if ( count > limit ) count = limit;
+	lua_createtable( L, count, 1 );
+	gasp_lseek( handle->aobscan_fd, 0, SEEK_SET );
 	for ( i = 0; i < count; ++i ) {
+		gasp_read( handle->aobscan_fd, (void*)(&array), sizeof(void*) );
 		sprintf( path, "%p", array );
+		lua_pushinteger( L, i+1 );
 		lua_pushstring( L, path );
+		lua_settable(L,-3);
+		lua_pop(L,1);
 	}
 	return 1;
 }
@@ -333,10 +427,11 @@ int lua_proc_handle_text( lua_State *L ) {
 	return 1;
 }
 int lua_proc_handle_grab( lua_State *L ) {
-	proc_handle_t **handle =
-		(proc_handle_t**)lua_newuserdata(L,sizeof(proc_handle_t*));
+	lua_proc_handle_t *handle =
+		(lua_proc_handle_t*)lua_newuserdata(L,sizeof(lua_proc_handle_t));
 	if ( !handle ) return 0;
-	*handle = NULL;
+	memset( handle, 0, sizeof(lua_proc_handle_t) );
+	handle->aobscan_fd = -1;
 	luaL_setmetatable(L,PROC_HANDLE_CLASS);
 	return 1;
 }

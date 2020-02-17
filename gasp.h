@@ -309,6 +309,8 @@ intptr_t proc_change_data(
 
 void lua_create_gasp(lua_State *L);
 void lua_create_proc_classes( lua_State *L );
+void* lua_extract_bytes(
+	int *err, lua_State *L, int index, nodes_t *dst );
 int lua_proc_locate_name( lua_State *L );
 int lua_proc_glance_grab( lua_State *L );
 int lua_proc_handle_grab( lua_State *L );

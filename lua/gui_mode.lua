@@ -147,10 +147,11 @@ local function boot_window()
 	end
 	rear.shutdown()
 	
-	_G['main_window'] = nil
 	gui.window = nil
 	gui.ctx = nil
 	atlas = nil
+	_G['main_window'] = nil
+	_G['GUI'] = gui
 	return gui
 end
 
@@ -223,13 +224,14 @@ while GUI.reboot == true do
 	GUI = GUI.add_ui( GUI, "cheatfile", "Load cheat file", "cfg/cheatfile.lua" )
 	
 	GUI.reboot = gasp.set_reboot_gui(false)
-	local ok, tmp = pcall( boot_window, gui )
+	local ok, tmp = pcall( boot_window )
 	if ok then
 		GUI = tmp
 		GUI.forced_reboot = false
 	else
 		glfw.set_window_should_close(_G['main_window'], true)
 		rear.shutdown()
+		_G['main_window'] = nil
 		print( tostring(tmp) )
 		if not GUI.reboot and not GUI.forced_reboot then
 			-- Try again, might not be main window that caused failure

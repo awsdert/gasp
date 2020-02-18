@@ -1,3 +1,64 @@
+local function draw_addr_field( gui, ctx, font, v )
+	local hex
+	if v.offset then
+		hex = string.format( "%X", v.offset )
+		-- Give user a chance to edit the offset
+		hex = nk.edit_string(ctx,nk.EDIT_FIELD,hex,10)
+		v.offset = tonumber( hex, 16 )
+	end
+	
+	hex = string.format( "%X", v.addr )
+	if v.generated == true or v.offset then
+		-- Generated addresses should not be editable
+		nk.label(ctx,hex,nk.TEXT_LEFT)
+	else
+		-- Give user a chance to edit the address
+		hex = nk.edit_string(ctx,nk.EDIT_FIELD,hex,20)
+		v.addr = tonumber( hex, 16 )
+	end
+	return v
+end
+local function draw_type_field( gui, ctx, font, v )
+	local types = { "signed", "unsigned", "bits", "text", "bytes" }
+	local k,x
+	v.Type = v.Type or "bytes"
+	for k = 0,#types,1 do
+		if types[k] == v.Type then
+			v.TypeSelected = k
+			break
+		end
+	end
+	if not k or k > #types then k = #types end
+	k = nk.combo( ctx,
+		types, k, pad_height(font,tmp),
+		{	-- width & height of dropdown box
+			pad_width(font,v.Type) * 2,
+			pad_height(font,v.Type) * (#types + 1)
+		}
+	)
+	v.Type = types[k]
+	return v
+end
+local function draw_size_field(gui,ctx,font,v)
+	local x
+	x = v.size or 1
+	if nk.button(ctx,nil,"-") then
+		x = x - 1
+	end
+	if nk.button(ctx,nil,"+") then
+		x = x + 1
+	end
+	if x < 1 then x = 1 end
+	if v.Type == "bits" then
+		if x > 64 then x = 64 end
+	elseif v.Type ~= "text" and v.Type ~= "bytes" then
+		if x > 8 then x = 8 end
+	end
+	nk.label( ctx, tostring(x), nk.TEXT_RIGHT )
+	v.size = x
+	return v
+end
+
 local function calc_cheat_bounds(font,text,prev)
 	local t = { x = 0, y = 0,
 		w = pad_width(font,text),
@@ -14,32 +75,32 @@ local function draw_cheat_edit(gui,ctx,font,v)
 	-- Editing in progress
 	if gui.cheat_addr == v.addr then
 		text = gui.cheat_text or ""
-		k = (v.signed or v.bytes or 0) * 3
+		k = v.size * 3
 		if k == 0 then k = 1 end
 	--[[ Only a cheat with count should generate this and only
 	when the value of the top cheat is edited ]]
 	elseif v.value then
 		text = v.value
-		k = (v.signed or v.bytes or 0) * 3
+		k = v.size
 		if k == 0 then k = 1 end
 	-- Read the value of the app and display that
 	elseif gui.handle and gui.handle:valid() == true then
-		if v.signed then
-			k = v.signed * 3
-			text = gui.handle:read( v.addr, v.signed )
+		if v.Type == "signed" then
+			k = v.size
+			text = gui.handle:read( v.addr, v.size )
 			if text then
 				--[[
 				if gui.cheat.endian == "Big" then
-					text = gasp.flipbytes(v.signed,text)
+					text = gasp.flipbytes(v.size,text)
 				end
 				--]]
-				text = "" .. gasp.bytes2int(v.signed,text)
+				text = "" .. gasp.bytes2int(v.size,text)
 			else text = "" end
-		elseif v.bytes then
-			k = v.bytes * 3
+		elseif v.Type == "bytes" then
+			k = v.size * 3
 			test = 'bytes'
-			text = gui.handle:read( v.addr, v.bytes )
-			if #text > 0 then text = gasp.totxtbytes(v.bytes,text)
+			text = gui.handle:read( v.addr, v.size )
+			if #text > 0 then text = gasp.totxtbytes(v.size,text)
 			else text = "" end
 		else
 			text = ""
@@ -56,20 +117,17 @@ local function draw_cheat_edit(gui,ctx,font,v)
 			v.edited = tmp
 			gui.cheat_text = tmp
 			gui.cheat_addr = v.addr
-			if v.signed then
-				tmp = gasp.int2bytes(tointeger(tmp) or 0,v.signed)
+			if v.Type == "signed" then
+				tmp = gasp.int2bytes(tointeger(tmp) or 0,v.size)
 				if gui.cheat.endian == "Big" then
-					tmp = gasp.flipbytes(v.signed,tmp)
+					tmp = gasp.flipbytes(v.size,tmp)
 				end
-				k = v.signed
-			elseif v.bytes then
+			elseif v.Type == "bytes" then
 				tmp = gasp.tointbytes(tmp)
-				k = v.bytes
 			else
 				tmp = {}
-				k = 0
 			end
-			gui.handle:write( v.addr, k, tmp )
+			gui.handle:write( v.addr, v.size, tmp )
 		elseif v.addr == gui.cheat_addr and tmp == gui.cheat_text then
 			gui.cheat_addr = nil
 			gui.cheat_text = nil
@@ -88,6 +146,10 @@ local function draw_cheat(gui,ctx,font,v)
 		nk.layout_row_template_push_static(ctx, pad_width(font,"0000"))
 	end
 	nk.layout_row_template_push_static(ctx, pad_width(font,"0000000000000000"))
+	nk.layout_row_template_push_static(ctx, pad_width(font,"unsigned"))
+	nk.layout_row_template_push_static(ctx, pad_width(font,"-"))
+	nk.layout_row_template_push_static(ctx, pad_width(font,"+"))
+	nk.layout_row_template_push_static(ctx, pad_width(font,"100"))
 	nk.layout_row_template_push_static(ctx, pad_width(font,"00 00 00 00 "))
 	nk.layout_row_template_end(ctx)
 	
@@ -97,26 +159,14 @@ local function draw_cheat(gui,ctx,font,v)
 	-- Description of the cheat
 	nk.label(ctx,v.desc or "{???}",nk.TEXT_LEFT)
 	
-	if v.offset then
-		text = string.format( "%X", v.offset )
-		-- Give user a chance to edit the offset
-		text  = nk.edit_string(ctx,nk.EDIT_FIELD | nk.TEXT_RIGHT,text,16)
-		v.offset = tonumber( text, 16 )
-	end
 	
-	text = string.format( "%X", v.addr )
-	if v.generated == true or v.offset then
-		-- Generated addresses should not be editable
-		nk.label(ctx,text,nk.TEXT_LEFT)
-	else
-		-- Give user a chance to edit the address
-		text  = nk.edit_string(ctx,nk.EDIT_FIELD | nk.TEXT_RIGHT,text,16)
-		v.addr = tonumber( text, 16 )
-	end
+	v = gui.draw_addr_field(gui,ctx,font,v)
+	v = gui.draw_type_field(gui,ctx,font,v)
+	v = gui.draw_size_field(gui,ctx,font,v)
 	
 	if v.list then
 		nk.label( ctx, "", nk.TEXT_LEFT )
-		for k,x in pairs(v.list) do
+		for j,x in pairs(v.list) do
 			k = {}
 			k.desc = x.desc
 			k.addr = x.addr
@@ -127,9 +177,12 @@ local function draw_cheat(gui,ctx,font,v)
 			else
 				k = x.addr
 			end
-			k.signed = x.signed
-			k.bytes = x.bytes
-			gui = draw_cheat(gui,ctx,font,k)
+			k.Type = x.Type
+			k.size = x.size
+			gui,k = draw_cheat(gui,ctx,font,k)
+			if not k.generated then
+				v.list[j] = k
+			end
 			k = nil
 		end
 		return gui
@@ -143,12 +196,12 @@ local function draw_cheat(gui,ctx,font,v)
 			k.method = x.method or v.method
 			k.desc = v.desc .. "#All:" .. x.desc
 			k.addr = v.addr + bytes
-			k.signed = x.signed
-			k.bytes = x.bytes
+			k.Type = x.Type
+			k.size = x.size
 			k.generated = true
 			gui = draw_cheat(gui,ctx,font,k)
 			k = nil
-			bytes = bytes + (x.signed or x.bytes or v.size or 1)
+			bytes = bytes + (x.size or v.size or 1)
 		end
 	else
 		gui = draw_cheat_edit(gui,ctx,font,v)
@@ -166,8 +219,8 @@ local function draw_cheat(gui,ctx,font,v)
 					k.method = x.method
 					k.desc = text .. ':' .. (x.desc or '???')
 					k.addr = tmp + bytes
-					k.signed = x.signed
-					k.bytes = x.bytes
+					k.Type = x.Type
+					k.size = x.size
 					k.generated = true
 					if k[test] == v[test] then
 						k.value = v.edited
@@ -182,8 +235,8 @@ local function draw_cheat(gui,ctx,font,v)
 				k.desc = text
 				k.addr = tmp
 				k.value = v.edited
-				k.signed = v.signed
-				k.bytes = v.bytes
+				k.Type = x.Type
+				k.size = v.size
 				k.generated = true
 				gui = draw_cheat( gui, ctx, font, k )
 				k = nil
@@ -192,7 +245,7 @@ local function draw_cheat(gui,ctx,font,v)
 		end
 	end
 	v.edited = nil
-	return gui
+	return gui, v
 end
 local function draw_cheats(gui,ctx)
 	local i, v, id, text, j, k, tmp, font
@@ -220,7 +273,8 @@ local function draw_cheats(gui,ctx)
 		nk.label(ctx,gui.cheat.endian,nk.TEXT_LEFT)
 		if gui.cheat.list then
 			for i,v in pairs(gui.cheat.list) do
-				gui = draw_cheat(gui,ctx,font,v)
+				gui,v = draw_cheat(gui,ctx,font,v)
+				gui.cheat.list[i] = v
 			end
 		end
 		nk.tree_pop(ctx)
@@ -283,8 +337,13 @@ return function(gui,ctx)
 	local font = get_font(gui)
 	local text, file, dir, tmp, i, v
 	gui = gui.draw_reboot(gui,ctx)
+	gui.draw_addr_field = draw_addr_field
+	gui.draw_type_field = draw_type_field
+	gui.draw_size_field = draw_size_field
 	gui.draw_cheat = draw_cheat
-	gui = hook_process(gui)
+	if not gui.donothook then
+		gui = hook_process(gui)
+	end
 	nk.layout_row_dynamic( ctx, pad_height(font,text), 1)
 	for i,v in pairs(gui.draw) do
 		if i > 1 then

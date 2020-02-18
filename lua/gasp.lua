@@ -114,84 +114,127 @@ local function draw_all(gui,ctx)
 	return gui
 end
 
-local function boot_window(gui)
+local function boot_window()
+	local gui = _G['GUI']
 	-- Forces reset
-	GUI.window = glfw.create_window(
-		GUI.cfg.window.width,
-		GUI.cfg.window.height,
-		GUI.cfg.window.title )
-	glfw.make_context_current(GUI.window)
+	gui.window = glfw.create_window(
+		gui.cfg.window.width,
+		gui.cfg.window.height,
+		gui.cfg.window.title )
+	_G['main_window'] = GUI.window
+	glfw.make_context_current(gui.window)
 	gl.init()
 
 	-- Initialize the rear
-	GUI.ctx = rear.init(GUI.window, {
-		vbo_size = GUI.cfg.sizes.gl_vbo,
-		ebo_size = GUI.cfg.sizes.gl_ebo,
-		anti_aliasing = GUI.cfg.anti_aliasing,
-		clipboard = GUI.cfg.clipboard,
+	gui.ctx = rear.init(gui.window, {
+		vbo_size = gui.cfg.sizes.gl_vbo,
+		ebo_size = gui.cfg.sizes.gl_ebo,
+		anti_aliasing = gui.cfg.anti_aliasing,
+		clipboard = gui.cfg.clipboard,
 		callbacks = true
 	})
 
 	atlas = rear.font_stash_begin()
-	for name,size in pairs(GUI.cfg.font.sizes) do
-		size = GUI.cfg.font.base_size * size
-		GUI.fonts[name] = atlas:add( size, GUI.cfg.font.file )
+	for name,size in pairs(gui.cfg.font.sizes) do
+		size = gui.cfg.font.base_size * size
+		gui.fonts[name] = atlas:add( size, gui.cfg.font.file )
 		-- Needed for memory editor later
-		GUI.fonts["mono-" .. name] =
-			atlas:add( size, GUI.cfg.font.mono )
+		gui.fonts["mono-" .. name] =
+			atlas:add( size, gui.cfg.font.mono )
 	end
-	rear.font_stash_end( GUI.ctx, (get_font(GUI)) )
+	rear.font_stash_end( gui.ctx, (get_font(gui)) )
 	
-	glfw.set_key_callback(GUI.window,GUI.global_cb)
+	glfw.set_key_callback(gui.window,gui.global_cb)
 	
 	collectgarbage()
 	collectgarbage('stop')
 	
-	while not glfw.window_should_close(GUI.window) do
-		GUI.cfg.window.width, GUI.cfg.window.height =
-			glfw.get_window_size(GUI.window)
-		glfw.wait_events_timeout(1/(GUI.cfg.fps or 30))
+	while not glfw.window_should_close(gui.window) do
+		gui.cfg.window.width, gui.cfg.window.height =
+			glfw.get_window_size(gui.window)
+		glfw.wait_events_timeout(1/(gui.cfg.fps or 30))
 		rear.new_frame()
-		GUI.idc = 0
-		GUI = draw_all(GUI,GUI.ctx)
+		gui.idc = 0
+		gui = draw_all(gui,gui.ctx)
 	end
 	rear.shutdown()
 	
-	GUI.window = nil
-	GUI.ctx = nil
+	_G['main_window'] = nil
+	gui.window = nil
+	gui.ctx = nil
 	atlas = nil
-	return GUI
+	return gui
+end
+
+GUI.draw_reboot = function(gui,ctx)
+	nk.layout_row_dynamic( ctx, pad_height(get_font(gui),text), 2)
+	if nk.button( ctx,nil, "Reboot GUI" ) then
+		gui.reboot = gasp.toggle_reboot_gui()
+	else
+		gui.reboot = gasp.get_reboot_gui()
+	end
+	nk.label( ctx, tostring(gui.reboot), nk.TEXT_RIGHT )
+	return gui
+end
+
+GUI.draw_goback = function(gui,ctx,prv,func)
+	nk.layout_row_dynamic( ctx, pad_height(get_font(gui),"Done"), 1 )
+	if nk.button( ctx, nil, "Go Back" ) then
+		gui.which = prv
+		if func then
+			gui = func(gui)
+		end
+	end
+	return gui
+end
+
+GUI.draw_fallback = function( gui, ctx, prv )
+	gui = gui.draw_reboot(gui,ctx)
+	gui = gui.draw_goback(gui,ctx,prv)
+	return gui
 end
 
 GUI.selected = {}
 GUI.reboot = true
+GUI.forced_reboot = false
 while GUI.reboot == true do
-	local tmp = os.getenv("PWD") or os.getenv("CWD") or "."
-	tmp =  tmp .. "/lua"
+	local path, add
+	path = (os.getenv("PWD") or os.getenv("CWD") or ".") .. "/lua"
+	
 	GUI.draw = {}
 	GUI.fonts = {}
-	GUI.draw[1] = {
-		desc = "Main",
-		func = dofile( tmp .. "/main.lua" )
-	}
-	GUI.draw[2] = {
-		desc = "Change Font",
-		func = dofile( tmp .. "/cfg/font.lua")
-	}
-	GUI.draw[3] = {
-		desc = "Hook App",
-		func = dofile( tmp .. "/cfg/proc.lua")
-	}
-	GUI.draw[4] = {
-		desc = "Scan Memory",
-		func = dofile( tmp .. "/scan.lua")
-	}
-	GUI.draw[5] = {
-		desc = "Load Cheatfile",
-		func = dofile( tmp .. "/cfg/cheatfile.lua")
-	}
+	
+	add = function( desc, file )
+		local tmp = dofile( path .. "/" .. file )
+		if not tmp then
+			print( debug.traceback() )
+			tmp = GUI.draw_fallback
+		end
+		GUI.draw[#(GUI.draw) + 1] = { desc = desc, func = tmp }
+	end
+	
+	add( "Main", "main.lua" )
+	add( "Change Font", "cfg/font.lua" )
+	add( "Hook process", "cfg/proc.lua" )
+	add( "Scan memory", "scan.lua" )
+	add( "Load cheat file", "cfg/cheatfile.lua" )
+	
 	GUI.reboot = gasp.set_reboot_gui(false)
-	GUI = boot_window()
+	local ok, tmp = pcall( boot_window, gui )
+	if ok then
+		GUI = tmp
+		GUI.forced_reboot = false
+	else
+		glfw.set_window_should_close(_G['main_window'], true)
+		rear.shutdown()
+		print( tostring(tmp) )
+		if not GUI.reboot and not GUI.forced_reboot then
+			-- Try again, might not be main window that caused failure
+			GUI.reboot = gasp.set_reboot_gui(true)
+			GUI.forced_reboot = true
+			GUI.which = 1
+		end
+	end
 	GUI.draw = nil
 	GUI.fonts = nil
 end

@@ -239,13 +239,13 @@ function mkdir(path)
 		end
 	end
 end
-function get_cheat_dir()
+function get_cheat_dir(gui)
 	local text = (os.getenv("PWD") or os.getenv("CWD")) .. '/cheats'
 	if mkdir(text) then
 		return text
 	end
-	if mkdir(GUI.cfg.cheatdir) then
-		return GUI.cfg.cheatdir
+	if mkdir(gui.cfg.cheatdir) then
+		return gui.cfg.cheatdir
 	end
 	text = os.getenv("GASP_PATH")
 	if mkdir(text) then
@@ -279,21 +279,11 @@ function hook_process(gui)
 	return gui
 end
 
-GUI.which = 1
-GUI.draw_reboot = function(gui,ctx)
-	nk.layout_row_dynamic( ctx, pad_height(get_font(gui),text), 2)
-	if nk.button( ctx,nil, "Reboot GUI" ) then
-		gui.reboot = gasp.toggle_reboot_gui()
-	else
-		gui.reboot = gasp.get_reboot_gui()
-	end
-	nk.label( ctx, tostring(gui.reboot), nk.TEXT_RIGHT )
-	return gui
-end
 return function(gui,ctx)
 	local font = get_font(gui)
 	local text, file, dir, tmp, i, v
 	gui = gui.draw_reboot(gui,ctx)
+	gui.draw_cheat = draw_cheat
 	gui = hook_process(gui)
 	nk.layout_row_dynamic( ctx, pad_height(font,text), 1)
 	for i,v in pairs(gui.draw) do

@@ -1,8 +1,9 @@
 return function(gui,ctx,prv)
 	local font = get_font(gui)
-	local text = get_cheat_dir()
+	local text = get_cheat_dir(gui)
 	local dir = scandir(text)
 	gui = gui.draw_reboot(gui,ctx)
+	gui = gui.draw_goback(gui,ctx,prv)
 	if dir and #dir > 0 then
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
 		nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)

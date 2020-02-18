@@ -2,6 +2,7 @@ return function(gui,ctx,prv)
 	local font = get_font(gui), ok, glance, id, i, v, selected
 	local text = "Noticed Processes"
 	gui = gui.draw_reboot(gui,ctx)
+	gui = gui.draw_goback(gui,ctx,prv)
 	if type(gui.glance) ~= "table" then
 		gui.glance = {}
 	end
@@ -39,10 +40,6 @@ return function(gui,ctx,prv)
 			end
 			nk.tree_pop(ctx)
 		end
-	end
-	if nk.button(ctx, nil, "Done") then
-		gui.which = prv
-		gui = hook_process(gui)
 	end
 	return gui
 end

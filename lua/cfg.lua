@@ -25,11 +25,13 @@ cfg = {
 }
 cfg.font = {
 	-- *.ttf fonts only should be used here unless nuklear gets an upgrade
-	file = cfg.dir.sys .. "/fonts/noto/NotoSansDisplay-Regular.ttf",
+	dir = cfg.dir.sys .. '/fonts',
 	base_size = 40,
 	use = "default",
 	sizes = {}
 }
+cfg.font.file = cfg.font.dir .. "/noto/NotoSansDisplay-Regular.ttf"
+cfg.font.mono = cfg.font.dir .. "/noto/NotoSansMono-Regular.ttf"
 -- These serve as multipliers against base_size
 cfg.font.sizes["default"] = 1
 cfg.font.sizes["xx-large"] = 1.6

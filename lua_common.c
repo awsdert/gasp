@@ -408,10 +408,17 @@ int lua_bytes2int( lua_State *L ) {
 	return 1;
 }
 bool g_reboot_gui = false;
+
 int lua_get_reboot_gui( lua_State *L ) {
 	lua_pushboolean(L,g_reboot_gui);
 	return 1;
 }
+
+int lua_set_reboot_gui( lua_State *L ) {
+	g_reboot_gui = lua_toboolean(L,1);
+	return lua_get_reboot_gui(L);
+}
+
 int lua_toggle_reboot_gui( lua_State *L ) {
 	g_reboot_gui = !g_reboot_gui;
 	return lua_get_reboot_gui(L);
@@ -439,6 +446,7 @@ void lua_create_gasp(lua_State *L) {
 	push_branch_cfunc(L,"int2bytes",lua_int2bytes);
 	push_branch_cfunc(L,"bytes2int",lua_bytes2int);
 	push_branch_cfunc(L,"flipbytes",lua_flipbytes);
+	push_branch_cfunc(L,"set_reboot_gui",lua_set_reboot_gui);
 	push_branch_cfunc(L,"get_reboot_gui",lua_get_reboot_gui);
 	push_branch_cfunc(L,"toggle_reboot_gui",lua_toggle_reboot_gui);
 	for ( i = 0; lua_path_funcs[i].name; ++i ) {

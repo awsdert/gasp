@@ -1,16 +1,17 @@
 return function(gui,ctx,prv)
 	local font = get_font(gui), ok, glance, id, i, v, selected
 	local text = "Noticed Processes"
+	gui = gui.draw_reboot(gui,ctx)
 	if type(gui.glance) ~= "table" then
 		gui.glance = {}
 	end
 	nk.layout_row_dynamic(ctx, pad_height(font,text), 2)
 	nk.label( ctx, "Process", nk.TEXT_LEFT )
-	cfg.find_process = nk.edit_string(
-		ctx, nk.EDIT_SIMPLE, (cfg.find_process or ""), 100 )
+	gui.cfg.find_process = nk.edit_string(
+		ctx, nk.EDIT_SIMPLE, (gui.cfg.find_process or ""), 100 )
 	nk.layout_row_dynamic(ctx, pad_height(font,text), 1)
-	if #(cfg.find_process) > 0 then
-		glance = gasp.locate_app(cfg.find_process)
+	if #(gui.cfg.find_process) > 0 then
+		glance = gasp.locate_app(gui.cfg.find_process)
 	else
 		glance = gasp.locate_app()
 		--glance = get_all_apps()

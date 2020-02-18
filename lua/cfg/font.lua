@@ -1,5 +1,5 @@
 local add_label = function(gui,name,text)
-	local used = (cfg.font.use == name)
+	local used = (gui.cfg.font.use == name)
 	local font = gui.fonts[name]
 	if used == false then
 		nk.style_push_font(gui.ctx, font)
@@ -14,13 +14,13 @@ local add_label = function(gui,name,text)
 end
 
 local add_button = function(gui,name,text)
-	local used = (cfg.font.use == name)
+	local used = (gui.cfg.font.use == name)
 	local font = gui.fonts[name]
 	if used == false then
 		nk.style_push_font(gui.ctx, font)
 	end
 	if nk.button(gui.ctx, nil, text) then
-		 cfg.font.use = name
+		 gui.cfg.font.use = name
 	end
 	if used == false then
 		nk.style_pop_font(gui.ctx)
@@ -31,7 +31,8 @@ end
 return function(gui,ctx,prv)
 	local font = get_font(gui)
 	local xxlarge = get_font(gui,"xx-large")
-	gui = add_label(gui,cfg.font.use,"Change font size to:")
+	local used = gui.cfg.font
+	gui = add_label(gui,gui.cfg.font.use,"Change font size to:")
 	nk.layout_row_dynamic(ctx, pad_height(xxlarge,text), 7 )
 	gui = add_button( gui, 'xx-large', 'XX-Large')
 	gui = add_button( gui, 'x-large', 'X-Large')
@@ -42,7 +43,12 @@ return function(gui,ctx,prv)
 	gui = add_button( gui, 'xx-small', 'XX-Small')
 	nk.layout_row_dynamic(ctx, pad_height(font,text), 1 )
 	if nk.button(ctx, nil, "Done") then
-		 gui.which = prv
+		gui.which = prv
+		if gui.font.file ~= used.file then
+			-- atlas needs to be respawned, window will be restarted
+			gui.reboot = gasp.set_reboot_gui(true)
+			glfw.set_window_should_close(gui.window, true)
+		end
 	end
 	return gui
 end

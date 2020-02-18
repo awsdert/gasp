@@ -2,13 +2,16 @@ return function(gui,ctx,prv)
 	local font = get_font(gui)
 	local text = get_cheat_dir()
 	local dir = scandir(text)
+	gui = gui.draw_reboot(gui,ctx)
 	if dir and #dir > 0 then
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
 		nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)
 		nk.label(ctx, text, nk.TEXT_LEFT)
-		nk.layout_row_dynamic( ctx, pad_height(font,text),1)
+		nk.layout_row_dynamic( ctx, pad_height(font,text), 1 )
+		
 		for i,v in pairs(dir) do
-			if gasp.path_isfile(text .. '/' .. v) == 1 then
+			if gasp.path_isfile(text .. '/' .. v) == 1 and
+				v:match("lua") then
 				if gui.cheatfile then
 					i = (gui.cheatfile == v)
 				else
@@ -31,9 +34,9 @@ return function(gui,ctx,prv)
 	end
 	if gui.cheat.app then
 		-- Auto fill search box when the process list is opened
-		cfg.find_process =
-			gui.cheat.app.name or cfg.find_process
-		dir = gasp.locate_app(cfg.find_process)
+		gui.cfg.find_process =
+			gui.cheat.app.name or gui.cfg.find_process
+		dir = gasp.locate_app(gui.cfg.find_process)
 		-- Auto hook process
 		if #dir == 1 then
 			gui.noticed = dir[1]

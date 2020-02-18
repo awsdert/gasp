@@ -111,6 +111,7 @@ int main( int argc, char *argv[] ) {
 	path = calloc( leng, 1 );
 	sprintf( path, "%s/lua/gasp.lua", PWD );
 	do {
+		g_reboot_gui = false;
 		if ( luaL_dofile(L, path ) )
 			printf("Failed:\n%s\n", lua_tostring(L,-1));
 	}

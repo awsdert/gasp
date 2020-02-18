@@ -1,5 +1,17 @@
 #include "gasp.h"
 
+int lua_panic_cb( lua_State *L ) {
+	puts("Error: Lua traceback...");
+	luaL_traceback(L,L,"[error]",-1);
+	puts(lua_tostring(L,-1));
+	return 0;
+}
+
+void lua_error_cb( lua_State *L, char const *text ) {
+	fprintf(stderr,"%s\n", text);
+	lua_panic_cb(L);
+}
+
 void* lua_extract_bytes(
 	int *err, lua_State *L, int index, nodes_t *dst ) {
 	char const *text;
@@ -82,18 +94,6 @@ void* lua_extract_bytes(
 	if ( err )
 		ERRMSG( EXIT_SUCCESS, "Fail" );
 	return NULL;
-}
-
-int lua_panic_cb( lua_State *L ) {
-	puts("Error: Lua traceback...");
-	luaL_traceback(L,L,"[error]",-1);
-	puts(lua_tostring(L,-1));
-	return 0;
-}
-
-void lua_error_cb( lua_State *L, char const *text ) {
-	fprintf(stderr,"%s\n", text);
-	lua_panic_cb(L);
 }
 
 void push_global_cfunc(
@@ -407,6 +407,15 @@ int lua_bytes2int( lua_State *L ) {
 	free_nodes( uchar, NULL, &nodes );
 	return 1;
 }
+bool g_reboot_gui = false;
+int lua_get_reboot_gui( lua_State *L ) {
+	lua_pushboolean(L,g_reboot_gui);
+	return 1;
+}
+int lua_toggle_reboot_gui( lua_State *L ) {
+	g_reboot_gui = !g_reboot_gui;
+	return lua_get_reboot_gui(L);
+}
 
 luaL_Reg lua_path_funcs[] = {
 	{ "path_access", lua_path_access },
@@ -430,6 +439,8 @@ void lua_create_gasp(lua_State *L) {
 	push_branch_cfunc(L,"int2bytes",lua_int2bytes);
 	push_branch_cfunc(L,"bytes2int",lua_bytes2int);
 	push_branch_cfunc(L,"flipbytes",lua_flipbytes);
+	push_branch_cfunc(L,"get_reboot_gui",lua_get_reboot_gui);
+	push_branch_cfunc(L,"toggle_reboot_gui",lua_toggle_reboot_gui);
 	for ( i = 0; lua_path_funcs[i].name; ++i ) {
 		reg = lua_path_funcs + i;
 		push_branch_cfunc(L,reg->name,reg->func);

@@ -307,6 +307,7 @@ intptr_t proc_change_data(
 	int *err, proc_handle_t *handle,
 	intptr_t addr, void *src, size_t size );
 
+extern bool g_reboot_gui;
 void lua_create_gasp(lua_State *L);
 void lua_create_proc_classes( lua_State *L );
 void* lua_extract_bytes(

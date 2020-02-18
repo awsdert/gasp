@@ -1,25 +1,10 @@
 #include "gasp.h"
+
 void error_cb( char *from, int code, char const *desc ) {
 	fprintf( stderr, "%s: Error %08X\n"
 		"External Msg: '%s'\n"
 		"Internal Msg: '%s'\n",
 		from, code, strerror(code), desc );
-}
-
-void *lua_allocator( void *ud, void *ptr, size_t size, size_t want ) {
-	void *tmp = NULL;
-	(void)ud;
-	if ( ptr ) {
-		if ( !want ) {
-			free(ptr);
-			return NULL;
-		}
-		tmp = realloc(ptr,want);
-		if ( !tmp )
-			return (want <= size) ? ptr : NULL;
-		return tmp;
-	}
-	return malloc( want );
 }
 
 int set_scope( char const *path, int set ) {
@@ -123,81 +108,18 @@ int main( int argc, char *argv[] ) {
 	/* Just a hack for slipups upstream */
 	(void)luaL_dostring(L,"loadlib = package.loadlib");
 	lua_create_gasp(L);
-#if 1
 	path = calloc( leng, 1 );
 	sprintf( path, "%s/lua/gasp.lua", PWD );
-	if ( luaL_dofile(L, path ) )
-		printf("Failed:\n%s\n", lua_tostring(L,-1));
+	do {
+		if ( luaL_dofile(L, path ) )
+			printf("Failed:\n%s\n", lua_tostring(L,-1));
+	}
+	while ( g_reboot_gui );
 	free(path);
 	path = NULL;
-#endif
 	lua_close(L);
 	free(LUA_CPATH);
 	free(LUA_PATH);
-#if 0
-	if ( (noticed = proc_locate_name( &ret, gasp, &nodes, 0 )) ) {
-		fputs( "Found:\n", stderr);
-		path = calloc( size, 1 );
-		if ( path ) {
-			sprintf( path, "%s/.gasp", HOME );
-			if ( access(path,0) != 0 && mkdir(path,0755) != 0 ) {
-				ret = errno;
-				ERRMSG( ret, "access() or mkdir() failed" );
-				fprintf( stderr, "Path: '%s'\n", path );
-			}
-			sprintf( path, "%s/.gasp/test.aobscan", HOME );
-			if ( (into = open(path, O_CREAT | O_RDWR, 0755 )) < 0 ) {
-				ret = errno;
-				ERRMSG( ret, "open() failed" );
-				fprintf( stderr, "Path: '%s'\n", path );
-			}
-		}
-		for ( i = 0; i < nodes.count; ++i ) {
-			(void)fprintf( stderr, "%04X '%s' launched with\n%s\n",
-				noticed[i].entryId,
-				(char*)(noticed[i].name.block),
-				(char*)(noticed[i].cmdl.block) );
-			if ( (handle =
-				proc_handle_open( &ret, noticed[i].entryId )) ) {
-				if ( ret != EXIT_SUCCESS )
-					ERRMSG( ret, "proc_handle_open() failed" );
-				if ( !(count = proc_aobscan( &ret, into, handle,
-					(uchar*)gasp, strlen(gasp), 0, INTPTR_MAX, 1 )) ) {
-					if ( ret != EXIT_SUCCESS )
-						ERRMSG( ret, "proc_aobscan() failed" );
-					continue;
-				}
-				
-				gasp_lseek( into, 0, SEEK_SET );
-				for ( a = 0; a < count; ++a ) {
-					(void)read( into, &addr, sizeof(void*) );
-					fprintf( stderr, "Got address %p\n", (void*)addr );
-					if ( proc_change_data( &ret, handle, addr,
-						"help", 4 )  != strlen(gasp) ) {
-						ret = errno;
-						ERRMSG( ret, "Couldn't write to memory" );
-					}
-					//fprintf(stderr, "gasp = '%s'\n", gasp);
-				}
-				proc_handle_shut( handle );
-			}
-			less_space( NULL, &(noticed[i].name), 0 );
-		}
-		close(into);
-		if ( path ) {
-			remove( path );
-			free( path );
-			path = NULL;
-		}
-		ret = EXIT_SUCCESS;
-	}
-	else if ( ret == EXIT_SUCCESS ) {
-		ret = ENOENT;
-		ERRMSG( ret, "Couldn't find process" );
-	}
-	else
-		ERRMSG( ret, "Couldn't find process" );
-#else
 	(void)into;
 	(void)i;
 	(void)a;
@@ -206,7 +128,6 @@ int main( int argc, char *argv[] ) {
 	(void)handle;
 	(void)gasp;
 	(void)addr;
-#endif
 	cleanup:
 #if 0
 	set_scope( ptrace_scope, scope );

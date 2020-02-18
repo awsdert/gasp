@@ -398,15 +398,21 @@ function hook_process(gui)
 	return gui
 end
 
-GUI.which = "main"
-GUI.draw["main"] = { desc = "Main", func = function(gui,ctx)
+GUI.which = 1
+GUI.draw[1] = { desc = "Main", func = function(gui,ctx)
 	local font = get_font(gui)
 	local text, file, dir, tmp, i, v
+	nk.layout_row_dynamic( ctx, pad_height(font,text), 2)
+	if nk.button( ctx,nil, "Reboot GUI" ) then
+		tmp = gasp.toggle_reboot_gui()
+	else
+		tmp = gasp.get_reboot_gui()
+	end
+	nk.label( ctx, tostring(tmp), nk.TEXT_RIGHT )
 	nk.layout_row_dynamic( ctx, pad_height(font,text), 1)
 	for i,v in pairs(GUI.draw) do
-		if i ~= "main" then
-			text = v.desc
-			if nk.button(ctx, nil, text) then
+		if i > 1 then
+			if nk.button(ctx, nil, v.desc) then
 				 gui.which = i
 			end
 		end
@@ -454,9 +460,9 @@ GUI.draw["main"] = { desc = "Main", func = function(gui,ctx)
 	return gui
 end
 }
-GUI.draw["cfg-font"] = { desc = "Change Font", func = require("cfg.font") }
-GUI.draw["cfg-proc"] = { desc = "Hook App", func = require("cfg.proc") }
-GUI.draw["cfg-cheatfile"] = { desc = "Load Cheatfile", func = require("cfg.cheatfile") }
+GUI.draw[2] = { desc = "Change Font", func = require("cfg.font") }
+GUI.draw[3] = { desc = "Hook App", func = require("cfg.proc") }
+GUI.draw[4] = { desc = "Load Cheatfile", func = require("cfg.cheatfile") }
 local function draw_all(gui,ctx)
 	local push_font = (cfg.font.use ~= "default")
 	if push_font == true then
@@ -465,7 +471,7 @@ local function draw_all(gui,ctx)
 	if nk.window_begin(ctx, "Show",
 		{0,0,cfg.window.width,cfg.window.height}, nk.WINDOW_BORDER
 	) then
-		gui = gui.draw[gui.which].func(gui,gui.ctx,"main")
+		gui = gui.draw[gui.which].func(gui,gui.ctx,1)
 	end
 	nk.window_end(ctx)
 	if push_font == true then

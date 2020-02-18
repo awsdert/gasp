@@ -1,7 +1,7 @@
 return function (gui,ctx,now,prv)
 	local font = get_font(gui)
 	local scan = gui.scan or {}
-	local i, v
+	local tmp
 	scan.find = scan.find or ""
 	scan.from = scan.from or 0
 	scan.upto = scan.upto or 0x7FFFFFFF
@@ -19,17 +19,11 @@ return function (gui,ctx,now,prv)
 	nk.label( ctx, "Find:", nk.TEXT_LEFT )
 	scan.find = nk.edit_string( ctx, nk.EDIT_FIELD, scan.find, 30 )
 	nk.label( ctx, "From:", nk.TEXT_LEFT )
-	scan.from = tonumber(
-		nk.edit_string(
-			ctx, nk.EDIT_FIELD,
-				string.format( "%X", scan.from ), 30 ), 16
-	)
+	tmp = gui.draw_addr_field( gui, ctx, font, { addr = scan.from } )
+	scan.from = tmp.addr
 	nk.label( ctx, "Upto:", nk.TEXT_LEFT )
-	scan.upto = tonumber(
-		nk.edit_string(
-			ctx, nk.EDIT_FIELD,
-				string.format( "%X", scan.upto ), 30 ), 16
-	)
+	tmp = gui.draw_addr_field( gui, ctx, font, { addr = scan.upto } )
+	scan.upto = tmp.addr
 	if nk.button( ctx, nil, "1st Scan" ) then
 		if not gui.handle or gui.handle:valid() == false then
 			return gui.use_ui(gui,ctx,"cfg-proc",now)

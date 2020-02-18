@@ -1,9 +1,9 @@
-return function(gui,ctx,prv)
+return function(gui,ctx,now,prv)
 	local font = get_font(gui)
 	local text = get_cheat_dir(gui)
 	local dir = scandir(text)
 	gui = gui.draw_reboot(gui,ctx)
-	gui = gui.draw_goback(gui,ctx,prv)
+	gui = gui.draw_goback(gui,ctx,now,prv)
 	if dir and #dir > 0 then
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
 		nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)
@@ -41,7 +41,9 @@ return function(gui,ctx,prv)
 		-- Auto hook process
 		if #dir == 1 then
 			gui.noticed = dir[1]
-			gui = hook_process(gui)
+			return hook_process(gui)
+		else
+			return gui.use_ui(gui,ctx,"cfg-proc",now)
 		end
 	end
 	return gui

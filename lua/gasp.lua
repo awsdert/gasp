@@ -21,7 +21,8 @@ GUI = {
 	--[[ ID Counter, since nuklear insists on unique IDs
 	Once used increment by 1 ready for next usage]]
 	idc = 0,
-	which = 1
+	which = 1,
+	previous = 1
 }
 local R, G, B, A
 
@@ -99,7 +100,7 @@ local function draw_all(gui,ctx)
 	if nk.window_begin(ctx, "Show",
 		{0,0,gui.cfg.window.width,gui.cfg.window.height}, nk.WINDOW_BORDER
 	) then
-		gui = gui.draw[gui.which].func(gui,gui.ctx,1)
+		gui = gui.draw[gui.which].func(gui,gui.ctx,gui.which,gui.previous)
 	end
 	nk.window_end(ctx)
 	if push_font == true then
@@ -177,20 +178,46 @@ GUI.draw_reboot = function(gui,ctx)
 	return gui
 end
 
-GUI.draw_goback = function(gui,ctx,prv,func)
+GUI.use_ui = function(gui,ctx,name,now)
+	local i,v
+	for i,v in pairs(gui.draw) do
+		if v.name == name then
+			gui.previous = now
+			gui.which = i
+			return gui
+		end
+	end
+	return gui
+end
+	
+GUI.add_ui = function( gui, name, desc, file )
+	local path = (os.getenv("PWD") or os.getenv("CWD") or ".") .. "/lua"
+	local tmp = dofile( path .. "/" .. file )
+	if not tmp then
+		print( debug.traceback() )
+		tmp = gui.draw_fallback
+	end
+	gui.draw[#(gui.draw) + 1] = { name = name, desc = desc, func = tmp }
+	return gui
+end
+
+GUI.draw_goback = function(gui,ctx,now,prv,func)
 	nk.layout_row_dynamic( ctx, pad_height(get_font(gui),"Done"), 1 )
 	if nk.button( ctx, nil, "Go Back" ) then
 		gui.which = prv
+		if prv == gui.previous then
+			gui.previous = 1
+		end
 		if func then
-			gui = func(gui)
+			return func(gui)
 		end
 	end
 	return gui
 end
 
-GUI.draw_fallback = function( gui, ctx, prv )
+GUI.draw_fallback = function( gui, ctx, now, prv )
 	gui = gui.draw_reboot(gui,ctx)
-	gui = gui.draw_goback(gui,ctx,prv)
+	gui = gui.draw_goback(gui,ctx,now,prv)
 	return gui
 end
 
@@ -198,26 +225,15 @@ GUI.selected = {}
 GUI.reboot = true
 GUI.forced_reboot = false
 while GUI.reboot == true do
-	local path, add
-	path = (os.getenv("PWD") or os.getenv("CWD") or ".") .. "/lua"
 	
 	GUI.draw = {}
 	GUI.fonts = {}
 	
-	add = function( desc, file )
-		local tmp = dofile( path .. "/" .. file )
-		if not tmp then
-			print( debug.traceback() )
-			tmp = GUI.draw_fallback
-		end
-		GUI.draw[#(GUI.draw) + 1] = { desc = desc, func = tmp }
-	end
-	
-	add( "Main", "main.lua" )
-	add( "Change Font", "cfg/font.lua" )
-	add( "Hook process", "cfg/proc.lua" )
-	add( "Scan memory", "scan.lua" )
-	add( "Load cheat file", "cfg/cheatfile.lua" )
+	GUI = GUI.add_ui( GUI, "main", "Main", "main.lua" )
+	GUI = GUI.add_ui( GUI, "cfg-font", "Change Font", "cfg/font.lua" )
+	GUI = GUI.add_ui( GUI, "cfg-proc", "Hook process", "cfg/proc.lua" )
+	GUI = GUI.add_ui( GUI, "scan", "Scan memory", "scan.lua" )
+	GUI = GUI.add_ui( GUI, "cheatfile", "Load cheat file", "cfg/cheatfile.lua" )
 	
 	GUI.reboot = gasp.set_reboot_gui(false)
 	local ok, tmp = pcall( boot_window, gui )
@@ -232,6 +248,7 @@ while GUI.reboot == true do
 			-- Try again, might not be main window that caused failure
 			GUI.reboot = gasp.set_reboot_gui(true)
 			GUI.forced_reboot = true
+			GUI.previous = 1
 			GUI.which = 1
 		end
 	end

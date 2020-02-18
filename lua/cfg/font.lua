@@ -37,7 +37,7 @@ local function update_fonts(gui)
 	return gui
 end
 
-return function(gui,ctx,prv)
+return function(gui,ctx,now,prv)
 	local font = get_font(gui)
 	local xxlarge = get_font(gui,"xx-large")
 	local used = gui.cfg.font

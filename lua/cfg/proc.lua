@@ -1,8 +1,8 @@
-return function(gui,ctx,prv)
+return function(gui,ctx,now,prv)
 	local font = get_font(gui), ok, glance, id, i, v, selected
 	local text = "Noticed Processes"
 	gui = gui.draw_reboot(gui,ctx)
-	gui = gui.draw_goback(gui,ctx,prv)
+	gui = gui.draw_goback(gui,ctx,now,prv)
 	if type(gui.glance) ~= "table" then
 		gui.glance = {}
 	end

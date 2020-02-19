@@ -22,37 +22,50 @@ local function draw_type_field( gui, ctx, font, v )
 	local types = { "signed", "unsigned", "bits", "text", "bytes" }
 	local k,x
 	v.Type = v.Type or "bytes"
-	for k = 0,#types,1 do
+	for k = 1,#types,1 do
 		if types[k] == v.Type then
-			v.TypeSelected = k
+			x = k
 			break
 		end
 	end
+	k = x
 	if not k or k > #types then k = #types end
-	k = nk.combo( ctx,
-		types, k, pad_height(font,tmp),
-		{	-- width & height of dropdown box
-			pad_width(font,v.Type) * 2,
-			pad_height(font,v.Type) * (#types + 1)
-		}
-	)
 	v.Type = types[k]
+	if v.count then
+		nk.label( ctx, "", nk.TEXT_LEFT )
+	elseif v.generated then
+		nk.label( ctx, v.Type, nk.TEXT_LEFT )
+	else
+		k = nk.combo( ctx,
+			types, k, pad_height(font,v.Type),
+			{	-- width & height of dropdown box
+				pad_width(font,v.Type) * 2,
+				pad_height(font,v.Type) * (#types + 1)
+			}
+		)
+		v.Type = types[k]
+	end
 	return v
 end
 local function draw_size_field(gui,ctx,font,v)
 	local x
 	x = v.size or 1
-	if nk.button(ctx,nil,"-") then
-		x = x - 1
-	end
-	if nk.button(ctx,nil,"+") then
-		x = x + 1
-	end
-	if x < 1 then x = 1 end
-	if v.Type == "bits" then
-		if x > 64 then x = 64 end
-	elseif v.Type ~= "text" and v.Type ~= "bytes" then
-		if x > 8 then x = 8 end
+	if v.generated then
+		nk.label(ctx,"",nk.TEXT_LEFT)
+		nk.label(ctx,"",nk.TEXT_LEFT)
+	else
+		if nk.button(ctx,nil,"-") then
+			x = x - 1
+		end
+		if nk.button(ctx,nil,"+") then
+			x = x + 1
+		end
+		if x < 1 then x = 1 end
+		if v.Type == "bits" then
+			if x > 64 then x = 64 end
+		elseif v.Type ~= "text" and v.Type ~= "bytes" then
+			if x > 8 then x = 8 end
+		end
 	end
 	nk.label( ctx, tostring(x), nk.TEXT_RIGHT )
 	v.size = x
@@ -73,20 +86,17 @@ end
 local function draw_cheat_edit(gui,ctx,font,v)
 	local text, tmp, k, x, test
 	-- Editing in progress
+	v.size = v.size or 1
+	k = v.size * 4
 	if gui.cheat_addr == v.addr then
 		text = gui.cheat_text or ""
-		k = v.size * 3
-		if k == 0 then k = 1 end
 	--[[ Only a cheat with count should generate this and only
 	when the value of the top cheat is edited ]]
 	elseif v.value then
 		text = v.value
-		k = v.size
-		if k == 0 then k = 1 end
 	-- Read the value of the app and display that
 	elseif gui.handle and gui.handle:valid() == true then
 		if v.Type == "signed" then
-			k = v.size
 			text = gui.handle:read( v.addr, v.size )
 			if text then
 				--[[
@@ -97,7 +107,6 @@ local function draw_cheat_edit(gui,ctx,font,v)
 				text = "" .. gasp.bytes2int(v.size,text)
 			else text = "" end
 		elseif v.Type == "bytes" then
-			k = v.size * 3
 			test = 'bytes'
 			text = gui.handle:read( v.addr, v.size )
 			if #text > 0 then text = gasp.totxtbytes(v.size,text)
@@ -145,7 +154,7 @@ local function draw_cheat(gui,ctx,font,v)
 	if v.offset then
 		nk.layout_row_template_push_static(ctx, pad_width(font,"0000"))
 	end
-	nk.layout_row_template_push_static(ctx, pad_width(font,"0000000000000000"))
+	nk.layout_row_template_push_static(ctx, pad_width(font,"00000000"))
 	nk.layout_row_template_push_static(ctx, pad_width(font,"unsigned"))
 	nk.layout_row_template_push_static(ctx, pad_width(font,"-"))
 	nk.layout_row_template_push_static(ctx, pad_width(font,"+"))
@@ -220,13 +229,13 @@ local function draw_cheat(gui,ctx,font,v)
 					k.desc = text .. ':' .. (x.desc or '???')
 					k.addr = tmp + bytes
 					k.Type = x.Type
-					k.size = x.size
+					k.size = x.size or 1
 					k.generated = true
 					if k[test] == v[test] then
 						k.value = v.edited
 					end
 					gui = draw_cheat(gui,ctx,font,k)
-					bytes = bytes + (x.signed or x.bytes or 1)
+					bytes = bytes + k.size
 					k = nil
 				end
 			else
@@ -235,8 +244,8 @@ local function draw_cheat(gui,ctx,font,v)
 				k.desc = text
 				k.addr = tmp
 				k.value = v.edited
-				k.Type = x.Type
-				k.size = v.size
+				k.Type = x.Type or "bytes"
+				k.size = v.size or 1
 				k.generated = true
 				gui = draw_cheat( gui, ctx, font, k )
 				k = nil

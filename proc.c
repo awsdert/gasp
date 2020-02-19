@@ -345,6 +345,62 @@ int proc__rwvmem_test(
 }
 
 node_t proc_aobscan(
+	int *err, int prev_fd, int next_fd,
+	scan_t *scan,
+	proc_handle_t *handle,
+	uchar *array, intptr_t bytes,
+	intptr_t from, intptr_t upto,
+	bool writable
+)
+{
+	int ret = EXIT_SUCCESS;
+	mode_t prot = 0777;
+	intptr_t addr = 0;
+	uchar * buff = NULL;
+	space_t *space;
+	proc_mapped_t mapped = {0};
+	node_t a, new_count = 0;
+	if ( !scan ) return 0;
+	space = &(scan->space);
+	buff = space->block;
+	if ( prev_fd < 0 || next_fd < 0 ) {
+		ret = EBADFD;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Need files to read/write address list" );
+		return 0;
+	}
+	(void)lseek( prev_fd, 0, SEEK_SET );
+	(void)lseek( next_fd, 0, SEEK_SET );
+	for ( a = 0; a < count; ++a ) {
+		read( prev_fd, &addr, sizeof(void*) );
+		while
+		(
+			proc_mapped_next(
+				&ret, handle, mapped.upto, &mapped, prot ) > 0
+		)
+		{
+			if ( mapped.upto <= addr )
+				continue;
+			if ( !(buff = more_space(
+				&ret, space, mapped.upto - mapped.from ))
+				goto fail;
+			addr -= mapped.from;
+			if ( memcmp( buff + addr, array, bytes ) == 0 ) {
+				write( next_fd, &addr, size(void*) );
+				scan->count++;
+				break;
+			}
+		}
+	}
+	if ( err ) *err = EXIT_SUCCESS;
+	return scan->count;
+	fail:
+	if ( err ) *err = ret;
+	ERRMSG( ret, "Couldn't start/finish scan" );
+	return scan->count;
+}
+
+node_t proc_aobinit(
 	int *err, int into,
 	proc_handle_t *handle,
 	uchar *array, intptr_t bytes,
@@ -355,7 +411,7 @@ node_t proc_aobscan(
 	int ret = EXIT_SUCCESS;
 	node_t count = 0;
 	uchar buff[BUFSIZ*2] = {0}, *i, *next;
-	intptr_t done;
+	intptr_t done, addr;
 	proc_mapped_t mapped = {0};
 	_Bool load_next = 0;
 	mode_t prot = 04 | (writable ? 02 : 0);
@@ -403,9 +459,9 @@ node_t proc_aobscan(
 	}
 	
 	while ( (from + bytes) < upto ) {
-		done = mapped.upto - from;	
+		done = mapped.upto - from;
 		if ( done >= BUFSIZ ) {
-			if ( done > BUFSIZ ) done = BUFSIZ;		
+			if ( done > BUFSIZ ) done = BUFSIZ;
 			if ( (done =
 				proc_glance_data( err, handle, from,
 				buff + BUFSIZ, done )) < 0) {

@@ -86,7 +86,7 @@ typedef struct nodes {
 	node_t count;
 	node_t total;
 	space_t space;
-} nodes_t;
+} nodes_t, scan_t;
 
 /** @brief Node allocater, passes over to change_space() after doing
  * calculations

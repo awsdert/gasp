@@ -1,5 +1,14 @@
 local t = {
-	app = { name = "rpcs3", desc = "RPCS3 - Playstation 3 Emulator" },
+	app = {
+		name = "rpcs3", desc = "RPCS3 - Playstation 3 Emulator",
+		-- Regions to auto fill via dropdown
+		regions = {
+			{
+				desc = "Stats & Items",
+				from = 0x40000000, upto = 0x50000000
+			}
+		}
+	},
 	emu = { desc = "Dragon Quest Builders" },
 	endian = "Big",
 	list = {

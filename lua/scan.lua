@@ -1,7 +1,7 @@
 return function (gui,ctx,now,prv)
 	local font = get_font(gui)
 	local scan = gui.scan or {}
-	local tmp
+	local list, tmp, i, v
 	scan.find = scan.find or ""
 	scan.from = scan.from or 0
 	scan.upto = scan.upto or 0x7FFFFFFF
@@ -18,6 +18,39 @@ return function (gui,ctx,now,prv)
 	nk.layout_row_dynamic( ctx, pad_height(font,"Find:"), 2 )
 	nk.label( ctx, "Find:", nk.TEXT_LEFT )
 	scan.find = nk.edit_string( ctx, nk.EDIT_FIELD, scan.find, 30 )
+	if gui.cheat and gui.cheat.app and gui.cheat.app.regions then
+		if scan.regions then
+			list = scan.regions
+			tmp = scan.region_options
+		else
+			list = {}
+			tmp = {}
+			list[1] = { desc = "Default", from = 0, upto = 0x7FFFFFFF }
+			tmp[1] =
+				string.format( "%X - %X %s",
+				list[1].from, list[1].upto, list[1].desc )
+			for i=1,#(gui.cheat.app.regions),1 do
+				list[i+1] = gui.cheat.app.regions[i]
+				tmp[i+1] =
+					string.format( "%X - %X %s",
+					list[i+1].from, list[i+1].upto, list[i+1].desc )
+			end
+		end
+		scan.regions = list
+		scan.region_options = tmp
+		scan.region = nk.combo(
+			ctx, tmp, scan.region or 1,
+			pad_height( font, tmp[1] ),
+			{
+				pad_width( font, tmp[1] ) * 2,
+				pad_height( font, tmp[1] ) * 2
+			}
+		)
+		if nk.button( ctx, nil, "Use" ) then
+			scan.from = list[scan.region].from
+			scan.upto = list[scan.region].upto
+		end
+	end
 	nk.label( ctx, "From:", nk.TEXT_LEFT )
 	tmp = gui.draw_addr_field( gui, ctx, font, { addr = scan.from } )
 	scan.from = tmp.addr

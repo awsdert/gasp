@@ -63,24 +63,55 @@ return function (gui,ctx,now,prv)
 		done.count = 1
 		done.from = 0
 		done.upto = scan.from
+		done.list = {}
 	end
 	if nk.button( ctx, nil, "Scan" ) then
 		done.count = done.count + 1
 		done.from = 0
 		done.upto = scan.from
+		done.list = done.list or {}
 	end
 	if done.count > 0 then
+		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
 		nk.progress( ctx,
-			done.upto - scan.from, scan.upto - scan.from, nk.MODIFIABLE )
+			done.upto - scan.from, scan.upto - scan.from, nk.FIXED )
 		if not gui.handle or gui.handle:valid() == false then
 			gui = gui.use_ui(gui,ctx,"cfg-proc",now)
 		end
+		list = done.list
 		done.from = done.upto
 		done.upto = done.upto + 0x10000
 		if done.upto > scan.upto then done.upto = scan.upto end
-		list = gui.handle:aobscan(
-			scan.text, done.from, done.upto, true, 1000, done.count )
-		for i = 1,#tmp,1 do
+		if scan.Type == "text" then
+			tmp, i = gasp.str2bytes( scan.find )
+		elseif scan.Type == "bytes" then
+			tmp = scan.find
+		elseif scan.Type == "signed" then
+			tmp, i = gasp.int2bytes( scan.find )
+		else
+			tmp = nil
+		end
+		if tmp and done.upto < scan.upto then
+			if type(tmp) == "table" then
+				tmp = gui.handle:aobscan(
+					i, tmp, done.from, done.upto,
+					true, 1000, done.count - 1 )
+			else
+				tmp = gui.handle:aobscan(
+					tmp, done.from, done.upto,
+					true, 1000, done.count - 1 )
+			end
+			if tmp then
+				for i = 1,#tmp,1 do
+					if #list == 1000 then break end
+					list[#list+1] = {
+						addr = tmp[i]
+					}
+				end
+				tmp = nil
+			end
+		end
+		for i = 1,#list,1 do
 			gui = gui.draw_cheat( gui, ctx, font, list[i] )
 		end
 	end

@@ -303,6 +303,19 @@ int lua_get_endian( lua_State *L ) {
 	return 0;
 }
 
+int lua_str2bytes( lua_State *L ) {
+	char const *str = luaL_checkstring(L,1);
+	size_t i, len = strlen(str);
+	lua_createtable( L, len, 0 );
+	for ( i = 0; i < len; ++i ) {
+		lua_pushinteger( L, i + 1 );
+		lua_pushinteger( L, str[i] );
+		lua_settable( L, -3 );
+	}
+	lua_pushinteger( L, len );
+	return 1;
+}
+
 int lua_int2bytes( lua_State *L ) {
 	node_t i, limit = luaL_optinteger(L,2,sizeof(lua_Integer));
 	nodes_t nodes = {0};
@@ -311,6 +324,7 @@ int lua_int2bytes( lua_State *L ) {
 	if ( !(array = lua_extract_bytes( NULL, L, 1, &nodes )) ) {
 		free_nodes( uchar, NULL, &nodes );
 		lua_newtable(L);
+		lua_pushinteger( L, 0 );
 		return 1;
 	}
 	lua_createtable(L,limit,1);
@@ -320,6 +334,7 @@ int lua_int2bytes( lua_State *L ) {
 		lua_pushinteger(L,array[i]);
 		lua_settable(L,-3);
 	}
+	lua_pushinteger( L, limit );
 	free_nodes( uchar, NULL, &nodes );
 	return 1;
 }
@@ -334,6 +349,7 @@ int lua_tointbytes( lua_State *L ) {
 	{
 		free_nodes( uchar, NULL, &nodes );
 		lua_newtable(L);
+		lua_pushinteger( L, 0 );
 		return 1;
 	}
 	lua_createtable(L,nodes.count,1);
@@ -342,6 +358,7 @@ int lua_tointbytes( lua_State *L ) {
 		lua_pushinteger(L,array[i]);
 		lua_settable(L,-3);
 	}
+	lua_pushinteger( L, nodes.count );
 	free_nodes( uchar, NULL, &nodes );
 	return 1;
 }
@@ -354,6 +371,7 @@ int lua_flipbytes( lua_State *L ) {
 		NULL, L, lua_istable(L,2) ? 2 : 1, &nodes )) ) {
 		free_nodes( uchar, NULL, &nodes );
 		lua_newtable(L);
+		lua_pushinteger( L, 0 );
 		return 1;
 	}
 	lua_createtable(L,nodes.count,1);
@@ -362,6 +380,7 @@ int lua_flipbytes( lua_State *L ) {
 		lua_pushinteger(L,array[j]);
 		lua_settable(L,-3);
 	}
+	lua_pushinteger( L, nodes.count );
 	free_nodes( uchar, NULL, &nodes );
 	return 1;
 }
@@ -444,6 +463,7 @@ void lua_create_gasp(lua_State *L) {
 	push_branch_cfunc(L,"totxtbytes",lua_totxtbytes);
 	push_branch_cfunc(L,"tointbytes",lua_tointbytes);
 	push_branch_cfunc(L,"int2bytes",lua_int2bytes);
+	push_branch_cfunc(L,"str2bytes",lua_str2bytes);
 	push_branch_cfunc(L,"bytes2int",lua_bytes2int);
 	push_branch_cfunc(L,"flipbytes",lua_flipbytes);
 	push_branch_cfunc(L,"set_reboot_gui",lua_set_reboot_gui);

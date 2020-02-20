@@ -293,6 +293,7 @@ int lua_proc_aobscan( lua_State *L ) {
 	) {
 		ERRMSG( ret, "Couldn't allocate memory for scan path" );
 		lua_newtable(L);
+		fprintf( stderr, "1: %s\n", GASP_PATH );
 		return 1;
 	}
 	
@@ -308,12 +309,15 @@ int lua_proc_aobscan( lua_State *L ) {
 			execl( "rm", path );
 		}
 	}
-	else if ( count > handle->scan_count )
+	else if ( count > handle->scan_count ) {
+		fprintf( stderr, "3: %s\n", GASP_PATH );
 		return 0;
+	}
 	if ( !(array = lua_extract_bytes(
 		NULL, L, index, &(handle->bytes) ))
 	)
 	{
+		fprintf( stderr, "2: %s\n", GASP_PATH );
 		lua_newtable(L);
 		return 1;
 	}
@@ -357,17 +361,19 @@ int lua_proc_aobscan( lua_State *L ) {
 			if ( errno == EEXIST )
 				next_fd = open( path, O_RDWR );
 		}
+		fprintf( stderr, "%s\n", path );
 		count = proc_aobscan(
 			NULL, prev_fd, next_fd, &(handle->scan), handle->handle,
 			array, handle->bytes.count, from, upto, writable );
 	}
 	else {
-		sprintf( path, "%s/scans/%lu/0.aobscan",
+		sprintf( path, "%s/scans/%lu/0.addr_list",
 			GASP_PATH, (ulong)(handle->scan_instance) );
 		if ( (next_fd = open( path, O_CREAT | O_RDWR )) < 0 ) {
 			if ( errno == EEXIST )
 				next_fd = open( path, O_RDWR );
 		}
+		fprintf( stderr, "%s\n", path );
 		count = proc_aobinit(
 			NULL, next_fd, &(handle->scan), handle->handle,
 			array, handle->bytes.count, from, upto, writable );

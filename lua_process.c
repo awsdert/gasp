@@ -275,7 +275,7 @@ int lua_proc_aobscan( lua_State *L ) {
 	char const *GASP_PATH = getenv("GASP_PATH");
 	int ret, index = lua_istable(L,3) ? 3 : 2,
 		prev_fd = -1, next_fd = -1;
-	node_t bytes = 0, i = 0;
+	node_t i = 0;
 	uchar *array;
 	intptr_t from = luaL_optinteger(L,index+1,0);
 	intptr_t upto = luaL_optinteger(L,index+2,INTPTR_MAX);
@@ -296,7 +296,8 @@ int lua_proc_aobscan( lua_State *L ) {
 		return 1;
 	}
 	
-	if ( lua_toboolean(L,index+6) ) {
+	count = luaL_optinteger(L,index+5,handle->scan_count);
+	if ( !count ) {
 		if ( handle->scan_count ) {
 			sprintf( path, "\"%s/scans/%lu/*\"",
 					GASP_PATH, (ulong)(handle->scan_instance) );
@@ -307,6 +308,8 @@ int lua_proc_aobscan( lua_State *L ) {
 			execl( "rm", path );
 		}
 	}
+	else if ( count > handle->scan_count )
+		return 0;
 	if ( !(array = lua_extract_bytes(
 		NULL, L, index, &(handle->bytes) ))
 	)
@@ -315,15 +318,18 @@ int lua_proc_aobscan( lua_State *L ) {
 		return 1;
 	}
 	
-	sprintf( path, "%s", GASP_PATH );
-	if ( access(path, F_OK) != 0 )
-		execl( "mkdir", path );
+	if ( access(GASP_PATH, F_OK) != 0 ) {
+		sprintf( path, "mkdir %s", GASP_PATH );
+		system(path);
+	}
 	
 	sprintf( path, "%s/scans", GASP_PATH );
-	if ( access(path, F_OK) != 0 )
-		execl( "mkdir", path );
+	if ( access(path, F_OK) != 0 ) {
+		sprintf( path, "mkdir %s/scans", GASP_PATH );
+		system(path);
+	}
 	
-	if ( !(handle->scan_count) ) {
+	if ( !count ) {
 		for ( handle->scan_instance = 0;
 			handle->scan_instance < LONG_MAX;
 			handle->scan_instance++
@@ -332,36 +338,39 @@ int lua_proc_aobscan( lua_State *L ) {
 			sprintf( path, "%s/scans/%lu",
 				GASP_PATH, (ulong)(handle->scan_instance) );
 			if ( access( path, F_OK ) != 0 ) {
-				execl( "mkdir", path );
+				sprintf( path, "mkdir %s/scans/%lu",
+					GASP_PATH, (ulong)(handle->scan_instance) );
+				system(path);
 				break;
 			}
-			
 		}
 	}
 	
-	if ( handle->scan_count ) {
+	if ( count ) {
 		sprintf( path, "%s/scans/%lu/%lu.addr_list",
-			GASP_PATH,
-			(ulong)(handle->scan_instance),
-			(ulong)(handle->scan_count) - 1 );
+			GASP_PATH, (ulong)(handle->scan_instance),
+			(ulong)(count - 1) );
 		prev_fd = open( path, O_RDWR );
 		sprintf( path, "%s/scans/%lu/%lu.addr_list",
-			GASP_PATH,
-			(ulong)(handle->scan_instance),
-			(ulong)(handle->scan_count) );
-		next_fd = open( path, O_CREAT | O_RDWR );
+			GASP_PATH, (ulong)(handle->scan_instance), (ulong)count );
+		if ( (next_fd = open( path, O_CREAT | O_RDWR )) < 0 ) {
+			if ( errno == EEXIST )
+				next_fd = open( path, O_RDWR );
+		}
 		count = proc_aobscan(
 			NULL, prev_fd, next_fd, &(handle->scan), handle->handle,
-			array, bytes, from, upto, writable );
+			array, handle->bytes.count, from, upto, writable );
 	}
 	else {
 		sprintf( path, "%s/scans/%lu/0.aobscan",
-			GASP_PATH,
-			(ulong)(handle->scan_instance) );
-		next_fd = open( path, O_CREAT | O_RDWR );
+			GASP_PATH, (ulong)(handle->scan_instance) );
+		if ( (next_fd = open( path, O_CREAT | O_RDWR )) < 0 ) {
+			if ( errno == EEXIST )
+				next_fd = open( path, O_RDWR );
+		}
 		count = proc_aobinit(
 			NULL, next_fd, &(handle->scan), handle->handle,
-			array, bytes, from, upto, writable );
+			array, handle->bytes.count, from, upto, writable );
 	}
 	if ( count > limit ) count = limit;
 	lua_createtable( L, count, 1 );

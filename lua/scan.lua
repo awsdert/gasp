@@ -6,6 +6,7 @@ return function (gui,ctx,now,prv)
 	scan.from = scan.from or 0
 	scan.upto = scan.upto or 0x7FFFFFFF
 	scan.Type = scan.Type or "signed"
+	done = scan.done or { count = 0, from = 0, upto = scan.from }
 	scan.TypeSelected = scan.TypeSelected or 1
 	gui = gui.draw_reboot(gui,ctx)
 	gui = gui.draw_goback(gui,ctx,now,prv)
@@ -57,22 +58,31 @@ return function (gui,ctx,now,prv)
 	nk.label( ctx, "Upto:", nk.TEXT_LEFT )
 	tmp = gui.draw_addr_field( gui, ctx, font, { addr = scan.upto } )
 	scan.upto = tmp.addr
-	if nk.button( ctx, nil, "1st Scan" ) then
-		if not gui.handle or gui.handle:valid() == false then
-			return gui.use_ui(gui,ctx,"cfg-proc",now)
-		end
-		-- TODO: Implement reset
-		-- gui.handle:aobinit( scan.text, from, upto, true, 1000 )
-	end
 	gui.scan = scan
-	if nk.button( ctx, nil, "Scan" ) then
-		if not gui.handle or gui.handle:valid() == false then
-			return gui.use_ui(gui,ctx,"cfg-proc",now)
-		end
-		-- TODO: Modify aobscan then implement GUI usage
-		-- Using parameters I remember offhand
-		-- gui.handle:aobscan( scan.text, from, upto, true, 1000 )
+	if nk.button( ctx, nil, "1st Scan" ) then
+		done.count = 1
+		done.from = 0
+		done.upto = scan.from
 	end
-	gui = gui.draw_cheat( gui, ctx, font, { addr = 0 } )
+	if nk.button( ctx, nil, "Scan" ) then
+		done.count = done.count + 1
+		done.from = 0
+		done.upto = scan.from
+	end
+	if done.count > 0 then
+		nk.progress( ctx,
+			done.upto - scan.from, scan.upto - scan.from, nk.MODIFIABLE )
+		if not gui.handle or gui.handle:valid() == false then
+			gui = gui.use_ui(gui,ctx,"cfg-proc",now)
+		end
+		done.from = done.upto
+		done.upto = done.upto + 0x10000
+		if done.upto > scan.upto then done.upto = scan.upto end
+		list = gui.handle:aobscan(
+			scan.text, done.from, done.upto, true, 1000, done.count )
+		for i = 1,#tmp,1 do
+			gui = gui.draw_cheat( gui, ctx, font, list[i] )
+		end
+	end
 	return gui
 end

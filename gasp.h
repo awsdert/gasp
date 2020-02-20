@@ -269,7 +269,8 @@ void proc_handle_shut(
 	proc_handle_t* handle );
 /** @brief Scans process mapped pages for array between from and upto
  * @param err Where to pass errors to
- * @param into File descriptor of file to write address list into
+ * @param prev_fd File descriptor of file to read address list into
+ * @param next_fd File descriptor of file to write address list into
  * @param handle Handle opened with proc_handle_open()
  * @param array Array of bytes to look for
  * @param bytes Number of bytes in array
@@ -279,7 +280,24 @@ void proc_handle_shut(
  * @return Count of addresses that matched/where written to file
 **/
 node_t proc_aobscan(
-	int *err, int into,
+	int *err, int prev_fd, int next_fd, scan_t *scan,
+	proc_handle_t *handle,
+	uchar *array, intptr_t bytes,
+	intptr_t from, intptr_t upto,
+	bool writable );
+/** @brief Scans process mapped pages for array between from and upto
+ * @param err Where to pass errors to
+ * @param init_fd File descriptor of file to write address list into
+ * @param handle Handle opened with proc_handle_open()
+ * @param array Array of bytes to look for
+ * @param bytes Number of bytes in array
+ * @param from Where to start search
+ * @param upto Where to end search
+ * @param writable Must be writable if this is true
+ * @return Count of addresses that matched/where written to file
+**/
+node_t proc_aobinit(
+	int *err, int init_fd, scan_t *scan,
 	proc_handle_t *handle,
 	uchar *array, intptr_t bytes,
 	intptr_t from, intptr_t upto,

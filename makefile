@@ -160,7 +160,7 @@ $(test_gasp_exe): $(test_gasp_d_objs)
 %.so.o:
 	@echo Why does the rule '$@' exist!?
 
-%.c: gasp.h
+%: gasp.h
 
 gasp.h: gasp_limits.h
 

@@ -345,75 +345,19 @@ int proc__rwvmem_test(
 }
 
 node_t proc_aobscan(
-	int *err, int prev_fd, int next_fd,
-	scan_t *scan,
+	int *err, int prev_fd, int next_fd, scan_t *scan,
 	proc_handle_t *handle,
 	uchar *array, intptr_t bytes,
 	intptr_t from, intptr_t upto,
 	bool writable
 )
 {
-	int ret = EXIT_SUCCESS;
-	mode_t prot = 0777;
-	intptr_t addr = 0;
-	uchar * buff = NULL;
+	int ret = EXIT_SUCCESS, clear = ~0;
+	uchar *buff = NULL;
+	intptr_t done = 0, prev = 0, addr = 0, stop = 0;
+	proc_mapped_t mapped = {0};
 	space_t *space;
-	proc_mapped_t mapped = {0};
-	node_t a, new_count = 0;
-	if ( !scan ) return 0;
-	space = &(scan->space);
-	buff = space->block;
-	if ( prev_fd < 0 || next_fd < 0 ) {
-		ret = EBADFD;
-		if ( err ) *err = ret;
-		ERRMSG( ret, "Need files to read/write address list" );
-		return 0;
-	}
-	(void)lseek( prev_fd, 0, SEEK_SET );
-	(void)lseek( next_fd, 0, SEEK_SET );
-	for ( a = 0; a < count; ++a ) {
-		read( prev_fd, &addr, sizeof(void*) );
-		while
-		(
-			proc_mapped_next(
-				&ret, handle, mapped.upto, &mapped, prot ) > 0
-		)
-		{
-			if ( mapped.upto <= addr )
-				continue;
-			if ( !(buff = more_space(
-				&ret, space, mapped.upto - mapped.from ))
-				goto fail;
-			addr -= mapped.from;
-			if ( memcmp( buff + addr, array, bytes ) == 0 ) {
-				write( next_fd, &addr, size(void*) );
-				scan->count++;
-				break;
-			}
-		}
-	}
-	if ( err ) *err = EXIT_SUCCESS;
-	return scan->count;
-	fail:
-	if ( err ) *err = ret;
-	ERRMSG( ret, "Couldn't start/finish scan" );
-	return scan->count;
-}
-
-node_t proc_aobinit(
-	int *err, int into,
-	proc_handle_t *handle,
-	uchar *array, intptr_t bytes,
-	intptr_t from, intptr_t upto,
-	bool writable
-)
-{
-	int ret = EXIT_SUCCESS;
-	node_t count = 0;
-	uchar buff[BUFSIZ*2] = {0}, *i, *next;
-	intptr_t done, addr;
-	proc_mapped_t mapped = {0};
-	_Bool load_next = 0;
+	node_t a;
 	mode_t prot = 04 | (writable ? 02 : 0);
 	
 	errno = EXIT_SUCCESS;
@@ -424,97 +368,218 @@ node_t proc_aobinit(
 		return 0;
 	}
 	
-	if ( into < 0 ) {
+	if ( !scan ) {
 		ret = EDESTADDRREQ;
 		if ( err ) *err = ret;
-		ERRMSG( ret, "into needs a file descriptor" );
+		ERRMSG( ret, "Need scan object to optimize memory usage" );
 		return 0;
 	}
 	
-	if ( gasp_lseek( into, 0, SEEK_SET ) < 0 ) {
+	scan->count = 0;
+	space = &(scan->space);
+	
+	if ( prev_fd < 0 || next_fd < 0 ) {
+		ret = EDESTADDRREQ;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "init_fd needs a file descriptor" );
+		return 0;
+	}
+	
+	if ( gasp_lseek( prev_fd, 0, SEEK_SET ) < 0
+		|| gasp_lseek( next_fd, 0, SEEK_SET ) < 0 ) {
 		if ( err ) *err = errno;
 		ERRMSG( errno, "failed reset position for output list file" );
 		return 0;
 	}
 	
-	if ( proc_mapped_next( &ret, handle, from, &mapped, prot ) < 0 ) {
-		if ( err ) *err = ret;
-		ERRMSG( ret, "no pages with base address >= start address" );
-		return 0;
+	/* Decide how we will clear memory */
+	for ( addr = 0; addr < bytes; ++addr ) {
+		if ( array[addr] ) {
+			clear = 0;
+			break;
+		}
 	}
 	
-	if ( mapped.base >= (upto - bytes) ) {
-		if ( err ) *err = EXIT_SUCCESS;
-		return 0;
-	}
-	if ( from < mapped.base ) from = mapped.base;
+	/* Reduce corrupted results */
+	(void)memset( space->block, clear, space->given );
 	
-	done = mapped.upto - from;
-	if ( done >= BUFSIZ ) done = BUFSIZ;
-	if ( (done = proc_glance_data( &ret, handle, from, buff, done ))
-		<= 0 ) {
-		if ( err ) *err = ret;
-		ERRMSG( ret, "failed to read from process memory" );
-		return 0;
-	}
-	
-	while ( (from + bytes) < upto ) {
-		done = mapped.upto - from;
-		if ( done >= BUFSIZ ) {
-			if ( done > BUFSIZ ) done = BUFSIZ;
-			if ( (done =
-				proc_glance_data( err, handle, from,
-				buff + BUFSIZ, done )) < 0) {
-				ERRMSG( errno, "failed read from process memory" );
-				fprintf( stderr, "Read %ld in Range %p-%p %c%c%c%c\n",
-					(long)done, (void*)from, (void*)(mapped.upto),
-					(mapped.perm & 04) ? 'r' : '-',
-					(mapped.perm & 02) ? 'w' : '-',
-					(mapped.perm & 01) ? 'x' : '-',
-					(mapped.perm & 010) ? 'p' : 's' );
-				return count;
-			}
-			next = buff + BUFSIZ;
+	for ( a = 0; a < scan->total; ++a ) {
+		if ( read( prev_fd, &done, sizeof(void*) ) != sizeof(void*) ) {
+			ret = errno;
+			if ( err ) *err = ret;
+			scan->total = scan->count;
+			return scan->count;
 		}
-		else {
-			next = buff + (done - bytes) + 1;
-			load_next = 1;
-		}
-		
-		for ( i = buff; i < next; ++i, ++from ) {
-			if ( memcmp( i, array, bytes ) == 0 ) {
-				if ( write( into, &from, sizeof(from) ) != sizeof(from) ) {
-					if ( err ) *err = errno;
-					ERRMSG( errno, "failed to copy found address" );
-					return count;
-				}
-				++count;
-			}
-		}
-		
-		(void)memmove( buff, buff + BUFSIZ, BUFSIZ );
-		(void)memset( buff + BUFSIZ, 0, BUFSIZ );
-		
-		if ( load_next ) {
-			if ( proc_mapped_next( &ret, handle,
-				mapped.upto, &mapped, prot ) < 0 ) {
+		if ( done >= mapped.base && done <= mapped.upto )
+			goto check_next_address;
+		while ( proc_mapped_next(
+			&ret, handle, mapped.upto, &mapped, prot )
+		)
+		{
+			/* Skip irrelevant regions */
+			if ( mapped.base < from
+				|| mapped.upto <= from
+				|| mapped.base >= upto
+				|| mapped.upto > upto
+				|| (mapped.prot & prot) != prot )
+				continue;
+check_next_address:
+			/* If continued page lines up with previous then move the bytes
+			 * we skipped to front of buffer to be compared now that we
+			 * will have the bytes after them */
+			addr = 0;
+			if ( prev > 0 && prev == mapped.base )
+				memmove( buff, buff + stop, (addr = bytes) );
+
+			/* Ensure we have enough memory to read into */
+			stop = mapped.upto - mapped.base;
+			if ( !more_space( &ret, space, addr + stop ) ) {
 				if ( err ) *err = ret;
-				if ( ret != EXIT_SUCCESS )
-					ERRMSG( ret, "Couldn't read VM" );
-				return count;
+				scan->total = scan->count;
+				return scan->count;
 			}
 			
-			if ( mapped.base >= (upto - bytes) ) {
-				if ( err ) *err = EXIT_SUCCESS;
-				return count;
-			}
+			/* Reduce corrupted results */
+			(void)memset( buff + addr, clear, stop );
 			
-			if ( from < mapped.base ) from = mapped.base;
+			/* Safe to read the memory block now */
+			if ( !proc_glance_data( &ret, handle,
+				mapped.base, buff + addr, stop ) )
+			stop += addr;
+			stop -= bytes;
+			addr = done - mapped.base;
+			if ( memcmp( buff + addr, array, bytes ) == 0 ) {
+				if ( write( next_fd, &done, sizeof(void*) )
+					< (ssize_t)(sizeof(void*))
+				)
+				{
+					ret = errno;
+					if ( err ) *err = ret;
+					scan->total = scan->count;
+					return scan->count;
+				}
+				scan->count++;
+			}
+			prev = mapped.upto;
+		}
+	}
+	if ( err ) *err = EXIT_SUCCESS;
+	scan->total = scan->count;
+	return scan->count;
+}
+
+node_t proc_aobinit(
+	int *err, int init_fd, scan_t *scan,
+	proc_handle_t *handle,
+	uchar *array, intptr_t bytes,
+	intptr_t from, intptr_t upto,
+	bool writable
+)
+{
+	int ret = EXIT_SUCCESS, clear = ~0;
+	uchar *buff = NULL;
+	intptr_t prev = 0, addr = 0, stop = 0;
+	proc_mapped_t mapped = {0};
+	space_t *space;
+	mode_t prot = 04 | (writable ? 02 : 0);
+	
+	errno = EXIT_SUCCESS;
+	
+	if ( (ret = proc__rwvmem_test( handle, array, bytes ))
+		!= EXIT_SUCCESS ) {
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
+	if ( !scan ) {
+		ret = EDESTADDRREQ;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Need scan object to optimize memory usage" );
+		return 0;
+	}
+	
+	scan->total = scan->count = 0;
+	space = &(scan->space);
+	
+	if ( init_fd < 0 ) {
+		ret = EDESTADDRREQ;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "init_fd needs a file descriptor" );
+		return 0;
+	}
+	
+	if ( gasp_lseek( init_fd, 0, SEEK_SET ) < 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "failed reset position for output list file" );
+		return 0;
+	}
+	
+	/* Decide how we will clear memory */
+	for ( addr = 0; addr < bytes; ++addr ) {
+		if ( array[addr] ) {
+			clear = 0;
+			break;
 		}
 	}
 	
+	/* Reduce corrupted results */
+	(void)memset( space->block, clear, space->given );
+	
+	while ( proc_mapped_next(
+		&ret, handle, mapped.upto, &mapped, prot )
+	)
+	{
+		/* Skip irrelevant regions */
+		if ( mapped.base < from
+			|| mapped.upto <= from
+			|| mapped.base >= upto
+			|| mapped.upto > upto
+			|| (mapped.prot & prot) != prot )
+			continue;
+
+		/* If continued page lines up with previous then move the bytes
+		 * we skipped to front of buffer to be compared now that we
+		 * will have the bytes after them */
+		addr = 0;
+		if ( prev > 0 && prev == mapped.base )
+			memmove( buff, buff + stop, (addr = bytes) );
+
+		/* Ensure we have enough memory to read into */
+		stop = mapped.upto - mapped.base;
+		if ( !more_space( &ret, space, addr + stop ) ) {
+			if ( err ) *err = ret;
+			scan->total = scan->count;
+			return scan->count;
+		}
+		
+		/* Reduce corrupted results */
+		(void)memset( buff + addr, clear, stop );
+		
+		/* Safe to read the memory block now */
+		if ( !proc_glance_data( &ret, handle,
+			mapped.base, buff + addr, stop ) )
+		stop += addr;
+		stop -= bytes;
+		for ( addr = 0; addr < stop; ++addr, ++from ) {
+			if ( memcmp( buff + addr, array, bytes ) == 0 ) {
+				prev = mapped.base + addr;
+				if ( write( init_fd, &prev, sizeof(void*) )
+					< (ssize_t)sizeof(void*)
+				)
+				{
+					ret = errno;
+					if ( err ) *err = ret;
+					scan->total = scan->count;
+					return scan->count;
+				}
+				scan->count++;
+			}
+		}
+		prev = mapped.upto;
+	}
 	if ( err ) *err = EXIT_SUCCESS;
-	return count;
+	scan->total = scan->count;
+	return scan->count;
 }
 
 char const * substr( char const * src, char const *txt ) {

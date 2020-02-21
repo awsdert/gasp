@@ -312,8 +312,11 @@ int lua_str2bytes( lua_State *L ) {
 		lua_pushinteger( L, str[i] );
 		lua_settable( L, -3 );
 	}
-	lua_pushinteger( L, len );
-	return 1;
+	lua_pushinteger( L, i + 1 );
+	lua_pushinteger( L, '\0' );
+	lua_settable( L, -3 );
+	lua_pushinteger( L, len+1 );
+	return 2;
 }
 
 int lua_int2bytes( lua_State *L ) {
@@ -350,7 +353,7 @@ int lua_tointbytes( lua_State *L ) {
 		free_nodes( uchar, NULL, &nodes );
 		lua_newtable(L);
 		lua_pushinteger( L, 0 );
-		return 1;
+		return 2;
 	}
 	lua_createtable(L,nodes.count,1);
 	for ( i = 0; i < nodes.count; ++i ) {
@@ -360,7 +363,7 @@ int lua_tointbytes( lua_State *L ) {
 	}
 	lua_pushinteger( L, nodes.count );
 	free_nodes( uchar, NULL, &nodes );
-	return 1;
+	return 2;
 }
 
 int lua_flipbytes( lua_State *L ) {
@@ -372,7 +375,7 @@ int lua_flipbytes( lua_State *L ) {
 		free_nodes( uchar, NULL, &nodes );
 		lua_newtable(L);
 		lua_pushinteger( L, 0 );
-		return 1;
+		return 2;
 	}
 	lua_createtable(L,nodes.count,1);
 	for ( i = 0, j = nodes.count - 1; i < nodes.count; ++i, --j ) {
@@ -382,7 +385,7 @@ int lua_flipbytes( lua_State *L ) {
 	}
 	lua_pushinteger( L, nodes.count );
 	free_nodes( uchar, NULL, &nodes );
-	return 1;
+	return 2;
 }
 
 int lua_totxtbytes( lua_State *L ) {

@@ -445,7 +445,12 @@ check_next_address:
 			
 			/* Safe to read the memory block now */
 			if ( !proc_glance_data( &ret, handle,
-				mapped.base, buff + addr, stop ) )
+				mapped.base, buff + addr, stop ) ) {
+				if ( err ) *err = ret;
+				ERRMSG( ret, "Couldn't read memory" );
+				scan->total = scan->count;
+				return scan->count;
+			}
 			stop += addr;
 			stop -= bytes;
 			addr = done - mapped.base;
@@ -527,8 +532,9 @@ node_t proc_aobinit(
 	/* Reduce corrupted results */
 	(void)memset( space->block, clear, space->given );
 	
-	while ( pages < max_pages && proc_mapped_next(
-		&ret, handle, mapped.upto, &mapped, prot ) >= 0
+	while ( //pages < max_pages &&
+		proc_mapped_next(
+			&ret, handle, mapped.upto, &mapped, prot ) >= 0
 	)
 	{
 		++pages;
@@ -551,6 +557,7 @@ node_t proc_aobinit(
 		stop = mapped.upto - mapped.base;
 		if ( !(buff = more_space( &ret, space, addr + stop )) ) {
 			if ( err ) *err = ret;
+			ERRMSG( ret, "Couldn't allocate memory" );
 			scan->total = scan->count;
 			return scan->count;
 		}
@@ -560,7 +567,12 @@ node_t proc_aobinit(
 		
 		/* Safe to read the memory block now */
 		if ( !proc_glance_data( &ret, handle,
-			mapped.base, buff + addr, stop ) )
+			mapped.base, buff + addr, stop ) ) {
+			if ( err ) *err = ret;
+			ERRMSG( ret, "Couldn't read memory" );
+			scan->total = scan->count;
+			return scan->count;
+		}
 		stop += addr;
 		stop -= bytes;
 		for ( addr = 0; addr < stop; ++addr ) {
@@ -572,6 +584,8 @@ node_t proc_aobinit(
 				{
 					ret = errno;
 					if ( err ) *err = ret;
+					ERRMSG( ret, "Couldn't write an address"
+						" to output file" );
 					scan->total = scan->count;
 					return scan->count;
 				}

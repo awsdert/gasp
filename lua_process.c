@@ -268,7 +268,34 @@ int lua_proc_change_data( lua_State *L ) {
 	return 1;
 }
 
-int lua_proc_aobscan( lua_State *L ) {
+bool lua_proc_handle_cleanup( lua_proc_handle_t *handle, node_t count, bool all )
+{
+	char const *GASP_PATH = getenv("GASP_PATH");
+	char *path;
+	int ret = EXIT_SUCCESS;
+	(void)count;
+	if ( !(path = more_space(
+		&ret, &(handle->scan.space), strlen( GASP_PATH ) + UCHAR_MAX))
+	) {
+		ERRMSG( ret, "Couldn't allocate memory for scan path" );
+		return 0;
+	}
+	if ( all ) {
+		sprintf( path, "rm -f \"%s/scans/%lu/*\"",
+				GASP_PATH, (ulong)(handle->scan_instance) );
+		system( path );
+		handle->scan_count = 0;
+		sprintf( path, "rm \"%s/scans/%lu\"",
+				GASP_PATH, (ulong)(handle->scan_instance) );
+		system( path );
+		handle->scan_count = 0;
+		handle->scan_instance = 0;
+		return 1;
+	}
+	return 1;
+}
+
+int lua_proc_handle_aobscan( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	char *path;
@@ -281,11 +308,13 @@ int lua_proc_aobscan( lua_State *L ) {
 	intptr_t upto = luaL_optinteger(L,index+2,INTPTR_MAX);
 	_Bool writable = lua_toboolean(L,index+3);
 	node_t limit = luaL_optinteger(L,index+4,100), count;
+	_Bool all;
 	if ( limit > LONG_MAX ) limit = 100;
 	
 	if ( !(handle->handle) ) {
 		lua_newtable(L);
-		return 1;
+		lua_pushinteger(L,0);
+		return 2;
 	}
 	
 	if ( !(path = more_space(
@@ -293,33 +322,27 @@ int lua_proc_aobscan( lua_State *L ) {
 	) {
 		ERRMSG( ret, "Couldn't allocate memory for scan path" );
 		lua_newtable(L);
-		fprintf( stderr, "1: %s\n", GASP_PATH );
-		return 1;
+		lua_pushinteger(L,0);
+		return 2;
 	}
 	
 	count = luaL_optinteger(L,index+5,handle->scan_count);
-	if ( !count ) {
-		if ( handle->scan_count ) {
-			sprintf( path, "\"%s/scans/%lu/*\"",
-					GASP_PATH, (ulong)(handle->scan_instance) );
-			execl( "rm", "-f", path );
-			handle->scan_count = 0;
-			sprintf( path, "\"%s/scans/%lu\"",
-					GASP_PATH, (ulong)(handle->scan_instance) );
-			execl( "rm", path );
-		}
+	all = luaL_optinteger(L,index+6,0);
+	if ( all ) count = 0;
+	if ( count < handle->scan_count || all ) {
+		lua_proc_handle_cleanup( handle, count, all );
+		handle->scan_count = count;
 	}
-	else if ( count > handle->scan_count ) {
-		fprintf( stderr, "3: %s\n", GASP_PATH );
+	else if ( count > handle->scan_count )
 		return 0;
-	}
 	if ( !(array = lua_extract_bytes(
 		NULL, L, index, &(handle->bytes) ))
 	)
 	{
 		fprintf( stderr, "2: %s\n", GASP_PATH );
 		lua_newtable(L);
-		return 1;
+		lua_pushinteger(L,0);
+		return 2;
 	}
 	
 	if ( access(GASP_PATH, F_OK) != 0 ) {
@@ -333,6 +356,8 @@ int lua_proc_aobscan( lua_State *L ) {
 		system(path);
 	}
 	
+	fprintf( stderr, "Array Size = %lu\n",
+		(ulong)(handle->bytes.count) );
 	if ( !count ) {
 		for ( handle->scan_instance = 0;
 			handle->scan_instance < LONG_MAX;
@@ -388,10 +413,11 @@ int lua_proc_aobscan( lua_State *L ) {
 		lua_pushstring( L, path );
 		lua_settable(L,-3);
 	}
+	lua_pushinteger( L, count );
 	close(next_fd);
 	if ( prev_fd >= 0 ) close(prev_fd);
 	handle->scan_count++;
-	return 1;
+	return 2;
 }
 
 int lua_proc_handle_text( lua_State *L ) {
@@ -413,7 +439,7 @@ luaL_Reg lua_class_proc_handle_func_list[] = {
 	{ "valid", lua_proc_handle_valid },
 	{ "read", lua_proc_glance_data },
 	{ "write", lua_proc_change_data },
-	{ "aobscan", lua_proc_aobscan },
+	{ "aobscan", lua_proc_handle_aobscan },
 	{ "term", lua_proc_handle_term },
 	{ "tostring", lua_proc_handle_text },
 {NULL}};

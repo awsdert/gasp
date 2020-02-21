@@ -64,12 +64,14 @@ return function (gui,ctx,now,prv)
 		done.from = 0
 		done.upto = scan.from
 		done.list = {}
+		done.found = 0
 	end
 	if nk.button( ctx, nil, "Scan" ) then
 		done.count = done.count + 1
 		done.from = 0
 		done.upto = scan.from
 		done.list = done.list or {}
+		done.found = 0
 	end
 	if done.count > 0 then
 		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
@@ -79,9 +81,7 @@ return function (gui,ctx,now,prv)
 			gui = gui.use_ui(gui,ctx,"cfg-proc",now)
 		end
 		list = done.list
-		done.from = done.upto
-		done.upto = done.upto + 0x10000
-		if done.upto > scan.upto then done.upto = scan.upto end
+		i = nil
 		if scan.Type == "text" then
 			tmp, i = gasp.str2bytes( scan.find )
 		elseif scan.Type == "bytes" then
@@ -91,27 +91,37 @@ return function (gui,ctx,now,prv)
 		else
 			tmp = nil
 		end
+		done.from = done.upto
+		if done.from > scan.from then
+			done.from = done.from - scan.size
+		end
+		done.upto = done.upto + 0x10000
+		if done.upto > scan.upto then done.upto = scan.upto end
 		if tmp and done.upto < scan.upto then
-			if type(tmp) == "table" then
-				tmp = gui.handle:aobscan(
+			v = nil
+			if i then
+				tmp, v = gui.handle:aobscan(
 					i, tmp, done.from, done.upto,
 					true, 1000, done.count - 1 )
 			else
-				tmp = gui.handle:aobscan(
+				tmp, v = gui.handle:aobscan(
 					tmp, done.from, done.upto,
 					true, 1000, done.count - 1 )
 			end
-			if tmp then
-				for i = 1,#tmp,1 do
-					if #list == 1000 then break end
-					list[#list+1] = {
+			if tmp and v then
+				print( "Found: " .. v )
+				for i = 1,v,1 do
+					if done.found == 1000 then break end
+					done.found = done.found + 1
+					list[done.found] = {
 						addr = tmp[i]
 					}
 				end
 				tmp = nil
 			end
 		end
-		for i = 1,#list,1 do
+		print( "Total Found: " .. done.found )
+		for i = 1,done.found,1 do
 			gui = gui.draw_cheat( gui, ctx, font, list[i] )
 		end
 	end

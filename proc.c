@@ -487,7 +487,6 @@ node_t proc_aobinit(
 	intptr_t prev = 0, addr = 0, stop = 0;
 	proc_mapped_t mapped = {0};
 	space_t *space;
-	node_t pages = 0, max_pages = 1000;
 	mode_t prot = 04 | (writable ? 02 : 0);
 	
 	errno = EXIT_SUCCESS;
@@ -532,12 +531,11 @@ node_t proc_aobinit(
 	/* Reduce corrupted results */
 	(void)memset( space->block, clear, space->given );
 	
-	while ( //pages < max_pages &&
+	while (
 		proc_mapped_next(
 			&ret, handle, mapped.upto, &mapped, prot ) >= 0
 	)
 	{
-		++pages;
 		/* Skip irrelevant regions */
 		if ( mapped.base < from
 			|| mapped.upto <= from

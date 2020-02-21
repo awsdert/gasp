@@ -95,35 +95,39 @@ return function (gui,ctx,now,prv)
 		if done.from > scan.from then
 			done.from = done.from - scan.size
 		end
-		done.upto = done.upto + 0x10000
+		done.upto = done.upto + 0x10000000
 		if done.upto > scan.upto then done.upto = scan.upto end
 		if tmp and done.upto < scan.upto then
 			v = nil
 			if i then
 				tmp, v = gui.handle:aobscan(
 					i, tmp, done.from, done.upto,
-					true, 1000, done.count - 1 )
+					false, 1000, done.count - 1 )
 			else
 				tmp, v = gui.handle:aobscan(
 					tmp, done.from, done.upto,
-					true, 1000, done.count - 1 )
+					false, 1000, done.count - 1 )
 			end
 			if tmp and v then
-				print( "Found: " .. v )
 				for i = 1,v,1 do
 					if done.found == 1000 then break end
 					done.found = done.found + 1
 					list[done.found] = {
-						addr = tmp[i]
+						generated = true,
+						method = "=",
+						addr = tmp[i],
+						Type = scan.Type,
+						size = scan.size
 					}
 				end
 				tmp = nil
 			end
 		end
-		print( "Total Found: " .. done.found )
 		for i = 1,done.found,1 do
 			gui = gui.draw_cheat( gui, ctx, font, list[i] )
 		end
 	end
+	scan.done = done
+	gui.scan = scan
 	return gui
 end

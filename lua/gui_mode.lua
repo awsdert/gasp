@@ -79,8 +79,30 @@ local function bytes2int(bytes,size)
 	return int
 end
 
+function hook_process(gui)
+	if gui.noticed then
+		if not gui.handle then
+			gui.handle = gasp.new_handle()
+		end
+		if not gui.handle then
+			return gui
+		end
+		if gui.handle:valid() == true then
+			return gui
+		end
+		if gui.handle:init( gui.noticed.entryId ) == true then
+			return gui
+		end
+	end
+	return gui
+end
+
 local function draw_all(gui,ctx)
 	local push_font = (gui.cfg.font.use ~= "default")
+	gui.quit = glfw.window_should_close( gui.window )
+	if not gui.donothook then
+		gui = hook_process(gui)
+	end
 	if push_font == true then
 		nk.style_push_font( ctx, get_font(gui) )
 	end

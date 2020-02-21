@@ -5,7 +5,7 @@ local t = {
 		regions = {
 			{
 				desc = "Stats & Items",
-				from = 0x40000000, upto = 0x50000000
+				from = 0x430000000, upto = 0x440000000
 			}
 		}
 	},

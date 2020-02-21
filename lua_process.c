@@ -180,15 +180,47 @@ void lua_proc_create_glance_class( lua_State *L ) {
 
 typedef struct lua_proc_handle {
 	proc_handle_t *handle;
+	_Bool nth_scan;
 	node_t scan_count;
 	scan_t scan;
 	node_t scan_instance;
 	nodes_t bytes;
 } lua_proc_handle_t;
 
+bool lua_proc_handle_cleanup( lua_proc_handle_t *handle, node_t count, bool all )
+{
+	char const *GASP_PATH = getenv("GASP_PATH");
+	char *path;
+	int ret = EXIT_SUCCESS;
+	node_t i;
+	if ( !(path = more_space(
+		&ret, &(handle->scan.space), strlen( GASP_PATH ) + UCHAR_MAX))
+	) {
+		ERRMSG( ret, "Couldn't allocate memory for scan path" );
+		return 0;
+	}
+	if ( all ) {
+		sprintf( path, "rm -r \"%s/scans/%lu\"",
+				GASP_PATH, (ulong)(handle->scan_instance) );
+		system( path );
+		handle->scan_instance = 0;
+		handle->scan_count = 0;
+		handle->nth_scan = 0;
+		return 1;
+	}
+	for ( i = handle->scan_count - 1; i > count; --i ) {
+		sprintf( path, "rm -f \"%s/scans/%lu/%lu*\"",
+				GASP_PATH, (ulong)(handle->scan_instance), (ulong)i );
+		system( path );
+	}
+	handle->scan_count = count;
+	return 1;
+}
+
 int lua_proc_handle_term( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	lua_proc_handle_cleanup( handle, 0, 1 );
 	proc_handle_shut( handle->handle );
 	handle->handle = NULL;
 	free_space( NULL, &(handle->scan.space) );
@@ -268,33 +300,6 @@ int lua_proc_change_data( lua_State *L ) {
 	return 1;
 }
 
-bool lua_proc_handle_cleanup( lua_proc_handle_t *handle, node_t count, bool all )
-{
-	char const *GASP_PATH = getenv("GASP_PATH");
-	char *path;
-	int ret = EXIT_SUCCESS;
-	(void)count;
-	if ( !(path = more_space(
-		&ret, &(handle->scan.space), strlen( GASP_PATH ) + UCHAR_MAX))
-	) {
-		ERRMSG( ret, "Couldn't allocate memory for scan path" );
-		return 0;
-	}
-	if ( all ) {
-		sprintf( path, "rm -f \"%s/scans/%lu/*\"",
-				GASP_PATH, (ulong)(handle->scan_instance) );
-		system( path );
-		handle->scan_count = 0;
-		sprintf( path, "rm \"%s/scans/%lu\"",
-				GASP_PATH, (ulong)(handle->scan_instance) );
-		system( path );
-		handle->scan_count = 0;
-		handle->scan_instance = 0;
-		return 1;
-	}
-	return 1;
-}
-
 int lua_proc_handle_aobscan( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
@@ -329,10 +334,8 @@ int lua_proc_handle_aobscan( lua_State *L ) {
 	count = luaL_optinteger(L,index+5,handle->scan_count);
 	all = luaL_optinteger(L,index+6,0);
 	if ( all ) count = 0;
-	if ( count < handle->scan_count || all ) {
+	if ( count < handle->scan_count || all )
 		lua_proc_handle_cleanup( handle, count, all );
-		handle->scan_count = count;
-	}
 	else if ( count > handle->scan_count )
 		return 0;
 	if ( !(array = lua_extract_bytes(
@@ -356,9 +359,7 @@ int lua_proc_handle_aobscan( lua_State *L ) {
 		system(path);
 	}
 	
-	fprintf( stderr, "Array Size = %lu\n",
-		(ulong)(handle->bytes.count) );
-	if ( !count ) {
+	if ( !(handle->nth_scan) ) {
 		for ( handle->scan_instance = 0;
 			handle->scan_instance < LONG_MAX;
 			handle->scan_instance++
@@ -373,6 +374,7 @@ int lua_proc_handle_aobscan( lua_State *L ) {
 				break;
 			}
 		}
+		handle->nth_scan = 1;
 	}
 	
 	if ( count ) {
@@ -380,13 +382,24 @@ int lua_proc_handle_aobscan( lua_State *L ) {
 			GASP_PATH, (ulong)(handle->scan_instance),
 			(ulong)(count - 1) );
 		prev_fd = open( path, O_RDWR );
+		if ( prev_fd < 0 ) {
+			ERRMSG( errno, "Couldn't open input file" );
+			lua_newtable(L);
+			lua_pushinteger(L,0);
+			return 2;
+		}
 		sprintf( path, "%s/scans/%lu/%lu.addr_list",
 			GASP_PATH, (ulong)(handle->scan_instance), (ulong)count );
-		if ( (next_fd = open( path, O_CREAT | O_RDWR )) < 0 ) {
-			if ( errno == EEXIST )
-				next_fd = open( path, O_RDWR );
+		if ( access( path, F_OK ) == 0 )
+			next_fd = open( path, O_RDWR );
+		else
+			next_fd = open( path, O_CREAT | O_RDWR, 0700 );
+		if ( next_fd < 0 ) {
+			ERRMSG( errno, "Couldn't open output file" );
+			lua_newtable(L);
+			lua_pushinteger(L,0);
+			return 2;
 		}
-		fprintf( stderr, "%s\n", path );
 		count = proc_aobscan(
 			NULL, prev_fd, next_fd, &(handle->scan), handle->handle,
 			array, handle->bytes.count, from, upto, writable );
@@ -394,26 +407,30 @@ int lua_proc_handle_aobscan( lua_State *L ) {
 	else {
 		sprintf( path, "%s/scans/%lu/0.addr_list",
 			GASP_PATH, (ulong)(handle->scan_instance) );
-		if ( (next_fd = open( path, O_CREAT | O_RDWR )) < 0 ) {
-			if ( errno == EEXIST )
-				next_fd = open( path, O_RDWR );
+		if ( access( path, F_OK ) == 0 )
+			next_fd = open( path, O_RDWR );
+		else
+			next_fd = open( path, O_CREAT | O_RDWR, 0700 );
+		if ( next_fd < 0 ) {
+			ERRMSG( errno, "Couldn't open output file" );
+			lua_newtable(L);
+			lua_pushinteger(L,0);
+			return 2;
 		}
-		fprintf( stderr, "%s\n", path );
 		count = proc_aobinit(
 			NULL, next_fd, &(handle->scan), handle->handle,
 			array, handle->bytes.count, from, upto, writable );
 	}
 	if ( count > limit ) count = limit;
-	lua_createtable( L, count, 1 );
+	lua_createtable( L, count, 0 );
 	gasp_lseek( next_fd, 0, SEEK_SET );
 	for ( i = 0; i < count; ++i ) {
-		gasp_read( next_fd, (void*)(&array), sizeof(void*) );
-		sprintf( path, "%p", array );
+		gasp_read( next_fd, &from, sizeof(void*) );
 		lua_pushinteger( L, i+1 );
-		lua_pushstring( L, path );
+		lua_pushinteger( L, from );
 		lua_settable(L,-3);
 	}
-	lua_pushinteger( L, count );
+	lua_pushinteger( L, count - 1 );
 	close(next_fd);
 	if ( prev_fd >= 0 ) close(prev_fd);
 	handle->scan_count++;

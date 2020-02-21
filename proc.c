@@ -343,6 +343,238 @@ int proc__rwvmem_test(
 	return ret;
 }
 
+typedef struct tscan {
+	bool wants2read;
+	bool ready2wait;
+	bool wants2free;
+	bool writeable;
+	pthread_t thread;
+	int ret;
+	int prev_fd;
+	int next_fd;
+	proc_handle_t *handle;
+	scan_t scan;
+	void * array;
+	intptr_t bytes;
+	intptr_t from;
+	intptr_t upto;
+} tscan_t;
+
+void* aobscanthread( void *_tscan ) {
+	tscan_t *tscan = (tscan_t*)_tscan;
+	int clear = ~0;
+	uchar *buff = NULL, *array;
+	intptr_t done = 0, prev = 0, addr = 0, stop = 0;
+	proc_mapped_t mapped = {0};
+	scan_t *scan;
+	space_t *space;
+	mode_t prot = 04;
+	node_t a;
+	
+	if ( tscan ) {
+		errno = EDESTADDRREQ;
+		ERRMSG( errno, "taobscan was given NULL" );
+		return NULL;
+	}
+	tscan->ret = errno = EXIT_SUCCESS;
+	array = (uchar*)(tscan->array);
+	scan = &(tscan->scan);
+	prot |= tscan->writeable ? 02 : 0;
+	
+	if ( (tscan->ret =
+		proc__rwvmem_test(tscan->handle, tscan->array, tscan->bytes ))
+		!= EXIT_SUCCESS )
+		return _tscan;
+	
+	if ( !scan ) {
+		tscan->ret = EDESTADDRREQ;
+		return _tscan;
+	}
+	
+	scan->total = scan->count = 0;
+	space = &(scan->space);
+	
+	if ( tscan->next_fd < 0 ) {
+		tscan->ret = EBADF;
+		return _tscan;
+	}
+	
+	if ( gasp_lseek( tscan->next_fd, 0, SEEK_SET ) < 0 ) {
+		tscan->ret = errno;
+		return _tscan;
+	}
+	
+	/* Decide how we will clear memory */
+	for ( addr = 0; addr < tscan->bytes; ++addr ) {
+		if ( array[addr] ) {
+			clear = 0;
+			break;
+		}
+	}
+	
+	/* Reduce corrupted results */
+	(void)memset( space->block, clear, space->given );
+	
+	if ( tscan->prev_fd < 0 ) {
+		while (
+			proc_mapped_next(
+				&(tscan->ret), tscan->handle,
+				mapped.upto, &mapped, prot ) >= 0
+		)
+		{
+			if ( tscan->wants2free ) {
+				scan->total = scan->count;
+				return _tscan;
+			}
+			if ( tscan->wants2read ) {
+				tscan->ready2wait = 1;
+				while ( tscan->wants2read );
+				tscan->ready2wait = 0;
+			}
+			/* Skip irrelevant regions */
+			if ( mapped.base < tscan->from
+				|| mapped.upto <= tscan->from
+				|| mapped.base >= tscan->upto
+				|| mapped.upto > tscan->upto
+				|| (mapped.prot & prot) != prot )
+				continue;
+
+			/* If continued page lines up with previous then move the bytes
+			 * we skipped to front of buffer to be compared now that we
+			 * will have the bytes after them */
+			addr = 0;
+			if ( prev > 0 && prev == mapped.base )
+				memmove( buff, buff + stop, (addr = tscan->bytes) );
+
+			/* Ensure we have enough memory to read into */
+			stop = mapped.upto - mapped.base;
+			if ( !(buff = more_space(
+				&(tscan->ret), space, addr + stop ))
+			)
+			{
+				scan->total = scan->count;
+				return _tscan;
+			}
+			
+			/* Reduce corrupted results */
+			(void)memset( buff + addr, clear, stop );
+			
+			/* Safe to read the memory block now */
+			if ( !proc_glance_data(
+				&(tscan->ret), tscan->handle,
+				mapped.base, buff + addr, stop )
+			)
+			{
+				scan->total = scan->count;
+				return _tscan;
+			}
+			stop += addr;
+			stop -= tscan->bytes;
+			for ( addr = 0; addr < stop; ++addr ) {
+				if ( memcmp( buff + addr, array, tscan->bytes ) == 0 ) {
+					prev = mapped.base + addr;
+					if ( write( tscan->next_fd, &prev, sizeof(void*) )
+						< (ssize_t)sizeof(void*)
+					)
+					{
+						tscan->ret = errno;
+						scan->total = scan->count;
+						return _tscan;
+					}
+					scan->count++;
+				}
+			}
+			prev = mapped.upto;
+		}
+	}
+	else {
+		if ( gasp_lseek( tscan->prev_fd, 0, SEEK_SET ) < 0 ) {
+			tscan->ret = errno;
+			return _tscan;
+		}
+		for ( a = 0; a < scan->total; ++a ) {
+			if ( read( tscan->prev_fd, &done,
+				sizeof(void*) ) != sizeof(void*)
+			)
+			{
+				tscan->ret = errno;
+				scan->total = scan->count;
+				return _tscan;
+			}
+			if ( done >= mapped.base && done <= mapped.upto )
+				goto check_next_address;
+			while ( proc_mapped_next(
+				&(tscan->ret), tscan->handle,
+				mapped.upto, &mapped, prot ) >= 0
+			)
+			{
+				if ( tscan->wants2free ) {
+					scan->total = scan->count;
+					return _tscan;
+				}
+				if ( tscan->wants2read ) {
+					tscan->ready2wait = 1;
+					while ( tscan->wants2read );
+					tscan->ready2wait = 0;
+				}
+				/* Skip irrelevant regions */
+				if ( mapped.base < tscan->from
+					|| mapped.upto <= tscan->from
+					|| mapped.base >= tscan->upto
+					|| mapped.upto > tscan->upto
+					|| (mapped.prot & prot) != prot )
+					continue;
+	check_next_address:
+				/* If continued page lines up with previous then move the bytes
+				 * we skipped to front of buffer to be compared now that we
+				 * will have the bytes after them */
+				addr = 0;
+				if ( prev > 0 && prev == mapped.base )
+					memmove( buff, buff + stop, (addr = tscan->bytes) );
+
+				/* Ensure we have enough memory to read into */
+				stop = mapped.upto - mapped.base;
+				if ( !(buff = more_space(
+					&(tscan->ret), space, addr + stop )) ) {
+					scan->total = scan->count;
+					return _tscan;
+				}
+				
+				/* Reduce corrupted results */
+				(void)memset( buff + addr, clear, stop );
+				
+				/* Safe to read the memory block now */
+				if ( !proc_glance_data(
+					&(tscan->ret), tscan->handle,
+					mapped.base, buff + addr, stop )
+				)
+				{
+					scan->total = scan->count;
+					return _tscan;
+				}
+				stop += addr;
+				stop -= tscan->bytes;
+				addr = done - mapped.base;
+				if ( memcmp( buff + addr, array, tscan->bytes ) == 0 ) {
+					if ( write( tscan->next_fd, &done, sizeof(void*) )
+						< (ssize_t)(sizeof(void*))
+					)
+					{
+						tscan->ret = errno;
+						scan->total = scan->count;
+						return _tscan;
+					}
+					scan->count++;
+				}
+				prev = mapped.upto;
+			}
+		}
+	}
+	tscan->ret = EXIT_SUCCESS;
+	scan->total = scan->count;
+	return _tscan;
+}
+
 node_t proc_aobscan(
 	int *err, int prev_fd, int next_fd, scan_t *scan,
 	proc_handle_t *handle,
@@ -403,7 +635,7 @@ node_t proc_aobscan(
 	/* Reduce corrupted results */
 	(void)memset( space->block, clear, space->given );
 	
-	for ( a = 0; pages < max_pages && a < scan->total; ++a ) {
+	for ( a = 0; a < scan->total; ++a ) {
 		if ( read( prev_fd, &done, sizeof(void*) ) != sizeof(void*) ) {
 			ret = errno;
 			if ( err ) *err = ret;

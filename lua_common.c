@@ -328,7 +328,7 @@ int lua_int2bytes( lua_State *L ) {
 		free_nodes( uchar, NULL, &nodes );
 		lua_newtable(L);
 		lua_pushinteger( L, 0 );
-		return 1;
+		return 2;
 	}
 	lua_createtable(L,limit,1);
 	push_branch_int( L, "__len", limit );
@@ -339,7 +339,7 @@ int lua_int2bytes( lua_State *L ) {
 	}
 	lua_pushinteger( L, limit );
 	free_nodes( uchar, NULL, &nodes );
-	return 1;
+	return 2;
 }
 
 int lua_tointbytes( lua_State *L ) {

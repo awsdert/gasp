@@ -6,6 +6,7 @@ return function (gui,ctx,now,prv)
 	scan.from = scan.from or 0
 	scan.upto = scan.upto or 0x7FFFFFFF
 	scan.Type = scan.Type or "signed"
+	scan.limit = scan.limit or 100
 	done = scan.done or { count = 0, from = 0, upto = scan.from }
 	scan.TypeSelected = scan.TypeSelected or 1
 	gui = gui.draw_reboot(gui,ctx)
@@ -58,27 +59,37 @@ return function (gui,ctx,now,prv)
 	nk.label( ctx, "Upto:", nk.TEXT_LEFT )
 	tmp = gui.draw_addr_field( gui, ctx, font, { addr = scan.upto } )
 	scan.upto = tmp.addr
-	gui.scan = scan
-	if nk.button( ctx, nil, "1st Scan" ) then
-		done.count = 1
-		done.from = 0
-		done.upto = scan.from
-		done.list = {}
-		done.found = 0
+	if nk.button( ctx, nil, "Clear" ) then
+		done = {
+			count = 0,
+			from = 0,
+			upto = scan.from,
+			list = {},
+			found = 0,
+			increment = math.floor((scan.upto - scan.from) / 10)
+		}
 	end
 	if nk.button( ctx, nil, "Scan" ) then
+		done.first_draw = nil
 		done.count = done.count + 1
 		done.from = 0
 		done.upto = scan.from
 		done.list = done.list or {}
 		done.found = 0
+		done.increment = math.floor((scan.upto - scan.from) / 10)
 	end
-	if done.count > 0 then
+	scan.done = done
+	gui.scan = scan
+	if done.count > 0 and not gui.quit then
 		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
 		nk.progress( ctx,
 			done.upto - scan.from, scan.upto - scan.from, nk.FIXED )
 		if not gui.handle or gui.handle:valid() == false then
-			gui = gui.use_ui(gui,ctx,"cfg-proc",now)
+			return gui.use_ui(gui,ctx,"cfg-proc",now)
+		end
+		if not done.first_draw then
+			done.first_draw = true
+			return gui
 		end
 		list = done.list
 		i = nil
@@ -88,6 +99,11 @@ return function (gui,ctx,now,prv)
 			tmp = scan.find
 		elseif scan.Type == "signed" then
 			tmp, i = gasp.int2bytes( scan.find )
+			--[[
+			if gui.cheat.endian == "Big" then
+				tmp = gasp.flipbytes( i, tmp )
+			end
+			--]]
 		else
 			tmp = nil
 		end
@@ -95,27 +111,27 @@ return function (gui,ctx,now,prv)
 		if done.from > scan.from then
 			done.from = done.from - scan.size
 		end
-		done.upto = done.upto + 0x10000000
+		done.upto = done.upto + done.increment
 		if done.upto > scan.upto then done.upto = scan.upto end
 		if tmp and done.upto < scan.upto then
 			v = nil
 			if i then
 				tmp, v = gui.handle:aobscan(
 					i, tmp, done.from, done.upto,
-					false, 1000, done.count - 1 )
+					false, scan.limit, done.count - 1 )
 			else
 				tmp, v = gui.handle:aobscan(
 					tmp, done.from, done.upto,
-					false, 1000, done.count - 1 )
+					false, scan.limit, done.count - 1 )
 			end
 			if tmp and v then
 				for i = 1,v,1 do
-					if done.found == 1000 then break end
+					if done.found == scan.limit then break end
 					done.found = done.found + 1
 					list[done.found] = {
 						generated = true,
 						method = "=",
-						addr = tmp[i],
+						addr = tmp[i] or 0,
 						Type = scan.Type,
 						size = scan.size
 					}

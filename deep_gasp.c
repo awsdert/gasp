@@ -14,9 +14,9 @@ int set_scope( char const *path, int set ) {
 	if ( set < 0 ) set = 0;
 	if ( strstr(path,"conf") )
 		sprintf( cmdl,
-		"echo kernel.yama.ptrace_scope = %d > '%s'", set, path );
+		"sudo echo kernel.yama.ptrace_scope = %d > '%s'", set, path );
 	else
-		sprintf( cmdl, "echo %d > '%s'", set, path );
+		sprintf( cmdl, "sudo echo %d > '%s'", set, path );
 	if ( access( path, F_OK ) == 0 ) {
 		if ( !(file = fopen(path,"r")) ) {
 			if ( set < 1 ) {
@@ -116,6 +116,11 @@ int main( int argc, char *argv[] ) {
 			printf("Failed:\n%s\n", lua_tostring(L,-1));
 	}
 	while ( g_reboot_gui );
+	sprintf( path, "%s/scans", GASP_PATH );
+	if ( access( path, F_OK ) == 0 ) {
+		sprintf( path, "rm -r \"%s/scans\"", GASP_PATH );
+		system( path );
+	}
 	free(path);
 	path = NULL;
 	lua_close(L);

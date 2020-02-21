@@ -324,23 +324,7 @@ local function list_cheat_files()
 	local text = find_cheat_dir()
 	return scandir( text ), text
 end
-function hook_process(gui)
-	if gui.noticed then
-		if not gui.handle then
-			gui.handle = gasp.new_handle()
-		end
-		if not gui.handle then
-			return gui
-		end
-		if gui.handle:valid() == true then
-			return gui
-		end
-		if gui.handle:init( gui.noticed.entryId ) == true then
-			return gui
-		end
-	end
-	return gui
-end
+
 
 return function(gui,ctx)
 	local font = get_font(gui)
@@ -350,9 +334,6 @@ return function(gui,ctx)
 	gui.draw_type_field = draw_type_field
 	gui.draw_size_field = draw_size_field
 	gui.draw_cheat = draw_cheat
-	if not gui.donothook then
-		gui = hook_process(gui)
-	end
 	nk.layout_row_dynamic( ctx, pad_height(font,text), 1)
 	for i,v in pairs(gui.draw) do
 		if i > 1 then

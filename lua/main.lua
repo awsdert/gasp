@@ -107,17 +107,6 @@ local function draw_edit_field(gui,ctx,font,v)
 	return v
 end
 
-local function calc_cheat_bounds(font,text,prev)
-	local t = { x = 0, y = 0,
-		w = pad_width(font,text),
-		h = pad_height(font,text)
-	}
-	if prev then
-		t.x = t.x + t.w
-	end
-	return t
-end
-
 local function draw_cheat_edit(gui,ctx,font,v)
 	local text, tmp, k, x, test
 	-- Editing in progress

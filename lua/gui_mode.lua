@@ -68,16 +68,7 @@ function add_tree_node(ctx,text,selected,id,isparent)
 	end
 	return false, selected
 end
-local function bytes2int(bytes,size)
-	local int = 0
-	local i = size
-	while i > 0 do
-		int = int << 8
-		int = int | (bytes[i] or 0)
-		i = i - 1
-	end
-	return int
-end
+
 
 function hook_process(gui)
 	if gui.noticed then

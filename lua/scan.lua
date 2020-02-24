@@ -2,7 +2,7 @@ return function (gui,ctx,now,prv)
 	local font = get_font(gui)
 	local scan = gui.scan or {}
 	local list, tmp, i, v
-	scan.find = scan.find or ""
+	scan.as_text = scan.as_text or ""
 	scan.from = scan.from or 0
 	scan.upto = scan.upto or 0x7FFFFFFF
 	scan.Type = scan.Type or "signed"
@@ -19,7 +19,7 @@ return function (gui,ctx,now,prv)
 	scan, tmp = gui.draw_size_field(gui,ctx,font,scan)
 	nk.layout_row_dynamic( ctx, pad_height(font,"Find:"), 2 )
 	nk.label( ctx, "Find:", nk.TEXT_LEFT )
-	scan.find = nk.edit_string( ctx, nk.EDIT_FIELD, scan.find, 30 )
+	scan = gui.draw_edit_field(gui,ctx,font,scan)
 	if gui.cheat and gui.cheat.app and gui.cheat.app.regions then
 		if scan.regions then
 			list = scan.regions
@@ -66,7 +66,8 @@ return function (gui,ctx,now,prv)
 			upto = scan.from,
 			list = {},
 			found = 0,
-			increment = math.floor((scan.upto - scan.from) / 10)
+			added =0,
+			increment = math.ceil((scan.upto - scan.from) / 0x16)
 		}
 	end
 	if nk.button( ctx, nil, "Scan" ) then
@@ -76,59 +77,28 @@ return function (gui,ctx,now,prv)
 		done.upto = scan.from
 		done.list = done.list or {}
 		done.found = 0
-		done.increment = math.floor((scan.upto - scan.from) / 10)
+		done.added = 0
+		done.increment = math.ceil((scan.upto - scan.from) / 0x16)
 	end
 	scan.done = done
 	gui.scan = scan
 	if done.count > 0 and not gui.quit then
-		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
-		nk.progress( ctx,
-			done.upto - scan.from, scan.upto - scan.from, nk.FIXED )
 		if not gui.handle or gui.handle:valid() == false then
 			return gui.use_ui(gui,ctx,"cfg-proc",now)
 		end
-		if not done.first_draw then
-			done.first_draw = true
-			return gui
-		end
-		list = done.list
-		i = nil
-		if scan.Type == "text" then
-			tmp, i = gasp.str2bytes( scan.find )
-		elseif scan.Type == "bytes" then
-			tmp = scan.find
-		elseif scan.Type == "signed" then
-			tmp, i = gasp.int2bytes( scan.find )
-			--[[
-			if gui.cheat.endian == "Big" then
-				tmp = gasp.flipbytes( i, tmp )
-			end
-			--]]
-		else
-			tmp = nil
-		end
-		done.from = done.upto
-		if done.from > scan.from then
-			done.from = done.from - scan.size
-		end
-		done.upto = done.upto + done.increment
-		if done.upto > scan.upto then done.upto = scan.upto end
-		if tmp and done.upto < scan.upto then
-			v = nil
-			if i then
-				tmp, v = gui.handle:aobscan(
-					i, tmp, done.from, done.upto,
-					false, scan.limit, done.count - 1 )
+		if gui.handle:doing_scan() or
+			gui.handle:done_scans() == done.count then
+			if gui.handle:scan_done_upto() < done.upto then
+				list = done.list
 			else
-				tmp, v = gui.handle:aobscan(
-					tmp, done.from, done.upto,
-					false, scan.limit, done.count - 1 )
-			end
-			if tmp and v then
-				for i = 1,v,1 do
-					if done.found == scan.limit then break end
-					done.found = done.found + 1
-					list[done.found] = {
+				list = {}
+				done.added = 0
+				done.upto, tmp, done.found =
+					gui.handle:get_scan_list(done.count - 1)
+				for i = 1,done.found,1 do
+					if done.added == scan.limit then break end
+					done.added = done.added + 1
+					list[done.added] = {
 						generated = true,
 						method = "=",
 						addr = tmp[i] or 0,
@@ -136,10 +106,55 @@ return function (gui,ctx,now,prv)
 						size = scan.size
 					}
 				end
-				tmp = nil
+			end
+		else
+			if not done.first_draw then
+				done.first_draw = true
+				return gui
+			end
+			list = done.list
+			i = nil
+			done.from = done.upto
+			if done.from > scan.from then
+				done.from = done.from - scan.size
+			end
+			done.upto = done.upto + done.increment
+			if done.upto > scan.upto then done.upto = scan.upto end
+			if tmp and done.upto < scan.upto then
+				v = nil
+				tmp, v = gui.handle:aobscan(
+					"table", scan.size, scan.as_bytes,
+					done.from, done.upto,
+					false, scan.limit, done.count - 1 )
+				if tmp and v then
+					for i = 1,v,1 do
+						if done.added == scan.limit then break end
+						done.added = done.added + 1
+						list[done.added] = {
+							generated = true,
+							method = "=",
+							addr = tmp[i] or 0,
+							Type = scan.Type,
+							size = scan.size
+						}
+					end
+					tmp = nil
+				end
 			end
 		end
-		for i = 1,done.found,1 do
+		done.list = list
+	end
+	if done.list then
+		list = done.list
+		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
+		tmp = gui.handle:scan_done_upto()
+		nk.progress( ctx, tmp, scan.upto, nk.FIXED )
+		tmp = string.format( "Scanned upto 0x%X", tmp )
+		nk.label( ctx, tmp, nk.TEXT_LEFT )
+		tmp = string.format( "Showing %d of %d Results",
+			done.added, gui.handle:scan_found() )
+		nk.label( ctx, tmp, nk.TEXT_LEFT )
+		for i = 1,done.added,1 do
 			gui = gui.draw_cheat( gui, ctx, font, list[i] )
 		end
 	end

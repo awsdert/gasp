@@ -187,6 +187,41 @@ typedef struct proc_mapped {
 	intptr_t base, upto, size;
 } proc_mapped_t;
 
+typedef struct dump {
+	int info_fd;
+	int addr_fd;
+	int dump_fd;
+} dump_t;
+
+int open_dump_files( dump_t *dump, scan_t *scan, long inst, long done );
+int check_dump( dump_t dump );
+void shut_dump_files( dump_t dump );
+
+typedef struct tscan {
+	bool wants2read;
+	bool ready2wait;
+	bool wants2free;
+	bool writeable;
+	bool threadmade;
+	pthread_t thread;
+	int ret;
+	dump_t prev_dump, next_dump;
+	proc_handle_t *handle;
+	node_t done_scans;
+	scan_t scan;
+	char compare;
+	void * array;
+	intptr_t bytes;
+	intptr_t from;
+	intptr_t upto;
+	intptr_t done_upto;
+} tscan_t;
+
+/** @brief Thread to scan for bytes in
+ * @param _tscan expects to hold a tscan_t object
+ **/
+void* bytescanner( void *_tscan );
+
 /** @brief free's allocated memory and zeroes everything
  * @param notice The entry to clear up
  * @note mainly for internal usage

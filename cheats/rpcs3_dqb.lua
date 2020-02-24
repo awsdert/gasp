@@ -5,7 +5,7 @@ local t = {
 		regions = {
 			{
 				desc = "Stats & Items",
-				from = 0x430000000, upto = 0x440000000
+				from = 0x433000000, upto = 0x434000000
 			}
 		}
 	},
@@ -26,12 +26,12 @@ local t = {
 { desc = "???", addr = 18036876692, Type = "signed", size = 2 },
 { desc = "Items", addr = 18036976864,
 	count = 15, size = 4, split = {
-		{desc="ID", use = "items", Type = "bytes", size = 2},
-		{desc="Qty",Type = "signed", size = 2} } },
+		{ offset = 0, desc="ID", use = "items", Type = "bytes", size = 2},
+		{ offset = 2, desc="Qty",Type = "signed", size = 2} } },
 { desc = "Gear", addr = 18036976924,
 	count = 16, size = 4, split = {
-		{desc="ID", use = "items", Type = "bytes", size = 2},
-		{desc="HP",Type = "signed", size = 2} } }
+		{ offset = 0, desc="ID", use = "items", Type = "bytes", size = 2},
+		{ offset = 2, desc="HP",Type = "signed", size = 2} } }
 	}
 }
 t.usable = {}

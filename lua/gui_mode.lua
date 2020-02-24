@@ -99,17 +99,27 @@ end
 
 local function draw_all(gui,ctx)
 	local push_font = (gui.cfg.font.use ~= "default")
+	local tmp
 	gui.quit = glfw.window_should_close( gui.window )
 	if not gui.donothook then
-		gui = hook_process(gui)
+		tmp = gasp.locate_app(gui.cfg.find_process)
+		-- Auto hook process
+		if #tmp == 1 then
+			gui.noticed = tmp[1]
+			gui = hook_process(gui)
+		end
+		tmp = nil
 	end
 	if push_font == true then
 		nk.style_push_font( ctx, get_font(gui) )
 	end
 	if nk.window_begin(ctx, "Show",
-		{0,0,gui.cfg.window.width,gui.cfg.window.height}, nk.WINDOW_BORDER
+		{0,0,gui.cfg.window.width,gui.cfg.window.height},
+		nk.WINDOW_BORDER
 	) then
-		gui = gui.draw[gui.which].func(gui,gui.ctx,gui.which,gui.previous)
+		_G['GUI'] = gui
+		gui = gui.draw[gui.which].func(
+			gui, gui.ctx, gui.which, gui.previous )
 	end
 	nk.window_end(ctx)
 	if push_font == true then
@@ -131,7 +141,6 @@ local function boot_window()
 		gui.cfg.window.width,
 		gui.cfg.window.height,
 		gui.cfg.window.title )
-	_G['main_window'] = GUI.window
 	glfw.make_context_current(gui.window)
 	gl.init()
 
@@ -160,6 +169,7 @@ local function boot_window()
 	collectgarbage('stop')
 	
 	while not glfw.window_should_close(gui.window) do
+		_G['GUI'] = gui
 		gui.cfg.window.width, gui.cfg.window.height =
 			glfw.get_window_size(gui.window)
 		glfw.wait_events_timeout(1/(gui.cfg.fps or 30))
@@ -172,7 +182,6 @@ local function boot_window()
 	gui.window = nil
 	gui.ctx = nil
 	atlas = nil
-	_G['main_window'] = nil
 	_G['GUI'] = gui
 	return gui
 end
@@ -246,14 +255,15 @@ while GUI.reboot == true do
 	GUI = GUI.add_ui( GUI, "cheatfile", "Load cheat file", "cfg/cheatfile.lua" )
 	
 	GUI.reboot = gasp.set_reboot_gui(false)
-	local ok, tmp = pcall( boot_window )
+	GUI.window = nil
+	local ok, tmp = pcall( boot_window() )
+	GUI = _G['GUI']
 	if ok then
 		GUI = tmp
 		GUI.forced_reboot = false
-	else
-		glfw.set_window_should_close(_G['main_window'], true)
+	elseif GUI.window then
+		glfw.set_window_should_close(GUI.window, true)
 		rear.shutdown()
-		_G['main_window'] = nil
 		print( tostring(tmp) )
 		if not GUI.reboot and not GUI.forced_reboot then
 			-- Try again, might not be main window that caused failure

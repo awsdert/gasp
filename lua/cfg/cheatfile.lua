@@ -4,6 +4,7 @@ return function(gui,ctx,now,prv)
 	local dir = scandir(text)
 	gui = gui.draw_reboot(gui,ctx)
 	gui = gui.draw_goback(gui,ctx,now,prv)
+	gui.cheat = nil
 	if dir and #dir > 0 then
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
 		nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)
@@ -28,12 +29,10 @@ return function(gui,ctx,now,prv)
 	if nk.button( ctx, nil, "Done" ) then
 		gui.which = prv
 		if gui.cheatfile then
-			gui.cheat = dofile(text .. "/" .. gui.cheatfile) or {}
-		else
-			gui.cheat = {}
+			gui.cheat = dofile(text .. "/" .. gui.cheatfile)
 		end
 	end
-	if gui.cheat.app then
+	if gui.cheat and gui.cheat.app then
 		-- Auto fill search box when the process list is opened
 		gui.cfg.find_process =
 			gui.cheat.app.name or gui.cfg.find_process

@@ -343,24 +343,72 @@ int proc__rwvmem_test(
 	return ret;
 }
 
-typedef struct tscan {
-	bool wants2read;
-	bool ready2wait;
-	bool wants2free;
-	bool writeable;
-	pthread_t thread;
-	int ret;
-	int prev_fd;
-	int next_fd;
-	proc_handle_t *handle;
-	scan_t scan;
-	void * array;
-	intptr_t bytes;
-	intptr_t from;
-	intptr_t upto;
-} tscan_t;
+int open_dump_files(
+	dump_t *dump, scan_t *scan, long inst, long done ) {
+	int ret = EXIT_SUCCESS;
+	char *path;
+	char const *GASP_PATH = getenv("GASP_PATH");
+	size_t len = strlen(GASP_PATH) + (2 * (sizeof(node_t) * CHAR_BIT));
+	if ( !dump ) return EDESTADDRREQ;
+	if ( !(path = more_space( &ret, &(scan->space), len )) )
+		return ret;
+	if ( access( GASP_PATH, F_OK ) != 0 ) {
+		sprintf( path, "mkdir %s", GASP_PATH );
+		system( path );
+	}
+	sprintf( path, "%s/scans", GASP_PATH );
+	if ( access( path, F_OK ) != 0 ) {
+		sprintf( path, "mkdir %s/scans", GASP_PATH );
+		system( path );
+	}
+	sprintf( path, "%s/scans/%ld", GASP_PATH, inst );
+	if ( access( path, F_OK ) != 0 ) {
+		sprintf( path, "mkdir %s/scans/%ld", GASP_PATH, inst );
+		system( path );
+	}
+	sprintf( path, "%s/scans/%ld/%ld.idmp", GASP_PATH, inst, done );
+	if ( (dump->info_fd = open( path, O_RDWR )) < 0 ) {
+		if ( errno == ENOENT ) {
+			if ( (dump->info_fd =
+				open( path, O_CREAT | O_RDWR, 0700 )) < 0 )
+				return errno;
+		}
+		else return errno;
+	}
+	sprintf( path, "%s/scans/%ld/%ld.admp", GASP_PATH, inst, done );
+	if ( (dump->addr_fd = open( path, O_RDWR )) < 0 ) {
+		if ( errno == ENOENT ) {
+			if ( (dump->addr_fd =
+				open( path, O_CREAT | O_RDWR, 0700 )) < 0 )
+				return errno;
+		}
+		else return errno;
+	}
+	sprintf( path, "%s/scans/%ld/%ld.dump", GASP_PATH, inst, done );
+	if ( (dump->dump_fd = open( path, O_RDWR )) < 0 ) {
+		if ( errno == ENOENT ) {
+			if ( (dump->dump_fd =
+				open( path, O_CREAT | O_RDWR, 0700 )) < 0 )
+				return errno;
+		}
+		else return errno;
+	}
+	return EXIT_SUCCESS;
+}
 
-void* aobscanthread( void *_tscan ) {
+void shut_dump_files( dump_t dump ) {
+	if ( dump.info_fd >= 0 ) close( dump.info_fd );
+	if ( dump.addr_fd >= 0 ) close( dump.addr_fd );
+	if ( dump.dump_fd >= 0 ) close( dump.dump_fd );
+}
+
+int check_dump( dump_t dump ) {
+	if ( dump.info_fd < 0 || dump.addr_fd < 0 || dump.dump_fd < 0 )
+		return EBADF;
+	return EXIT_SUCCESS;
+}
+
+void* bytescanner( void *_tscan ) {
 	tscan_t *tscan = (tscan_t*)_tscan;
 	int clear = ~0;
 	uchar *buff = NULL, *array;
@@ -371,14 +419,19 @@ void* aobscanthread( void *_tscan ) {
 	mode_t prot = 04;
 	node_t a;
 	
-	if ( tscan ) {
+	if ( !tscan ) {
 		errno = EDESTADDRREQ;
 		ERRMSG( errno, "taobscan was given NULL" );
 		return NULL;
 	}
-	tscan->ret = errno = EXIT_SUCCESS;
-	array = (uchar*)(tscan->array);
+	
+	tscan->threadmade = 1;
 	scan = &(tscan->scan);
+	scan->count = 0;
+	if ( (tscan->ret = errno = check_dump( tscan->next_dump ))
+		!= EXIT_SUCCESS )
+		goto set_found;
+	array = (uchar*)(tscan->array);
 	prot |= tscan->writeable ? 02 : 0;
 	
 	if ( (tscan->ret =
@@ -386,22 +439,16 @@ void* aobscanthread( void *_tscan ) {
 		!= EXIT_SUCCESS )
 		return _tscan;
 	
-	if ( !scan ) {
-		tscan->ret = EDESTADDRREQ;
-		return _tscan;
-	}
-	
 	scan->total = scan->count = 0;
 	space = &(scan->space);
 	
-	if ( tscan->next_fd < 0 ) {
-		tscan->ret = EBADF;
-		return _tscan;
-	}
-	
-	if ( gasp_lseek( tscan->next_fd, 0, SEEK_SET ) < 0 ) {
+	if ( gasp_lseek( tscan->next_dump.addr_fd, 0, SEEK_SET ) < 0 ) {
 		tscan->ret = errno;
-		return _tscan;
+		goto set_found;
+	}
+	if ( gasp_lseek( tscan->next_dump.dump_fd, 0, SEEK_SET ) < 0 ) {
+		tscan->ret = errno;
+		goto set_found;
 	}
 	
 	/* Decide how we will clear memory */
@@ -415,22 +462,22 @@ void* aobscanthread( void *_tscan ) {
 	/* Reduce corrupted results */
 	(void)memset( space->block, clear, space->given );
 	
-	if ( tscan->prev_fd < 0 ) {
+	if ( check_dump( tscan->prev_dump ) == EBADF ) {
 		while (
 			proc_mapped_next(
 				&(tscan->ret), tscan->handle,
 				mapped.upto, &mapped, prot ) >= 0
 		)
 		{
-			if ( tscan->wants2free ) {
-				scan->total = scan->count;
-				return _tscan;
-			}
+			if ( tscan->wants2free )
+				goto set_found;
+			
 			if ( tscan->wants2read ) {
 				tscan->ready2wait = 1;
-				while ( tscan->wants2read );
+				while ( tscan->wants2read ) sleep(1);
 				tscan->ready2wait = 0;
 			}
+			
 			/* Skip irrelevant regions */
 			if ( mapped.base < tscan->from
 				|| mapped.upto <= tscan->from
@@ -449,12 +496,8 @@ void* aobscanthread( void *_tscan ) {
 			/* Ensure we have enough memory to read into */
 			stop = mapped.upto - mapped.base;
 			if ( !(buff = more_space(
-				&(tscan->ret), space, addr + stop ))
-			)
-			{
-				scan->total = scan->count;
-				return _tscan;
-			}
+				&(tscan->ret), space, addr + stop )) )
+				goto set_found;
 			
 			/* Reduce corrupted results */
 			(void)memset( buff + addr, clear, stop );
@@ -462,24 +505,30 @@ void* aobscanthread( void *_tscan ) {
 			/* Safe to read the memory block now */
 			if ( !proc_glance_data(
 				&(tscan->ret), tscan->handle,
-				mapped.base, buff + addr, stop )
-			)
-			{
-				scan->total = scan->count;
-				return _tscan;
-			}
+				mapped.base, buff + addr, stop ) )
+				goto set_found;
+				
 			stop += addr;
 			stop -= tscan->bytes;
 			for ( addr = 0; addr < stop; ++addr ) {
+				tscan->done_upto = mapped.base + addr;
 				if ( memcmp( buff + addr, array, tscan->bytes ) == 0 ) {
 					prev = mapped.base + addr;
-					if ( write( tscan->next_fd, &prev, sizeof(void*) )
+					if ( write( tscan->next_dump.addr_fd,
+							&prev, sizeof(void*) )
 						< (ssize_t)sizeof(void*)
 					)
 					{
 						tscan->ret = errno;
-						scan->total = scan->count;
-						return _tscan;
+						goto set_found;
+					}
+					if ( write( tscan->next_dump.dump_fd,
+							buff + addr, tscan->bytes )
+						< (ssize_t)(tscan->bytes)
+					)
+					{
+						tscan->ret = errno;
+						goto set_found;
 					}
 					scan->count++;
 				}
@@ -488,18 +537,26 @@ void* aobscanthread( void *_tscan ) {
 		}
 	}
 	else {
-		if ( gasp_lseek( tscan->prev_fd, 0, SEEK_SET ) < 0 ) {
+		if ( gasp_lseek( tscan->prev_dump.info_fd, 0, SEEK_SET ) < 0 ) {
 			tscan->ret = errno;
-			return _tscan;
+			goto set_found;
+		}
+		read( tscan->prev_dump.info_fd, &(scan->total), sizeof(node_t) );
+		if ( gasp_lseek( tscan->prev_dump.addr_fd, 0, SEEK_SET ) < 0 ) {
+			tscan->ret = errno;
+			goto set_found;
+		}
+		if ( gasp_lseek( tscan->prev_dump.dump_fd, 0, SEEK_SET ) < 0 ) {
+			tscan->ret = errno;
+			goto set_found;
 		}
 		for ( a = 0; a < scan->total; ++a ) {
-			if ( read( tscan->prev_fd, &done,
+			if ( read( tscan->prev_dump.addr_fd, &done,
 				sizeof(void*) ) != sizeof(void*)
 			)
 			{
 				tscan->ret = errno;
-				scan->total = scan->count;
-				return _tscan;
+				goto set_found;
 			}
 			if ( done >= mapped.base && done <= mapped.upto )
 				goto check_next_address;
@@ -508,15 +565,15 @@ void* aobscanthread( void *_tscan ) {
 				mapped.upto, &mapped, prot ) >= 0
 			)
 			{
-				if ( tscan->wants2free ) {
-					scan->total = scan->count;
-					return _tscan;
-				}
+				if ( tscan->wants2free )
+					goto set_found;
+					
 				if ( tscan->wants2read ) {
 					tscan->ready2wait = 1;
-					while ( tscan->wants2read );
+					while ( tscan->wants2read ) sleep(1);
 					tscan->ready2wait = 0;
 				}
+				
 				/* Skip irrelevant regions */
 				if ( mapped.base < tscan->from
 					|| mapped.upto <= tscan->from
@@ -524,6 +581,7 @@ void* aobscanthread( void *_tscan ) {
 					|| mapped.upto > tscan->upto
 					|| (mapped.prot & prot) != prot )
 					continue;
+				
 	check_next_address:
 				/* If continued page lines up with previous then move the bytes
 				 * we skipped to front of buffer to be compared now that we
@@ -535,10 +593,8 @@ void* aobscanthread( void *_tscan ) {
 				/* Ensure we have enough memory to read into */
 				stop = mapped.upto - mapped.base;
 				if ( !(buff = more_space(
-					&(tscan->ret), space, addr + stop )) ) {
-					scan->total = scan->count;
-					return _tscan;
-				}
+					&(tscan->ret), space, addr + stop )) ) 
+					goto set_found;
 				
 				/* Reduce corrupted results */
 				(void)memset( buff + addr, clear, stop );
@@ -546,32 +602,43 @@ void* aobscanthread( void *_tscan ) {
 				/* Safe to read the memory block now */
 				if ( !proc_glance_data(
 					&(tscan->ret), tscan->handle,
-					mapped.base, buff + addr, stop )
-				)
-				{
-					scan->total = scan->count;
-					return _tscan;
-				}
+					mapped.base, buff + addr, stop ) )
+					goto set_found;
 				stop += addr;
 				stop -= tscan->bytes;
 				addr = done - mapped.base;
 				if ( memcmp( buff + addr, array, tscan->bytes ) == 0 ) {
-					if ( write( tscan->next_fd, &done, sizeof(void*) )
+					if ( write( tscan->next_dump.addr_fd,
+							&done, sizeof(void*) )
 						< (ssize_t)(sizeof(void*))
 					)
 					{
 						tscan->ret = errno;
-						scan->total = scan->count;
-						return _tscan;
+						goto set_found;
+					}
+					if ( write( tscan->next_dump.dump_fd,
+							buff + addr, tscan->bytes )
+						< (ssize_t)(tscan->bytes)
+					)
+					{
+						tscan->ret = errno;
+						goto set_found;
 					}
 					scan->count++;
 				}
 				prev = mapped.upto;
 			}
+		tscan->done_upto = done;
 		}
 	}
 	tscan->ret = EXIT_SUCCESS;
+	set_found:
 	scan->total = scan->count;
+	if ( tscan->next_dump.info_fd >= 0 &&
+		gasp_lseek( tscan->next_dump.info_fd, 0, SEEK_SET ) == 0 )
+		write( tscan->next_dump.info_fd, &(scan->total), sizeof(node_t) );
+	tscan->threadmade = 0;
+	tscan->done_scans++;
 	return _tscan;
 }
 

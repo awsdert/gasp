@@ -1,4 +1,4 @@
-cfg = {
+local cfg = {
 	fps = 15,
 	volume = 0.5,
 	clipboard = false,

@@ -3,6 +3,46 @@ glfw = require("moonglfw")
 nk = require("moonnuklear")
 rear = require("moonnuklear.glbackend")
 
+function rebuild_cheat(v)
+	local _t = {
+		app = v.app,
+		emu = v.emu,
+		as_text = v.as_text,
+		as_bytes = v.as_bytes,
+		edited = v.edited,
+		endian = v.endian,
+		method = v.method or "=",
+		desc = v.desc or "???",
+		addr = v.addr or 0,
+		size = v.size or 1,
+		Type = v.Type or "bytes",
+		offset = v.offset,
+		-- Group only stuff
+		generated = v.generated,
+		change_all = v.change_all,
+		list = v.list,
+		prev = v.prev,
+		count = v.count,
+		split = v.split,
+		is_group = toboolean(v.list or v.count or v.split or v.prev)
+	}
+	if v.active == nil then
+		_t.active = _t.is_group
+	else
+		_t.active = toboolean(v.active)
+	end
+	local mt = {
+		__index = _t,
+		__newindex = function (t,k,val)
+			_t[k] = val
+			return v
+		end
+	}
+	local _r = {}
+	setmetatable(_r,mt)
+	return _r
+end
+
 GUI = {
 	cfg = require("cfg"),
 	--[[ ID Counter, since nuklear insists on unique IDs
@@ -11,6 +51,7 @@ GUI = {
 	which = 1,
 	previous = 1
 }
+
 local R, G, B, A
 
 local function set_bgcolor(color)
@@ -75,26 +116,54 @@ function hook_process()
 		if not GUI.handle then
 			GUI.handle = gasp.new_handle()
 		end
-		if not GUI.handle or GUI.handle:valid() == true then
-			return
+		if not GUI.handle then
+			return false
 		end
-		GUI.handle:init( GUI.noticed.entryId )
+		if GUI.handle:valid() == true then
+			return true
+		end
+		return GUI.handle:init( GUI.noticed.entryId )
 	end
+	return false
+end
+
+function autoload()
+	local tmp, v, ok, err, func
+	v = GUI.cheat
+	if v then return rebuild_cheat(v) end
+	if GUI.cheatfile then
+		tmp = cheatspath() .. "/" .. GUI.cheatfile
+		func = loadfile(tmp)
+		ok, err, v = pcall( func )
+		if not ok then
+			print( tostring(err) )
+			v = {}
+		else
+			v = rebuild_cheat(func())
+		end
+		if v and v.app then
+			GUI.cfg.find_process =
+				v.app.name or GUI.cfg.find_process
+			if not GUI.donothook then
+				tmp = gasp.locate_app(GUI.cfg.find_process)
+				-- Auto hook process
+				if #tmp == 1 then
+					GUI.noticed = tmp[1]
+					hook_process()
+				end
+			end
+		end
+	end
+	if v then
+		GUI.cheat = v
+	end
+	return v
 end
 
 local function draw_all(ctx)
 	local push_font = (GUI.cfg.font.use ~= "default")
 	local tmp
 	GUI.quit = glfw.window_should_close( GUI.window )
-	if not GUI.donothook then
-		tmp = gasp.locate_app(GUI.cfg.find_process)
-		-- Auto hook process
-		if #tmp == 1 then
-			GUI.noticed = tmp[1]
-			hook_process()
-		end
-		tmp = nil
-	end
 	if push_font == true then
 		nk.style_push_font( ctx, get_font() )
 	end
@@ -102,8 +171,13 @@ local function draw_all(ctx)
 		{0,0,GUI.cfg.window.width,GUI.cfg.window.height},
 		nk.WINDOW_BORDER
 	) then
+		autoload()
+		GUI.keep_cheat = nil
 		GUI.draw[GUI.which].func(
 			GUI.ctx, GUI.which, GUI.previous )
+		if GUI.keep_cheat then
+			GUI.cheat = rebuild_cheat( GUI.keep_cheat )
+		end
 	end
 	nk.window_end(ctx)
 	if push_font == true then
@@ -115,7 +189,6 @@ local function draw_all(ctx)
 	rear.render()
 	glfw.swap_buffers(GUI.window)
 	collectgarbage()
-	
 end
 
 local function boot_window()
@@ -159,6 +232,9 @@ local function boot_window()
 		rear.new_frame()
 		GUI.idc = 0
 		draw_all(GUI.ctx)
+		if GUI.keep_cheat then
+			GUI.cheat = rebuild_cheat( GUI.keep_cheat )
+		end
 	end
 	rear.shutdown()
 	

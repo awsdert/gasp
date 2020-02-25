@@ -15,15 +15,15 @@ return function (ctx,now,prv)
 	nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 2 )
 	nk.label( ctx, "Type:", nk.TEXT_LEFT )
 	GUI.draw_type_field(ctx,font,scan)
-	scan = GUI.keep_cheat
+	scan = rebuild_cheat( GUI.keep_cheat )
 	nk.layout_row_dynamic( ctx, pad_height(font,"Size:"), 4 )
 	nk.label( ctx, "Size:", nk.TEXT_LEFT )
 	GUI.draw_size_field(ctx,font,scan)
-	scan = GUI.keep_cheat
+	scan = rebuild_cheat( GUI.keep_cheat )
 	nk.layout_row_dynamic( ctx, pad_height(font,"Find:"), 2 )
 	nk.label( ctx, "Find:", nk.TEXT_LEFT )
 	GUI.draw_edit_field(ctx,font,scan)
-	scan = GUI.keep_cheat
+	scan = rebuild_cheat( GUI.keep_cheat )
 	if GUI.cheat and GUI.cheat.app and GUI.cheat.app.regions then
 		if scan.regions then
 			list = scan.regions
@@ -59,10 +59,10 @@ return function (ctx,now,prv)
 	end
 	nk.label( ctx, "From:", nk.TEXT_LEFT )
 	GUI.draw_addr_field( ctx, font, { addr = scan.from } )
-	scan.from = GUI.keep_cheat.addr
+	scan.from = rebuild_cheat( GUI.keep_cheat ).addr
 	nk.label( ctx, "Upto:", nk.TEXT_LEFT )
 	GUI.draw_addr_field( ctx, font, { addr = scan.upto } )
-	scan.upto = GUI.keep_cheat.addr
+	scan.upto = rebuild_cheat( GUI.keep_cheat ).addr
 	if nk.button( ctx, nil, "Clear" ) then
 		done = {
 			count = 0,

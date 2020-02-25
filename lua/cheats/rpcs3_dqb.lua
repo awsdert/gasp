@@ -12,7 +12,7 @@ local t = {
 	emu = { desc = "Dragon Quest Builders" },
 	endian = "Big",
 	list = {
-{ desc = "Player", addr = 18036876676,
+{ check = 2, desc = "Player", addr = 18036876676,
 	list = { 
 		{ desc = "Days", offset = 0, Type = "signed", size = 2 },
 		{ desc = "HP Upto", offset = 2, Type = "signed", size = 2 },

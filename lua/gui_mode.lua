@@ -22,11 +22,11 @@ R, G, B, A = set_bgcolor()
 -- GL/GLFW inits
 glfw.version_hint(3, 3, 'core')
 
-function get_font(gui,name)
-	if type(name) ~= "string" or not gui.fonts[name] then
-		name = gui.cfg.font.use
+function get_font(name)
+	if type(name) ~= "string" or not GUI.fonts[name] then
+		name = GUI.cfg.font.use
 	end
-	return gui.fonts[name]
+	return GUI.fonts[name]
 end
 
 GUI.global_cb = function (window, key, scancode, action, shift, control, alt, super)
@@ -70,200 +70,173 @@ function add_tree_node(ctx,text,selected,id,isparent)
 end
 
 
-function hook_process(gui)
-	if gui.noticed then
-		if not gui.handle then
-			gui.handle = gasp.new_handle()
+function hook_process()
+	if GUI.noticed then
+		if not GUI.handle then
+			GUI.handle = gasp.new_handle()
 		end
-		if not gui.handle then
-			return gui
+		if not GUI.handle or GUI.handle:valid() == true then
+			return
 		end
-		if gui.handle:valid() == true then
-			return gui
-		end
-		if gui.handle:init( gui.noticed.entryId ) == true then
-			return gui
-		end
+		GUI.handle:init( GUI.noticed.entryId )
 	end
-	return gui
 end
 
-local function draw_all(gui,ctx)
-	local push_font = (gui.cfg.font.use ~= "default")
+local function draw_all(ctx)
+	local push_font = (GUI.cfg.font.use ~= "default")
 	local tmp
-	gui.quit = glfw.window_should_close( gui.window )
-	if not gui.donothook then
-		tmp = gasp.locate_app(gui.cfg.find_process)
+	GUI.quit = glfw.window_should_close( GUI.window )
+	if not GUI.donothook then
+		tmp = gasp.locate_app(GUI.cfg.find_process)
 		-- Auto hook process
 		if #tmp == 1 then
-			gui.noticed = tmp[1]
-			gui = hook_process(gui)
+			GUI.noticed = tmp[1]
+			hook_process()
 		end
 		tmp = nil
 	end
 	if push_font == true then
-		nk.style_push_font( ctx, get_font(gui) )
+		nk.style_push_font( ctx, get_font() )
 	end
 	if nk.window_begin(ctx, "Show",
-		{0,0,gui.cfg.window.width,gui.cfg.window.height},
+		{0,0,GUI.cfg.window.width,GUI.cfg.window.height},
 		nk.WINDOW_BORDER
 	) then
-		_G['GUI'] = gui
-		gui = gui.draw[gui.which].func(
-			gui, gui.ctx, gui.which, gui.previous )
+		GUI.draw[GUI.which].func(
+			GUI.ctx, GUI.which, GUI.previous )
 	end
 	nk.window_end(ctx)
 	if push_font == true then
 		nk.style_pop_font(ctx)
 	end
-	gl.viewport(0, 0, gui.cfg.window.width, gui.cfg.window.height)
+	gl.viewport(0, 0, GUI.cfg.window.width, GUI.cfg.window.height)
 	gl.clear_color(R, G, B, A)
 	gl.clear('color')
 	rear.render()
-	glfw.swap_buffers(gui.window)
+	glfw.swap_buffers(GUI.window)
 	collectgarbage()
-	return gui
+	
 end
 
 local function boot_window()
-	local gui = _G['GUI']
+	local tmp
 	-- Forces reset
-	gui.window = glfw.create_window(
-		gui.cfg.window.width,
-		gui.cfg.window.height,
-		gui.cfg.window.title )
-	glfw.make_context_current(gui.window)
+	GUI.window = glfw.create_window(
+		GUI.cfg.window.width,
+		GUI.cfg.window.height,
+		GUI.cfg.window.title )
+	glfw.make_context_current(GUI.window)
 	gl.init()
 
 	-- Initialize the rear
-	gui.ctx = rear.init(gui.window, {
-		vbo_size = gui.cfg.sizes.gl_vbo,
-		ebo_size = gui.cfg.sizes.gl_ebo,
-		anti_aliasing = gui.cfg.anti_aliasing,
-		clipboard = gui.cfg.clipboard,
+	GUI.ctx = rear.init(GUI.window, {
+		vbo_size = GUI.cfg.sizes.gl_vbo,
+		ebo_size = GUI.cfg.sizes.gl_ebo,
+		anti_aliasing = GUI.cfg.anti_aliasing,
+		clipboard = GUI.cfg.clipboard,
 		callbacks = true
 	})
 
 	atlas = rear.font_stash_begin()
-	for name,size in pairs(gui.cfg.font.sizes) do
-		size = gui.cfg.font.base_size * size
-		gui.fonts[name] = atlas:add( size, gui.cfg.font.file )
+	for name,size in pairs(GUI.cfg.font.sizes) do
+		size = GUI.cfg.font.base_size * size
+		GUI.fonts[name] = atlas:add( size, GUI.cfg.font.file )
 		-- Needed for memory editor later
-		gui.fonts["mono-" .. name] =
-			atlas:add( size, gui.cfg.font.mono )
+		GUI.fonts["mono-" .. name] =
+			atlas:add( size, GUI.cfg.font.mono )
 	end
-	rear.font_stash_end( gui.ctx, (get_font(gui)) )
+	rear.font_stash_end( GUI.ctx, (get_font()) )
 	
-	glfw.set_key_callback(gui.window,gui.global_cb)
+	glfw.set_key_callback(GUI.window,GUI.global_cb)
 	
 	collectgarbage()
 	collectgarbage('stop')
 	
-	while not glfw.window_should_close(gui.window) do
-		_G['GUI'] = gui
-		gui.cfg.window.width, gui.cfg.window.height =
-			glfw.get_window_size(gui.window)
-		glfw.wait_events_timeout(1/(gui.cfg.fps or 30))
+	while not glfw.window_should_close(GUI.window) do
+		GUI.cfg.window.width, GUI.cfg.window.height =
+			glfw.get_window_size(GUI.window)
+		glfw.wait_events_timeout(1/(GUI.cfg.fps or 30))
 		rear.new_frame()
-		gui.idc = 0
-		gui = draw_all(gui,gui.ctx)
+		GUI.idc = 0
+		draw_all(GUI.ctx)
 	end
 	rear.shutdown()
 	
-	gui.window = nil
-	gui.ctx = nil
+	GUI.window = nil
+	GUI.ctx = nil
 	atlas = nil
-	_G['GUI'] = gui
-	return gui
+	
 end
 
-GUI.draw_reboot = function(gui,ctx)
-	nk.layout_row_dynamic( ctx, pad_height(get_font(gui),text), 2)
+GUI.draw_reboot = function(ctx)
+	nk.layout_row_dynamic( ctx, pad_height(get_font(),text), 2)
 	if nk.button( ctx,nil, "Reboot GUI" ) then
-		gui.reboot = gasp.toggle_reboot_gui()
+		GUI.reboot = gasp.toggle_reboot_gui()
 	else
-		gui.reboot = gasp.get_reboot_gui()
+		GUI.reboot = gasp.get_reboot_gui()
 	end
-	nk.label( ctx, tostring(gui.reboot), nk.TEXT_RIGHT )
-	return gui
+	nk.label( ctx, tostring(GUI.reboot), nk.TEXT_RIGHT )
+	
 end
 
-GUI.use_ui = function(gui,ctx,name,now)
+GUI.use_ui = function(ctx,name,now)
 	local i,v
-	for i,v in pairs(gui.draw) do
+	for i,v in pairs(GUI.draw) do
 		if v.name == name then
-			gui.previous = now
-			gui.which = i
-			return gui
+			GUI.previous = now
+			GUI.which = i
+			
 		end
 	end
-	return gui
+	
 end
 	
-GUI.add_ui = function( gui, name, desc, file )
+GUI.add_ui = function( name, desc, file )
 	local path = (os.getenv("PWD") or os.getenv("CWD") or ".") .. "/lua"
 	local tmp = dofile( path .. "/" .. file )
 	if not tmp then
 		print( debug.traceback() )
-		tmp = gui.draw_fallback
+		tmp = GUI.draw_fallback
 	end
-	gui.draw[#(gui.draw) + 1] = { name = name, desc = desc, func = tmp }
-	return gui
+	GUI.draw[#(GUI.draw) + 1] = { name = name, desc = desc, func = tmp }
+	
 end
 
-GUI.draw_goback = function(gui,ctx,now,prv,func)
-	nk.layout_row_dynamic( ctx, pad_height(get_font(gui),"Done"), 1 )
+GUI.draw_goback = function(ctx,now,prv,func)
+	nk.layout_row_dynamic( ctx, pad_height(get_font(),"Done"), 1 )
 	if nk.button( ctx, nil, "Go Back" ) then
-		gui.which = prv
-		if prv == gui.previous then
-			gui.previous = 1
+		GUI.which = prv
+		if prv == GUI.previous then
+			GUI.previous = 1
 		end
 		if func then
-			return func(gui)
+			return func()
 		end
 	end
-	return gui
+	
 end
 
-GUI.draw_fallback = function( gui, ctx, now, prv )
-	gui = gui.draw_reboot(gui,ctx)
-	gui = gui.draw_goback(gui,ctx,now,prv)
-	return gui
+GUI.draw_fallback = function( ctx, now, prv )
+	GUI.draw_reboot(ctx)
+	GUI.draw_goback(ctx,now,prv)
 end
 
 GUI.selected = {}
 GUI.reboot = true
 GUI.forced_reboot = false
 while GUI.reboot == true do
-	
 	GUI.draw = {}
 	GUI.fonts = {}
 	
-	GUI = GUI.add_ui( GUI, "main", "Main", "main.lua" )
-	GUI = GUI.add_ui( GUI, "cfg-font", "Change Font", "cfg/font.lua" )
-	GUI = GUI.add_ui( GUI, "cfg-proc", "Hook process", "cfg/proc.lua" )
-	GUI = GUI.add_ui( GUI, "scan", "Scan memory", "scan.lua" )
-	GUI = GUI.add_ui( GUI, "cheatfile", "Load cheat file", "cfg/cheatfile.lua" )
+	GUI.add_ui( "main", "Main", "main.lua" )
+	GUI.add_ui( "cfg-font", "Change Font", "cfg/font.lua" )
+	GUI.add_ui( "cfg-proc", "Hook process", "cfg/proc.lua" )
+	GUI.add_ui( "scan", "Scan memory", "scan.lua" )
+	GUI.add_ui( "cheatfile", "Load cheat file", "cfg/cheatfile.lua" )
 	
 	GUI.reboot = gasp.set_reboot_gui(false)
 	GUI.window = nil
-	local ok, tmp = pcall( boot_window() )
-	GUI = _G['GUI']
-	if ok then
-		GUI = tmp
-		GUI.forced_reboot = false
-	elseif GUI.window then
-		glfw.set_window_should_close(GUI.window, true)
-		rear.shutdown()
-		print( tostring(tmp) )
-		if not GUI.reboot and not GUI.forced_reboot then
-			-- Try again, might not be main window that caused failure
-			GUI.reboot = gasp.set_reboot_gui(true)
-			GUI.forced_reboot = true
-			GUI.previous = 1
-			GUI.which = 1
-		end
-	end
+	boot_window()
 	GUI.draw = nil
 	GUI.fonts = nil
 end

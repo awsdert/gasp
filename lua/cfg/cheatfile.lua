@@ -1,10 +1,10 @@
-return function(gui,ctx,now,prv)
-	local font = get_font(gui)
-	local text = get_cheat_dir(gui)
+return function(ctx,now,prv)
+	local font = get_font(GUI)
+	local text = get_cheat_dir(GUI)
 	local dir = scandir(text)
-	gui = gui.draw_reboot(gui,ctx)
-	gui = gui.draw_goback(gui,ctx,now,prv)
-	gui.cheat = nil
+	GUI.draw_reboot(ctx)
+	GUI.draw_goback(ctx,now,prv)
+	GUI.cheat = nil
 	if dir and #dir > 0 then
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
 		nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)
@@ -14,36 +14,36 @@ return function(gui,ctx,now,prv)
 		for i,v in pairs(dir) do
 			if gasp.path_isfile(text .. '/' .. v) == 1 and
 				v:match("lua") then
-				if gui.cheatfile then
-					i = (gui.cheatfile == v)
+				if GUI.cheatfile then
+					i = (GUI.cheatfile == v)
 				else
 					i = false
 				end
 				i = nk.selectable( ctx, nil, v, nk.TEXT_LEFT, i )
 				if i == true then
-					gui.cheatfile = v
+					GUI.cheatfile = v
 				end
 			end
 		end
 	end
 	if nk.button( ctx, nil, "Done" ) then
-		gui.which = prv
-		if gui.cheatfile then
-			gui.cheat = dofile(text .. "/" .. gui.cheatfile)
+		GUI.which = prv
+		if GUI.cheatfile then
+			GUI.cheat = dofile(text .. "/" .. GUI.cheatfile)
 		end
 	end
-	if gui.cheat and gui.cheat.app then
+	if GUI.cheat and GUI.cheat.app then
 		-- Auto fill search box when the process list is opened
-		gui.cfg.find_process =
-			gui.cheat.app.name or gui.cfg.find_process
-		dir = gasp.locate_app(gui.cfg.find_process)
+		GUI.cfg.find_process =
+			GUI.cheat.app.name or GUI.cfg.find_process
+		dir = gasp.locate_app(GUI.cfg.find_process)
 		-- Auto hook process
 		if #dir == 1 then
-			gui.noticed = dir[1]
-			return hook_process(gui)
+			GUI.noticed = dir[1]
+			return hook_process(GUI)
 		else
-			return gui.use_ui(gui,ctx,"cfg-proc",now)
+			return GUI.use_ui(ctx,"cfg-proc",now)
 		end
 	end
-	return gui
+	return GUI
 end

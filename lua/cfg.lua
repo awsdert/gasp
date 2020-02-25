@@ -1,5 +1,5 @@
 cfg = {
-	fps = 60,
+	fps = 15,
 	volume = 0.5,
 	clipboard = false,
 	anti_aliasing = false,

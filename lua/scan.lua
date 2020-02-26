@@ -8,22 +8,26 @@ return function (ctx,now,prv)
 	scan.upto = scan.upto or 0x7FFFFFFF
 	scan.Type = scan.Type or "signed"
 	scan.limit = scan.limit or 100
-	done = scan.done or { count = 0, from = 0, upto = scan.from }
+	scan.done = scan.done or { count = 0, from = 0, upto = scan.from }
 	scan.TypeSelected = scan.TypeSelected or 1
+	scan = rebuild_cheat(scan)
+	
+	done = scan.done
 	GUI.draw_reboot(ctx)
 	GUI.draw_goback(ctx,now,prv)
+	
 	nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 2 )
 	nk.label( ctx, "Type:", nk.TEXT_LEFT )
-	GUI.draw_type_field(ctx,font,scan)
-	scan = rebuild_cheat( GUI.keep_cheat )
+	scan = GUI.draw_type_field(ctx,font,scan)
+	
 	nk.layout_row_dynamic( ctx, pad_height(font,"Size:"), 4 )
 	nk.label( ctx, "Size:", nk.TEXT_LEFT )
-	GUI.draw_size_field(ctx,font,scan)
-	scan = rebuild_cheat( GUI.keep_cheat )
+	scan = GUI.draw_size_field(ctx,font,scan)
+	
 	nk.layout_row_dynamic( ctx, pad_height(font,"Find:"), 2 )
 	nk.label( ctx, "Find:", nk.TEXT_LEFT )
-	GUI.draw_edit_field(ctx,font,scan)
-	scan = rebuild_cheat( GUI.keep_cheat )
+	scan = GUI.draw_edit_field(ctx,font,scan)
+	
 	if GUI.cheat and GUI.cheat.app and GUI.cheat.app.regions then
 		if scan.regions then
 			list = scan.regions
@@ -57,20 +61,22 @@ return function (ctx,now,prv)
 			scan.upto = list[scan.region].upto
 		end
 	end
+	
 	nk.label( ctx, "From:", nk.TEXT_LEFT )
-	GUI.draw_addr_field( ctx, font, { addr = scan.from } )
-	scan.from = rebuild_cheat( GUI.keep_cheat ).addr
+	tmp = GUI.draw_addr_field( ctx, font, { addr = scan.from } )
+	scan.from = tmp.addr
+	
 	nk.label( ctx, "Upto:", nk.TEXT_LEFT )
-	GUI.draw_addr_field( ctx, font, { addr = scan.upto } )
-	scan.upto = rebuild_cheat( GUI.keep_cheat ).addr
+	tmp = GUI.draw_addr_field( ctx, font, { addr = scan.upto } )
+	scan.upto = tmp.addr
+	
 	if nk.button( ctx, nil, "Clear" ) then
 		done = {
 			count = 0,
 			from = 0,
 			upto = scan.from,
-			list = {},
 			found = 0,
-			added =0,
+			added = 0,
 			increment = math.ceil((scan.upto - scan.from) / 0x16)
 		}
 	end
@@ -79,7 +85,6 @@ return function (ctx,now,prv)
 		done.count = done.count + 1
 		done.from = 0
 		done.upto = scan.from
-		done.list = done.list or {}
 		done.found = 0
 		done.added = 0
 		done.increment = math.ceil((scan.upto - scan.from) / 0x16)
@@ -148,15 +153,19 @@ return function (ctx,now,prv)
 		end
 		done.list = list
 	end
-	if done.list then
+	if done.count > 0 then
 		list = done.list
 		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
+		
 		tmp = GUI.handle:scan_done_upto()
 		nk.progress( ctx, tmp, scan.upto, nk.FIXED )
+		
 		tmp = string.format( "Scanned upto 0x%X", tmp )
 		nk.label( ctx, tmp, nk.TEXT_LEFT )
+		
 		tmp = string.format( "Showing %d of %d Results",
 			done.added, GUI.handle:scan_found() )
+		
 		nk.label( ctx, tmp, nk.TEXT_LEFT )
 		for i = 1,done.added,1 do
 			GUI.draw_cheat( ctx, font, list[i] )
@@ -164,5 +173,5 @@ return function (ctx,now,prv)
 	end
 	scan.done = done
 	GUI.scan = scan
-	
+	GUI.keep_cheat = nil
 end

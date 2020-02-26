@@ -4,6 +4,7 @@ nk = require("moonnuklear")
 rear = require("moonnuklear.glbackend")
 
 function rebuild_cheat(v)
+	if not v then return end
 	local _t = {
 		app = v.app,
 		emu = v.emu,
@@ -19,12 +20,23 @@ function rebuild_cheat(v)
 		offset = v.offset,
 		-- Group only stuff
 		generated = v.generated,
-		change_all = v.change_all,
 		list = v.list,
 		prev = v.prev,
 		count = v.count,
 		split = v.split,
-		is_group = toboolean(v.list or v.count or v.split or v.prev)
+		is_group = toboolean(v.list or v.count or v.split or v.prev),
+		-- Scan related
+		from = v.from,
+		upto = v.upto,
+		done = v.done,
+		limit = v.limit,
+		found = v.found,
+		added = v.added,
+		increment = v.increment,
+		TypeSelected = v.TypeSelected,
+		region = v.region,
+		regions = v.regions,
+		region_options = v.region_options
 	}
 	if v.active == nil then
 		_t.active = _t.is_group
@@ -112,17 +124,19 @@ end
 
 
 function hook_process()
-	if GUI.noticed then
-		if not GUI.handle then
-			GUI.handle = gasp.new_handle()
+	if not GUI.donothook then
+		if GUI.noticed then
+			if not GUI.handle then
+				GUI.handle = gasp.new_handle()
+			end
+			if not GUI.handle then
+				return false
+			end
+			if GUI.handle:valid() == true then
+				return true
+			end
+			return GUI.handle:init( GUI.noticed.entryId )
 		end
-		if not GUI.handle then
-			return false
-		end
-		if GUI.handle:valid() == true then
-			return true
-		end
-		return GUI.handle:init( GUI.noticed.entryId )
 	end
 	return false
 end
@@ -137,7 +151,7 @@ function autoload()
 		ok, err, v = pcall( func )
 		if not ok then
 			print( tostring(err) )
-			v = {}
+			v = nil
 		else
 			v = rebuild_cheat(func())
 		end
@@ -171,11 +185,13 @@ local function draw_all(ctx)
 		{0,0,GUI.cfg.window.width,GUI.cfg.window.height},
 		nk.WINDOW_BORDER
 	) then
-		autoload()
+		if not GUI.cheat then
+			GUI.cheat = autoload()
+		end
 		GUI.keep_cheat = nil
 		GUI.draw[GUI.which].func(
 			GUI.ctx, GUI.which, GUI.previous )
-		if GUI.keep_cheat then
+		if type(GUI.keep_cheat) == "table" then
 			GUI.cheat = rebuild_cheat( GUI.keep_cheat )
 		end
 	end

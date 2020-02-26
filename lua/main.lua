@@ -3,22 +3,12 @@ local function draw_desc_field( ctx, font, v )
 	if v.active == true then
 		text = '- ' .. v.desc
 	end
-	if v.desc == "Player" then
-		print( "1: " .. tostring(v.active) )
-		if _G.Player then
-			print( "2: " .. tostring(_G.Player.active) )
-		end
-		_G.Player = v
-	end
 	if v.is_group then
 		if nk.button( ctx, nil, text ) then
 			v.active = not v.active
 		end
 	else
 		v.active = nk.checkbox( ctx, v.desc, v.active )
-	end
-	if v.desc == "Player" then
-		print( "3: " .. tostring(v.active) )
 	end
 	GUI.keep_cheat = rebuild_cheat(v)
 	return rebuild_cheat(v)
@@ -189,6 +179,10 @@ end
 local function draw_cheats( ctx, font, v )
 	local prv, now, nxt, text, i, j, k, x, tmp, bytes, test, list, all
 	v = rebuild_cheat(v)
+	GUI.keep_cheat = nil
+	if v.is_group == false then
+		return GUI.draw_cheat( ctx, font, v )
+	end
 	tmp = GUI.idc
 	GUI.idc = GUI.idc + 1
 	nk.layout_row_dynamic( ctx, pad_height( font, v.desc ), 1 )
@@ -305,10 +299,8 @@ local function draw_cheat(ctx,font,v)
 	
 	GUI.keep_cheat = nil
 	
-	if v.prev or v.list or v.count or v.split then
-		v = GUI.draw_cheats( ctx, font, rebuild_cheat(v) )
-		GUI.keep_cheat = rebuild_cheat(v)
-		return rebuild_cheat(v)
+	if v.is_group == true then
+		return GUI.draw_cheats( ctx, font, v )
 	end
 	
 	text = v.desc
@@ -334,15 +326,12 @@ local function draw_cheat(ctx,font,v)
 	v = GUI.draw_type_field(ctx,font,rebuild_cheat(v))
 	v = GUI.draw_size_field(ctx,font,rebuild_cheat(v))
 	v = GUI.draw_cheat_edit(ctx,font,rebuild_cheat(v))
+	GUI.keep_cheat = rebuild_cheat(v)
 	return rebuild_cheat(v)
 end
 local function draw_all_cheats(ctx,font,v)
 	local i, id, text, j, k, tmp
-	if not v then
-		print(debug.traceback())
-		error("root cheat was nil")
-		return
-	end
+	if not v then return end
 	v = rebuild_cheat(v)
 	text = "Game"
 	nk.layout_row_dynamic( ctx, pad_height( font, text ), 2 )
@@ -408,14 +397,10 @@ return function(ctx)
 			nk.layout_row_dynamic(ctx,pad_height(font,text),1)
 			if nk.button( ctx, nil, "Hook" ) then
 				GUI.donothook = false
-				hook_process()
 			end
 		else
 			nk.layout_row_dynamic(ctx,pad_height(font,text),1)
 			nk.label( ctx, "Nothing selected", nk.TEXT_LEFT )
-		end
-		if hook_process() == false then
-			return
 		end
 	end
 	if hook_process() == true then

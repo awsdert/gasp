@@ -207,14 +207,13 @@ intptr_t proc_mapped_next(
 	if ( !mapped ) {
 		if ( err ) *err = EDESTADDRREQ;
 		ERRMSG( EINVAL, "Need destination for page details" );
-		return -1;
+		return 0;
 	}
 	
-	memset( mapped, 0, sizeof(proc_mapped_t) );
 	if ( !handle ) {
 		if ( err ) *err = EINVAL;
 		ERRMSG( EINVAL, "Invalid handle" );
-		return -1;
+		return 0;
 	}
 	
 	sprintf( path, "%s/maps", handle->procdir );
@@ -222,7 +221,7 @@ intptr_t proc_mapped_next(
 		if ( err ) *err = errno;
 		ERRMSG( errno, "Failed to open maps file" );
 		fprintf( stderr, "Path: '%s'\n", path );
-		return -1;
+		return 0;
 	}
 	
 	do {
@@ -243,15 +242,11 @@ intptr_t proc_mapped_next(
 				break;
 			
 			/* Move file pointer to next line */
-			while ( gasp_read( fd, line, 1 ) == 1 ) {
-				if ( line[0] == '\n' )
-					break;
-				line[0] = 0;
+			while ( *line != '\n' ) {
+				/* Ensure we break out when we hit EOF */
+				if ( gasp_read( fd, line, 1 ) != 1 )
+					goto failed;
 			}
-			
-			/* Ensure we break out when we hit EOF */
-			if ( line[0] != '\n' )
-				goto failed;
 		} while ( addr >= mapped->upto );
 		
 		/* Get position right after address range */
@@ -277,13 +272,12 @@ intptr_t proc_mapped_next(
 	} while ( (mapped->prot & prot) != prot );
 	
 	close(fd);
-	return mapped->base;
+	return mapped->upto;
 	
 	failed:
 	close(fd);
+	//if ( errno == EOF ) errno = EXIT_SUCCESS;
 	if ( err ) *err = errno;
-	if ( errno == EXIT_SUCCESS )
-		return -1;
 	ERRMSG( errno, "Failed to find page that finishes after address" );
 	fprintf( stderr, "Wanted: From address %p a page with %c%c%c%c\n",
 		(void*)addr,
@@ -292,7 +286,7 @@ intptr_t proc_mapped_next(
 		((prot & 01) ? 'x' : '-'),
 		((prot & 010) ? ((prot & 020) ? 'v' : 's') : '-')
 	);
-	return -1;
+	return 0;
 }
 
 mode_t proc_mapped_addr(
@@ -303,8 +297,7 @@ mode_t proc_mapped_addr(
 	char path[256] = {0};
 	proc_mapped_t mapped = {0};
 	
-	while ( proc_mapped_next( err, handle, mapped.upto, &mapped, 0 )
-		>= 0 ) {
+	while ( proc_mapped_next( err, handle, mapped.upto, &mapped, 0 ) ) {
 		if ( mapped.upto < addr ) continue;
 #ifdef SIZEOF_LLONG
 		sprintf( path, "%s/map_files/%llx-%llx",
@@ -421,32 +414,37 @@ void* bytescanner( void *_tscan ) {
 	
 	if ( !tscan ) {
 		errno = EDESTADDRREQ;
-		ERRMSG( errno, "taobscan was given NULL" );
+		ERRMSG( errno, "bytescanner was given NULL" );
 		return NULL;
 	}
 	
-	tscan->threadmade = 1;
 	scan = &(tscan->scan);
 	scan->count = 0;
 	if ( (tscan->ret = errno = check_dump( tscan->next_dump ))
-		!= EXIT_SUCCESS )
+		!= EXIT_SUCCESS ) {
+		fprintf( stderr, "Failed at check_dump()\n" );
 		goto set_found;
+	}
 	array = (uchar*)(tscan->array);
 	prot |= tscan->writeable ? 02 : 0;
 	
 	if ( (tscan->ret =
 		proc__rwvmem_test(tscan->handle, tscan->array, tscan->bytes ))
-		!= EXIT_SUCCESS )
+		!= EXIT_SUCCESS ){
+		fprintf( stderr, "Failed at proc__rwvmen_test()\n" );
 		return _tscan;
+	}
 	
 	scan->total = scan->count = 0;
 	space = &(scan->space);
 	
 	if ( gasp_lseek( tscan->next_dump.addr_fd, 0, SEEK_SET ) < 0 ) {
+		fprintf( stderr, "Failed at lseek(addr_fd)\n" );
 		tscan->ret = errno;
 		goto set_found;
 	}
 	if ( gasp_lseek( tscan->next_dump.dump_fd, 0, SEEK_SET ) < 0 ) {
+		fprintf( stderr, "Failed at lseek(dump_fd)\n" );
 		tscan->ret = errno;
 		goto set_found;
 	}
@@ -462,15 +460,31 @@ void* bytescanner( void *_tscan ) {
 	/* Reduce corrupted results */
 	(void)memset( space->block, clear, space->given );
 	
-	if ( check_dump( tscan->prev_dump ) == EBADF ) {
-		while (
+	tscan->threadmade = 1;
+#if 0
+	fprintf( stderr, "Started thread\n" );
+	fprintf( stderr, "Looking for %02X %02X\n", array[0], array[1] );
+	fprintf( stderr, "From %p to %p\n",
+		(void*)(tscan->from), (void*)(tscan->upto) );
+	fprintf( stderr, "With r%c protection flags set\n",
+		(prot & 02) ? 'w' : '-' );
+#endif
+	if ( !(tscan->done_scans) ) {
+		//fprintf( stderr, "First scan mode\n" );
+		while ( mapped.upto < tscan->upto &&
 			proc_mapped_next(
 				&(tscan->ret), tscan->handle,
-				mapped.upto, &mapped, prot ) >= 0
+				mapped.upto, &mapped, prot )
 		)
 		{
-			if ( tscan->wants2free )
+#if 0
+			fprintf( stderr, "Checking %p to %p\n",
+				(void*)(mapped.base), (void*)(mapped.upto) );
+#endif
+			if ( tscan->wants2free ) {
+				fprintf( stderr, "Failed at wants2free\n" );
 				goto set_found;
+			}
 			
 			if ( tscan->wants2read ) {
 				tscan->ready2wait = 1;
@@ -483,8 +497,13 @@ void* bytescanner( void *_tscan ) {
 				|| mapped.upto <= tscan->from
 				|| mapped.base >= tscan->upto
 				|| mapped.upto > tscan->upto
-				|| (mapped.prot & prot) != prot )
+				|| (mapped.prot & prot) != prot ) {
+#if 0
+				fprintf( stderr, "Skipping %p to %p\n",
+				(void*)(mapped.base), (void*)(mapped.upto) );
+#endif
 				continue;
+			}
 
 			/* If continued page lines up with previous then move the bytes
 			 * we skipped to front of buffer to be compared now that we
@@ -496,8 +515,10 @@ void* bytescanner( void *_tscan ) {
 			/* Ensure we have enough memory to read into */
 			stop = mapped.upto - mapped.base;
 			if ( !(buff = more_space(
-				&(tscan->ret), space, addr + stop )) )
+				&(tscan->ret), space, addr + stop )) ){
+				fprintf( stderr, "Failed at more_space()\n" );
 				goto set_found;
+			}
 			
 			/* Reduce corrupted results */
 			(void)memset( buff + addr, clear, stop );
@@ -505,8 +526,10 @@ void* bytescanner( void *_tscan ) {
 			/* Safe to read the memory block now */
 			if ( !proc_glance_data(
 				&(tscan->ret), tscan->handle,
-				mapped.base, buff + addr, stop ) )
+				mapped.base, buff + addr, stop ) ) {
+				fprintf( stderr, "Failed at proc_glance_data() \n" );
 				goto set_found;
+			}
 				
 			stop += addr;
 			stop -= tscan->bytes;
@@ -520,6 +543,7 @@ void* bytescanner( void *_tscan ) {
 					)
 					{
 						tscan->ret = errno;
+						fprintf( stderr, "Failed at write(addr_fd)\n" );
 						goto set_found;
 					}
 					if ( write( tscan->next_dump.dump_fd,
@@ -528,6 +552,7 @@ void* bytescanner( void *_tscan ) {
 					)
 					{
 						tscan->ret = errno;
+						fprintf( stderr, "Failed at write(dump_fd)\n" );
 						goto set_found;
 					}
 					scan->count++;
@@ -535,19 +560,24 @@ void* bytescanner( void *_tscan ) {
 			}
 			prev = mapped.upto;
 		}
+		if ( tscan->ret != EXIT_SUCCESS )
+			ERRMSG( tscan->ret, "Failed to identify next page" );
 	}
 	else {
 		if ( gasp_lseek( tscan->prev_dump.info_fd, 0, SEEK_SET ) < 0 ) {
 			tscan->ret = errno;
+			fprintf( stderr, "Failed at lseek(prev_info_fd)\n" );
 			goto set_found;
 		}
 		read( tscan->prev_dump.info_fd, &(scan->total), sizeof(node_t) );
 		if ( gasp_lseek( tscan->prev_dump.addr_fd, 0, SEEK_SET ) < 0 ) {
 			tscan->ret = errno;
+			fprintf( stderr, "Failed at lseek(prev_addr_fd)\n" );
 			goto set_found;
 		}
 		if ( gasp_lseek( tscan->prev_dump.dump_fd, 0, SEEK_SET ) < 0 ) {
 			tscan->ret = errno;
+			fprintf( stderr, "Failed at lseek(prev_dump_fd)\n" );
 			goto set_found;
 		}
 		for ( a = 0; a < scan->total; ++a ) {
@@ -556,17 +586,20 @@ void* bytescanner( void *_tscan ) {
 			)
 			{
 				tscan->ret = errno;
+				fprintf( stderr, "Failed at read(prev_addr_fd)\n" );
 				goto set_found;
 			}
 			if ( done >= mapped.base && done <= mapped.upto )
 				goto check_next_address;
 			while ( proc_mapped_next(
 				&(tscan->ret), tscan->handle,
-				mapped.upto, &mapped, prot ) >= 0
+				mapped.upto, &mapped, prot )
 			)
 			{
-				if ( tscan->wants2free )
+				if ( tscan->wants2free ) {
+					fprintf( stderr, "Failed at wants2free nth\n" );
 					goto set_found;
+				}
 					
 				if ( tscan->wants2read ) {
 					tscan->ready2wait = 1;
@@ -593,8 +626,10 @@ void* bytescanner( void *_tscan ) {
 				/* Ensure we have enough memory to read into */
 				stop = mapped.upto - mapped.base;
 				if ( !(buff = more_space(
-					&(tscan->ret), space, addr + stop )) ) 
+					&(tscan->ret), space, addr + stop )) )  {
+					fprintf( stderr, "Failed at more_space()\n" );
 					goto set_found;
+				}
 				
 				/* Reduce corrupted results */
 				(void)memset( buff + addr, clear, stop );
@@ -602,8 +637,10 @@ void* bytescanner( void *_tscan ) {
 				/* Safe to read the memory block now */
 				if ( !proc_glance_data(
 					&(tscan->ret), tscan->handle,
-					mapped.base, buff + addr, stop ) )
+					mapped.base, buff + addr, stop ) ) {
+					fprintf( stderr, "Failed at proc_glance_data()\n" );
 					goto set_found;
+				}
 				stop += addr;
 				stop -= tscan->bytes;
 				addr = done - mapped.base;
@@ -614,6 +651,7 @@ void* bytescanner( void *_tscan ) {
 					)
 					{
 						tscan->ret = errno;
+						fprintf( stderr, "Failed at write(addr_fd)\n" );
 						goto set_found;
 					}
 					if ( write( tscan->next_dump.dump_fd,
@@ -622,6 +660,7 @@ void* bytescanner( void *_tscan ) {
 					)
 					{
 						tscan->ret = errno;
+						fprintf( stderr, "Failed at write(dump_fd)\n" );
 						goto set_found;
 					}
 					scan->count++;
@@ -637,6 +676,7 @@ void* bytescanner( void *_tscan ) {
 	if ( tscan->next_dump.info_fd >= 0 &&
 		gasp_lseek( tscan->next_dump.info_fd, 0, SEEK_SET ) == 0 )
 		write( tscan->next_dump.info_fd, &(scan->total), sizeof(node_t) );
+	fprintf( stderr, "Ending thread\n" );
 	tscan->threadmade = 0;
 	tscan->done_scans++;
 	return _tscan;
@@ -712,7 +752,7 @@ node_t proc_aobscan(
 		if ( done >= mapped.base && done <= mapped.upto )
 			goto check_next_address;
 		while ( pages < max_pages && proc_mapped_next(
-			&ret, handle, mapped.upto, &mapped, prot ) >= 0
+			&ret, handle, mapped.upto, &mapped, prot )
 		)
 		{
 			++pages;
@@ -832,7 +872,7 @@ node_t proc_aobinit(
 	
 	while (
 		proc_mapped_next(
-			&ret, handle, mapped.upto, &mapped, prot ) >= 0
+			&ret, handle, mapped.upto, &mapped, prot )
 	)
 	{
 		/* Skip irrelevant regions */

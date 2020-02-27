@@ -119,7 +119,6 @@ return function (ctx,now,prv)
 		else
 			if not done.first_draw then
 				done.first_draw = true
-				
 			end
 			list = done.list
 			i = nil
@@ -133,8 +132,10 @@ return function (ctx,now,prv)
 				v = nil
 				tmp, v = GUI.handle:aobscan(
 					"table", scan.size, scan.as_bytes,
-					done.from, done.upto,
-					false, scan.limit, done.count - 1 )
+					scan.from, scan.upto,
+					true, scan.limit, done.count - 1 )
+				done.from = scan.from
+				done.upto = scan.upto
 				if tmp and v then
 					for i = 1,v,1 do
 						if done.added == scan.limit then break end
@@ -156,6 +157,13 @@ return function (ctx,now,prv)
 	if done.count > 0 then
 		list = done.list
 		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
+		
+		if GUI.handle:doing_scan() == true then
+			tmp = "Scan thread is running"
+		else
+			tmp = "Scan thread is not running"
+		end
+		nk.label( ctx, tmp, nk.TEXT_LEFT )
 		
 		tmp = GUI.handle:scan_done_upto()
 		nk.progress( ctx, tmp, scan.upto, nk.FIXED )

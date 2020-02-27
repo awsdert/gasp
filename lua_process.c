@@ -219,17 +219,23 @@ bool lua_proc_handle_undo( lua_proc_handle_t *handle, node_t count, bool all )
 		return 0;
 	}
 	if ( all ) {
-		sprintf( path, "rm -r \"%s/scans/%lu\"",
+		sprintf( path, "%s/scans/%lu",
 				GASP_PATH, (ulong)(handle->scan_instance) );
-		system( path );
+		if ( access( path, F_OK ) == 0 ) {
+			sprintf( path, "rm -r \"%s/scans/%lu\"",
+					GASP_PATH, (ulong)(handle->scan_instance) );
+			fprintf( stderr, "%s\n", path );
+			system( path );
+		}
 		handle->scan_instance = 0;
 		handle->scan_count = 0;
 		handle->nth_scan = 0;
 		return 1;
 	}
 	for ( i = handle->scan_count - 1; i > count; --i ) {
-		sprintf( path, "rm -f \"%s/scans/%lu/%lu*\"",
+		sprintf( path, "rm -r \"%s/scans/%lu/%lu*\"",
 				GASP_PATH, (ulong)(handle->scan_instance), (ulong)i );
+		fprintf( stderr, "%s\n", path );
 		system( path );
 	}
 	handle->scan_count = count;

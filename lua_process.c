@@ -189,7 +189,7 @@ typedef struct lua_proc_handle {
 
 void lua_proc_handle_checkrdwr( lua_proc_handle_t *handle ) {
 	if ( !handle || !(handle->tscan.threadmade) ) return;
-	handle->tscan.wants2read = 1;
+	handle->tscan.wants2rdwr = 1;
 	while (	!(handle->tscan.ready2wait) ) sleep(1);
 }
 
@@ -287,7 +287,7 @@ int lua_proc_handle_glance_data( lua_State *L ) {
 	}
 	lua_proc_handle_checkrdwr(handle);
 	size = proc_glance_data( NULL, handle->handle, addr, array, size );
-	handle->tscan.wants2read = 0;
+	handle->tscan.wants2rdwr = 0;
 	if ( size < 1 ) {
 		free(array);
 		lua_newtable(L);
@@ -324,7 +324,7 @@ int lua_proc_handle_change_data( lua_State *L ) {
 	
 	size = proc_change_data( NULL, handle->handle, addr, array, nodes->count );
 	
-	handle->tscan.wants2read = 0;
+	handle->tscan.wants2rdwr = 0;
 
 	lua_pushinteger(L,(size > 0) ? size : 0);
 	return 1;
@@ -375,14 +375,15 @@ int lua_proc_handle__get_scan_list(
 	lua_createtable( L, count, 0 );
 	gasp_lseek( handle->tscan.next_dump.addr_fd, 0, SEEK_SET );
 	for ( i = 0; i < count; ++i ) {
-		gasp_read( handle->tscan.next_dump.addr_fd, &addr, sizeof(void*) );
+		gasp_read( handle->tscan.next_dump.addr_fd,
+			&addr, sizeof(void*) );
 		lua_pushinteger( L, i+1 );
 		lua_pushinteger( L, addr );
 		lua_settable(L,-3);
 	}
 	gasp_lseek( handle->tscan.next_dump.addr_fd, 0, SEEK_END );
 	lua_pushinteger( L, count );
-	handle->tscan.wants2read = 0;
+	handle->tscan.wants2rdwr = 0;
 	return 3;
 }
 
@@ -390,7 +391,7 @@ int lua_proc_handle_get_scan_list( lua_State *L ) {
 	return lua_proc_handle__get_scan_list(
 		L,
 		(lua_proc_handle_t*)luaL_checkudata(L,1,PROC_HANDLE_CLASS),
-		luaL_optinteger( L, 2, 100 ) );
+		luaL_optinteger( L, 3, 100 ) );
 }
 
 int lua_proc_handle_aobscan( lua_State *L ) {

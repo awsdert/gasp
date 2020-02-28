@@ -73,89 +73,62 @@ return function (ctx,now,prv)
 	if nk.button( ctx, nil, "Clear" ) then
 		done = {
 			count = 0,
-			from = 0,
+			from = scan.from,
 			upto = scan.from,
+			addr = scan.from,
 			found = 0,
 			added = 0,
 			increment = math.ceil((scan.upto - scan.from) / 0x16)
 		}
 	end
 	if nk.button( ctx, nil, "Scan" ) then
-		done.first_draw = nil
-		done.count = done.count + 1
-		done.from = 0
-		done.upto = scan.from
-		done.found = 0
-		done.added = 0
-		done.increment = math.ceil((scan.upto - scan.from) / 0x16)
+		scan.activate = true
+		done = {
+			count = done.count + 1,
+			from = scan.from,
+			upto = scan.from,
+			addr = scan.from,
+			found = 0,
+			added = 0,
+			increment = math.ceil((scan.upto - scan.from) / 0x16)
+		}
 	end
 	scan.done = done
 	GUI.scan = scan
-	if done.count > 0 and not GUI.quit then
+	if scan.activate == true and not done.activated and not GUI.quit then
 		if not GUI.handle or GUI.handle:valid() == false then
 			return GUI.use_ui(ctx,"cfg-proc",now)
 		end
-		if GUI.handle:doing_scan() or
-			GUI.handle:done_scans() == done.count then
+		tmp, v = GUI.handle:aobscan(
+			"table", scan.size, scan.as_bytes,
+			scan.from, scan.upto,
+			true, scan.limit, done.count - 1 )
+		done.upto = done.upto + done.increment
+		if done.upto > scan.upto then done.upto = scan.upto end
+		done.activated = true
+	end
+	if done.count > 0 then
+		if GUI.handle:doing_scan() or done.addr < done.upto then
 			if GUI.handle:scan_done_upto() < done.upto then
 				list = done.list
 			else
 				list = {}
 				done.added = 0
-				done.upto, tmp, done.found =
-					GUI.handle:get_scan_list(done.count - 1)
+				done.addr, tmp, done.found =
+					GUI.handle:get_scan_list(done.count - 1,scan.limit)
 				for i = 1,done.found,1 do
 					if done.added == scan.limit then break end
 					done.added = done.added + 1
-					list[done.added] = {
-						generated = true,
-						method = "=",
-						addr = tmp[i] or 0,
-						Type = scan.Type,
-						size = scan.size
-					}
+					list[done.added] = rebuild_cheat(scan)
+					list[done.added].generated = true
+					list[done.added].addr = tmp[i] or 0
 				end
+				done.upto = done.upto + done.increment
+				if done.upto > scan.upto then done.upto = scan.upto end
 			end
-		else
-			if not done.first_draw then
-				done.first_draw = true
-			end
-			list = done.list
-			i = nil
-			done.from = done.upto
-			if done.from > scan.from then
-				done.from = done.from - scan.size
-			end
-			done.upto = done.upto + done.increment
-			if done.upto > scan.upto then done.upto = scan.upto end
-			if tmp and done.upto < scan.upto then
-				v = nil
-				tmp, v = GUI.handle:aobscan(
-					"table", scan.size, scan.as_bytes,
-					scan.from, scan.upto,
-					true, scan.limit, done.count - 1 )
-				done.from = scan.from
-				done.upto = scan.upto
-				if tmp and v then
-					for i = 1,v,1 do
-						if done.added == scan.limit then break end
-						done.added = done.added + 1
-						list[done.added] = {
-							generated = true,
-							method = "=",
-							addr = tmp[i] or 0,
-							Type = scan.Type,
-							size = scan.size
-						}
-					end
-					tmp = nil
-				end
-			end
+			done.list = list
 		end
-		done.list = list
-	end
-	if done.count > 0 then
-		list = done.list
+	
 		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
 		
 		if GUI.handle:doing_scan() == true then
@@ -175,6 +148,8 @@ return function (ctx,now,prv)
 			done.added, GUI.handle:scan_found() )
 		
 		nk.label( ctx, tmp, nk.TEXT_LEFT )
+		
+		list = done.list
 		for i = 1,done.added,1 do
 			GUI.draw_cheat( ctx, font, list[i] )
 		end

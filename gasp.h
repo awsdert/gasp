@@ -198,7 +198,7 @@ int check_dump( dump_t dump );
 void shut_dump_files( dump_t dump );
 
 typedef struct tscan {
-	bool wants2read;
+	bool wants2rdwr;
 	bool ready2wait;
 	bool wants2free;
 	bool writeable;

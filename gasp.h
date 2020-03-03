@@ -19,6 +19,7 @@
 #include <pthread.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <poll.h>
 #include <dirent.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -80,6 +81,10 @@ void* change_space( int *err, space_t *space, size_t want, int dir );
 	change_space( err, space, want, -1 )
 #define free_space( err, space )\
 	change_space( err, space, 0, 0 )
+	
+int gasp_isdir( char const *path );
+int gasp_mkdir( space_t *space, char const *path );
+int gasp_rmdir( space_t *space, char const *path, bool recursive );
 	
 typedef size_t node_t;
 typedef struct nodes {
@@ -167,9 +172,15 @@ typedef struct proc_glance {
 	nodes_t idNodes;
 	proc_notice_t notice;
 } proc_glance_t;
+typedef struct proc_mapped {
+	mode_t perm, prot;
+	uintmax_t head, foot, size;
+} proc_mapped_t;
 #define SIZEOF_PROCDIR (sizeof(int) * CHAR_BIT)
 typedef struct proc_handle {
 	bool running, waiting, attached, exited;
+	pthread_t thread;
+	proc_notice_t notice;
 #ifdef _WIN32
 	HANDLE handle;
 #else
@@ -179,43 +190,54 @@ typedef struct proc_handle {
 	int memfd, perm;
 #endif
 #endif
-	pthread_t thread;
-	proc_notice_t notice;
 } proc_handle_t;
-typedef struct proc_mapped {
-	mode_t perm, prot;
-	intptr_t base, upto, size;
-} proc_mapped_t;
 
+#define DUMP_BUF_SIZE BUFSIZ
+#define DUMP_MAX_SIZE (DUMP_BUF_SIZE * 2)
 typedef struct dump {
 	int info_fd;
-	int addr_fd;
-	int dump_fd;
+	int used_fd;
+	int data_fd;
+	/* Iterate through memory by swapping pointers to the below */
+	proc_mapped_t mapped[2], *pmap, *nmap;
+	/* How much of nmap has been read */
+	uintmax_t done;
+	/* Which address to report */
+	uintmax_t addr;
+	/* Where to stop comparing from 0 */
+	size_t size;
+	uchar used[DUMP_MAX_SIZE], data[DUMP_MAX_SIZE];
 } dump_t;
 
-int open_dump_files( dump_t *dump, scan_t *scan, long inst, long done );
+int open_dump_files( dump_t *dump, long inst, long done );
 int check_dump( dump_t dump );
-void shut_dump_files( dump_t dump );
+void shut_dump_files( dump_t *dump );
 
 typedef struct tscan {
 	bool wants2rdwr;
 	bool ready2wait;
 	bool wants2free;
 	bool writeable;
+	bool dumping;
+	bool scanning;
 	bool threadmade;
+	bool pipesmade;
+	int main_pipe[2], scan_pipe[2], zero;
 	pthread_t thread;
 	int ret;
-	dump_t prev_dump, next_dump;
+	dump_t dump[2];
+	
 	proc_handle_t *handle;
-	node_t done_scans;
-	scan_t scan;
+	node_t done_scans, regions, found, last_found;
 	char compare;
 	void * array;
-	intptr_t bytes;
-	intptr_t from;
-	intptr_t upto;
-	intptr_t done_upto;
+	uintmax_t bytes;
+	uintmax_t from;
+	uintmax_t upto;
+	uintmax_t done_upto;
 } tscan_t;
+
+void *proc_handle_dumper( void *_tscan );
 
 /** @brief Thread to scan for bytes in
  * @param _tscan expects to hold a tscan_t object
@@ -295,13 +317,18 @@ mode_t file_change_perm(
  * @param pid ID of process to open handle for
  * @return Handle of process or NULL
 **/
-proc_handle_t* proc_handle_open(
-	int *err, int pid );
+proc_handle_t* proc_handle_open( int *err, int pid );
+/** @brief used to load the next dumpped region into memory, appends
+ * to existing first then if not a boundary match (meaning
+ * prev foot not equal to next head)
+**/
+bool glance_dump( int *err, dump_t *dump, bool *both, size_t keep );
 /** @brief Deallocates any memory before deallocating the handle itself
  * @param handle The process handle to deallocate
 **/
 void proc_handle_shut(
 	proc_handle_t* handle );
+node_t proc_handle_dump( tscan_t *tscan );
 /** @brief Scans process mapped pages for array between from and upto
  * @param err Where to pass errors to
  * @param prev_fd File descriptor of file to read address list into
@@ -317,8 +344,8 @@ void proc_handle_shut(
 node_t proc_aobscan(
 	int *err, int prev_fd, int next_fd, scan_t *scan,
 	proc_handle_t *handle,
-	uchar *array, intptr_t bytes,
-	intptr_t from, intptr_t upto,
+	uchar *array, uintmax_t bytes,
+	uintmax_t from, uintmax_t upto,
 	bool writable );
 /** @brief Scans process mapped pages for array between from and upto
  * @param err Where to pass errors to
@@ -334,8 +361,8 @@ node_t proc_aobscan(
 node_t proc_aobinit(
 	int *err, int init_fd, scan_t *scan,
 	proc_handle_t *handle,
-	uchar *array, intptr_t bytes,
-	intptr_t from, intptr_t upto,
+	uchar *array, uintmax_t bytes,
+	uintmax_t from, uintmax_t upto,
 	bool writable );
 /** @brief Reads what was in memory at the time of the read/pread call
  * @param err Where to pass errors to
@@ -345,9 +372,9 @@ node_t proc_aobinit(
  * @param size Number of bytes to read into dst
  * @return Number of bytes read into dst
 **/
-intptr_t proc_glance_data(
+uintmax_t proc_glance_data(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, void *dst, size_t size );
+	uintmax_t addr, void *dst, size_t size );
 /** @brief Writes what was in memory at the time of the write/pwrite call
  * @param err Where to pass errors to
  * @param handle Handle opened with proc_handle_open()
@@ -356,9 +383,9 @@ intptr_t proc_glance_data(
  * @param size Number of bytes to write from src
  * @return Number of bytes written from src
 **/
-intptr_t proc_change_data(
+uintmax_t proc_change_data(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, void *src, size_t size );
+	uintmax_t addr, void *src, size_t size );
 
 extern bool g_reboot_gui;
 void lua_create_gasp(lua_State *L);

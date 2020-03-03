@@ -53,10 +53,8 @@ int main( int argc, char *argv[] ) {
 		if ( strstr(cmd, gasp) ) continue;
 		sprintf( strchr( path, '\0'), " %s", cmd );
 	}
-	fprintf(stderr, "gasp = '%s'\n", gasp);
 	fprintf(stderr,"%s\n",path);
 	ret = system( path );
-	fprintf(stderr, "gasp = '%s'\n", gasp);
 	cleanup:
 	(void)free_space( &ret, &PATH );
 	if ( ret != EXIT_SUCCESS ) {

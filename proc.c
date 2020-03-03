@@ -195,9 +195,9 @@ void proc_handle_shut( proc_handle_t *handle ) {
 
 #define PAGE_LINE_SIZE ((sizeof(void*) * 4) + 7)
 
-intptr_t proc_mapped_next(
+uintmax_t proc_mapped_next(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, proc_mapped_t *mapped, mode_t prot
+	uintmax_t addr, proc_mapped_t *mapped, mode_t prot
 )
 {
 	int fd;
@@ -231,14 +231,14 @@ intptr_t proc_mapped_next(
 			errno = EXIT_SUCCESS;
 			if ( gasp_read( fd, line, PAGE_LINE_SIZE )
 				!= PAGE_LINE_SIZE )
-				goto failed;
+				goto done;
 			
 			line[PAGE_LINE_SIZE-1] = 0;
 			sscanf( line, "%p-%p",
-				(void**)&(mapped->base),
-				(void**)&(mapped->upto) );
+				(void**)&(mapped->head),
+				(void**)&(mapped->foot) );
 
-			if ( addr < mapped->upto )
+			if ( addr < mapped->foot )
 				break;
 			
 			/* Move file pointer to next line */
@@ -247,7 +247,7 @@ intptr_t proc_mapped_next(
 				if ( gasp_read( fd, line, 1 ) != 1 )
 					goto failed;
 			}
-		} while ( addr >= mapped->upto );
+		} while ( addr >= mapped->foot );
 		
 		/* Get position right after address range */
 		pos = strchr( line, ' ' );
@@ -258,7 +258,7 @@ intptr_t proc_mapped_next(
 		/* Move pointer to the permissions text */
 		++pos;
 		
-		mapped->size = (mapped->upto) - (mapped->base);
+		mapped->size = (mapped->foot) - (mapped->head);
 		mapped->prot |= (pos[0] == 'r') ? 04 : 0;
 		mapped->prot |= (pos[1] == 'w') ? 02 : 0;
 		mapped->prot |= (pos[2] == 'x') ? 01 : 0;
@@ -268,11 +268,12 @@ intptr_t proc_mapped_next(
 			/* Check if validated share */
 			mapped->prot |= (pos[3] == 's') ? 0 : 020;
 		
-		addr = mapped->upto;
+		addr = mapped->foot;
 	} while ( (mapped->prot & prot) != prot );
 	
+	done:
 	close(fd);
-	return mapped->upto;
+	return mapped->foot;
 	
 	failed:
 	close(fd);
@@ -291,22 +292,22 @@ intptr_t proc_mapped_next(
 
 mode_t proc_mapped_addr(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, mode_t perm, int *fd, proc_mapped_t *Mapped
+	uintmax_t addr, mode_t perm, int *fd, proc_mapped_t *Mapped
 )
 {
 	char path[256] = {0};
 	proc_mapped_t mapped = {0};
 	
-	while ( proc_mapped_next( err, handle, mapped.upto, &mapped, 0 ) ) {
-		if ( mapped.upto < addr ) continue;
+	while ( proc_mapped_next( err, handle, mapped.foot, &mapped, 0 ) ) {
+		if ( mapped.foot < addr ) continue;
 #ifdef SIZEOF_LLONG
 		sprintf( path, "%s/map_files/%llx-%llx",
 			handle->procdir,
-			(long long)(mapped.base), (long long)(mapped.upto) );
+			(long long)(mapped.head), (long long)(mapped.foot) );
 #else
 		sprintf( path, "%s/map_files/%lx-%lx",
 			handle->procdir,
-			(long)(mapped.base), (long)(mapped.upto) );
+			(long)(mapped.head), (long)(mapped.foot) );
 #endif
 		if ( access( path, F_OK ) == 0 ) {
 			(void)file_change_perm( err, path, perm | mapped.perm );
@@ -336,97 +337,940 @@ int proc__rwvmem_test(
 	return ret;
 }
 
-int open_dump_files(
-	dump_t *dump, scan_t *scan, long inst, long done ) {
+size_t proc__glance_peek(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, uintmax_t size ) {
+	uintmax_t done = 0, dst = 0, predone = 0;
+	int ret;
+	uchar *m = mem;
+	size_t temp;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+
+	errno = EXIT_SUCCESS;
+	
+	for ( temp = 0; addr % sizeof(long); ++temp, --addr );
+	if ( temp ) {
+		dst = ptrace( PTRACE_PEEKDATA,
+			handle->notice.entryId, (void*)addr, NULL );
+		if ( errno != EXIT_SUCCESS )
+			return 0;
+		temp = (sizeof(long) - (predone = temp));
+		memcpy( m, (&dst) + predone, temp );
+		addr += sizeof(long);
+		size -= predone;
+	}
+	
+	while ( done < size ) {
+		dst = ptrace( PTRACE_PEEKTEXT,
+			handle->notice.entryId, (void*)(addr + done), NULL );
+		if ( errno != EXIT_SUCCESS )
+			return done + predone;
+		temp = size - done;
+		if ( temp > sizeof(long) ) temp = sizeof(long);
+		memcpy( m + predone + done, &dst, temp );
+		done += temp;
+	}
+	
+	return done + predone;
+}
+
+size_t proc__glance_vmem(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, uintmax_t size ) {
+#ifdef _GNU_SOURCE
+	struct iovec internal, external;
+	uintmax_t done, predone = 0;
+	int ret;
+	uchar *m = mem;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+
+	errno = EXIT_SUCCESS;
+#if 0
+	if ( addr % 0xFF ) {
+		predone = proc__glance_peek( &ret, handle, addr, mem,
+			0xFF - (addr % 0xFF) );
+		if ( ret != EXIT_SUCCESS ) {
+			if ( err ) *err = ret;
+			ERRMSG( ret, "Couldn't read from VM" );
+			fprintf( stderr, "%p\n", (void*)addr );
+			return predone;
+		}
+		addr += predone;
+		size -= predone;
+	}
+#endif
+	internal.iov_base = m + predone;
+	internal.iov_len = size;
+	external.iov_base = (void*)addr;
+	external.iov_len = size;
+	
+	if ( (done = process_vm_readv(
+		handle->notice.entryId, &internal, 1, &external, 1, 0))
+		<= 0 )
+	{
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't glance at VM" );
+		fprintf( stderr, "%p\n", external.iov_base );
+	}
+	
+	return done;
+#else
+	if ( err ) *err = ENOSYS;
+	return 0;
+#endif
+}
+
+uintmax_t proc__glance_file(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, size_t size
+)
+{
+#ifdef gasp_pread
+	intmax_t done = 0;
+	int ret, fd;
+	char path[64] = {0};
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
+	if ( handle->memfd >= 0 )
+		fd = handle->memfd;
+	else {
+		sprintf( path, "%s/mem", handle->procdir );
+		if ( (fd = open(path,O_RDONLY)) < 0 ) {
+			if ( err ) *err = errno;
+			return 0;
+		}
+	}
+	
+	done = gasp_pread( fd, mem, size, addr );
+	if ( handle->memfd < 0 )
+		close(fd);
+
+	if ( done < 0 ) {
+		if ( err ) *err = errno;
+		if ( errno != ESPIPE && errno != EIO )
+			ERRMSG( errno, "Couldn't read process memory" );
+		return 0;
+	}
+	return done;
+#else
+	if ( err ) err = ENOSYS;
+	return 0;
+#endif
+}
+
+uintmax_t proc__glance_self(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, size_t size
+)
+{
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
+	if ( handle->notice.self ) {
+		(void)memmove( mem, (void*)addr, size );
+		if ( err ) *err = errno;
+		if ( errno != EXIT_SUCCESS )
+			ERRMSG( errno, "Couldn't override VM" );
+		return size;
+	}
+	
+	return 0;
+}
+
+uintmax_t proc__glance_seek(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, size_t size
+)
+{
+	char path[SIZEOF_PROCDIR+5] = {0};
+	uintmax_t done = 0;
+	int ret, fd;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
+	if ( handle->memfd >= 0 )
+		fd = handle->memfd;
+	else {
+		sprintf( path, "%s/mem", handle->procdir );
+		if ( (fd = open( path, O_RDONLY )) < 0 ) {
+			if ( err ) *err = errno;
+			ERRMSG( errno, "Could'nt open process memory" );
+			fprintf( stderr, "Path: '%s'\n", path );
+			return 0;
+		}
+	}
+	
+	gasp_lseek( fd, addr, SEEK_SET );
+	if ( errno != EXIT_SUCCESS )
+		goto failed;
+	
+	done = gasp_read( fd, mem, size );
+	if ( done <= 0 || errno != EXIT_SUCCESS )
+		goto failed;
+
+	if ( handle->memfd < 0 )
+		close(fd);
+	return done;
+	
+	failed:
+	if ( handle->memfd < 0 )
+		close(fd);
+	if ( err ) *err = errno;
+	if ( errno != ESPIPE && errno != EIO )
+		ERRMSG( errno, "Couldn't read process memory" );
+	return 0;
+}
+
+size_t proc__change_poke(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, uintmax_t size ) {
+	uintmax_t done = 0, dst = 0;
+	int ret;
+	uchar *m = mem;
+	size_t temp;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+
+	errno = EXIT_SUCCESS;
+	
+	while ( done < size ) {
+		dst = ptrace( PTRACE_PEEKDATA,
+			handle->notice.entryId, addr + done, NULL );
+		temp = size - done;
+		if ( temp > sizeof(long) ) temp = sizeof(long);
+		memcpy( &dst, m + done, temp );
+		ptrace( PTRACE_POKEDATA,
+			handle->notice.entryId, addr + done, &dst );
+		done += temp;
+	}
+	
+	return done;
+}
+
+size_t proc__change_vmem(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, uintmax_t size ) {
+#ifdef _GNU_SOURCE
+	struct iovec internal, external;
+	uintmax_t done;
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+
+	errno = EXIT_SUCCESS;
+	
+	internal.iov_base = mem;
+	internal.iov_len = size;
+	external.iov_base = (void*)addr;
+	external.iov_len = size;
+	
+	if ( (done = process_vm_writev(
+		handle->notice.entryId, &internal, 1, &external, 1, 0))
+		!= size )
+	{
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't write to VM" );
+		fprintf( stderr, "Address %p\n", external.iov_base );
+	}
+	
+	return done;
+#else
+	if ( err ) *err = ENOSYS;
+	return 0;
+#endif
+}
+
+uintmax_t proc__change_file(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, size_t size
+)
+{
+#ifdef gasp_pwrite
+	intmax_t done = 0;
+	int ret, fd;
+	
+	(void)fd;
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
+	if ( handle->perm != O_RDWR || handle->memfd < 0 )
+		return 0;
+	
+	done = gasp_pwrite( handle->memfd, mem, size, addr );
+	if ( done < 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Couldn't write to process memory" );
+	}
+	return done;
+#else
+	if ( err ) err = ENOSYS;
+	return 0;
+#endif
+}
+
+size_t proc__change_self(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, size_t size
+)
+{
+	int ret;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
+	if ( handle->notice.self ) {
+		errno = EXIT_SUCCESS;
+		(void)memmove( (void*)addr, mem, size );
+		if ( errno != EXIT_SUCCESS ) {
+			if ( err ) *err = errno;
+			ERRMSG( errno, "Couldn't override VM" );
+			return 0;
+		}
+		return size;
+	}
+	
+	return 0;
+}
+
+uintmax_t proc__change_seek(
+	int *err, proc_handle_t *handle,
+	uintmax_t addr, void *mem, size_t size
+)
+{
+	char path[SIZEOF_PROCDIR+5] = {0};
+	uintmax_t done = 0;
+	int ret, fd;
+	
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	{
+		if ( err ) *err = ret;
+		return 0;
+	}
+	
+	sprintf( path, "%s/mem", handle->procdir );
+	if ( (fd = open( path, O_WRONLY )) < 0 ) {
+		if ( err ) *err = errno;
+		ERRMSG( errno, "Could'nt open process memory" );
+		fprintf( stderr, "Path: '%s'\n", path );
+		return 0;
+	}
+	
+	gasp_lseek( fd, addr, SEEK_SET );
+	if ( errno != EXIT_SUCCESS )
+		goto failed;
+	
+	done = gasp_write( fd, mem, size );
+	if ( done <= 0 || errno != EXIT_SUCCESS )
+		goto failed;
+
+	close(fd);
+	return done;
+	
+	failed:
+	close(fd);
+	if ( err ) *err = errno;
+	ERRMSG( errno, "Couldn't write to process memory" );
+	return 0;
+}
+
+int gasp_isdir( char const *path ) {
+	struct stat st = {0};
+	if ( !path )
+		return EINVAL;
+	if ( stat( path, &st ) != 0 )
+	{
+		if ( errno == ENOENT )
+			errno = EXIT_FAILURE;
+		return errno;
+	}
+	if ( !S_ISDIR(st.st_mode) )
+		return EXIT_FAILURE;
+	return EXIT_SUCCESS;
+}
+
+int gasp_mkdir( space_t *space, char const *path ) {
+	int ret = gasp_isdir( path );
+	char *temp;
+	if ( ret != EXIT_FAILURE )
+		return ret;
+	if ( !space )
+		return EDESTADDRREQ;
+	if ( !(temp = more_space( &ret, space, strlen( path ) + 9 )) )
+		return ret;
+	(void)sprintf( temp, "mkdir \"%s\"\n", path );
+	fprintf( stderr, "%s\n", temp );
+	return system( temp );
+}
+
+int gasp_rmdir( space_t *space, char const *path, bool recursive ) {
+	int ret = gasp_isdir( path );
+	char *temp;
+	if ( ret == EXIT_FAILURE )
+		return EXIT_SUCCESS;
+	if ( ret != EXIT_SUCCESS )
+		return ret;
+	if ( !space )
+		return EDESTADDRREQ;
+	if ( !(temp = more_space( &ret, space, strlen( path ) + 9 )) )
+		return ret;
+	(void)sprintf( temp, "rm -%c \"%s\"",
+		recursive ? 'r' : 'd', path );
+	return system( temp );
+}
+
+int gasp_open( int *fd, char const *path, int perm )
+{
+	int ret = EXIT_SUCCESS;
+	int with = ((perm & 0600) == 0600) ? O_RDWR : 0;
+	if ( !fd ) return EDESTADDRREQ;
+	if ( !path ) return EINVAL;
+	if ( !with ) {
+		with |= ((perm & 0400) == 0400) ? O_RDONLY : 0;
+		with |= ((perm & 0200) == 0200) ? O_WRONLY : 0;
+	}
+	//with |= ((perm & 0100) == 0100) ? O_EXEC : 0;
+	if ( (*fd = open( path, with )) < 0 ) {
+		if ( errno == ENOENT ) {
+			if ( (*fd =	open( path, O_CREAT | with, perm )) < 0 )
+				return errno;
+		}
+		else return errno;
+	}
+	return ret;
+}
+
+int open_dump_files( dump_t *dump, long inst, long done ) {
 	int ret = EXIT_SUCCESS;
 	char *path;
 	char const *GASP_PATH = getenv("GASP_PATH");
 	size_t len = strlen(GASP_PATH) + (2 * (sizeof(node_t) * CHAR_BIT));
+	space_t space = {0}, path_space = {0};
 	if ( !dump ) return EDESTADDRREQ;
-	if ( !(path = more_space( &ret, &(scan->space), len )) )
+	if ( !(path = more_space( &ret, &path_space, len )) )
 		return ret;
-	if ( access( GASP_PATH, F_OK ) != 0 ) {
-		sprintf( path, "mkdir %s", GASP_PATH );
-		system( path );
-	}
+	if ( (ret = gasp_mkdir( &space, GASP_PATH )) != EXIT_SUCCESS )
+		goto fail;
 	sprintf( path, "%s/scans", GASP_PATH );
-	if ( access( path, F_OK ) != 0 ) {
-		sprintf( path, "mkdir %s/scans", GASP_PATH );
-		system( path );
-	}
+	if ( (ret = gasp_mkdir( &space, path )) != EXIT_SUCCESS )
+		goto fail;
 	sprintf( path, "%s/scans/%ld", GASP_PATH, inst );
-	if ( access( path, F_OK ) != 0 ) {
-		sprintf( path, "mkdir %s/scans/%ld", GASP_PATH, inst );
-		system( path );
-	}
-	sprintf( path, "%s/scans/%ld/%ld.idmp", GASP_PATH, inst, done );
-	if ( (dump->info_fd = open( path, O_RDWR )) < 0 ) {
-		if ( errno == ENOENT ) {
-			if ( (dump->info_fd =
-				open( path, O_CREAT | O_RDWR, 0700 )) < 0 )
-				return errno;
-		}
-		else return errno;
-	}
-	sprintf( path, "%s/scans/%ld/%ld.admp", GASP_PATH, inst, done );
-	if ( (dump->addr_fd = open( path, O_RDWR )) < 0 ) {
-		if ( errno == ENOENT ) {
-			if ( (dump->addr_fd =
-				open( path, O_CREAT | O_RDWR, 0700 )) < 0 )
-				return errno;
-		}
-		else return errno;
-	}
-	sprintf( path, "%s/scans/%ld/%ld.dump", GASP_PATH, inst, done );
-	if ( (dump->dump_fd = open( path, O_RDWR )) < 0 ) {
-		if ( errno == ENOENT ) {
-			if ( (dump->dump_fd =
-				open( path, O_CREAT | O_RDWR, 0700 )) < 0 )
-				return errno;
-		}
-		else return errno;
-	}
-	return EXIT_SUCCESS;
+	if ( (ret = gasp_mkdir( &space, path )) != EXIT_SUCCESS )
+		goto fail;
+	sprintf( path, "%s/scans/%ld/%ld.info", GASP_PATH, inst, done );
+	if ( (ret = gasp_open( &(dump->info_fd), path, 0700 ))
+		!= EXIT_SUCCESS )
+		goto fail;
+	sprintf( path, "%s/scans/%ld/%ld.used", GASP_PATH, inst, done );
+	if ( (ret = gasp_open( &(dump->used_fd), path, 0700 ))
+		!= EXIT_SUCCESS )
+		goto fail;
+	sprintf( path, "%s/scans/%ld/%ld.data", GASP_PATH, inst, done );
+	ret = gasp_open( &(dump->data_fd), path, 0700 );
+	fail:
+	free_space( NULL, &path_space );
+	free_space( NULL, &space );
+	return ret;
 }
 
-void shut_dump_files( dump_t dump ) {
-	if ( dump.info_fd >= 0 ) close( dump.info_fd );
-	if ( dump.addr_fd >= 0 ) close( dump.addr_fd );
-	if ( dump.dump_fd >= 0 ) close( dump.dump_fd );
+void shut_dump_files( dump_t *dump ) {
+	if ( dump->info_fd >= 0 ) close( dump->info_fd );
+	if ( dump->used_fd >= 0 ) close( dump->used_fd );
+	if ( dump->data_fd >= 0 ) close( dump->data_fd );
+	memset( dump->used, 0, DUMP_MAX_SIZE );
+	memset( dump->data, 0, DUMP_MAX_SIZE );
+	memset( dump, 0, sizeof(dump_t) );
+	memset( dump, 0, sizeof(dump_t) );
+	dump->info_fd = dump->used_fd = dump->data_fd = -1;
 }
 
 int check_dump( dump_t dump ) {
-	if ( dump.info_fd < 0 || dump.addr_fd < 0 || dump.dump_fd < 0 )
+	if ( dump.info_fd <= 0 || dump.used_fd <= 0 || dump.data_fd <= 0 )
+	{
+		fprintf( stderr, "info_fd = %d, used_fd = %d, data_fd = %d\n",
+			dump.info_fd, dump.used_fd, dump.data_fd );
 		return EBADF;
+	}
 	return EXIT_SUCCESS;
 }
 
-void* bytescanner( void *_tscan ) {
-	tscan_t *tscan = (tscan_t*)_tscan;
-	int clear = ~0;
-	uchar *buff = NULL, *array;
-	intptr_t done = 0, prev = 0, addr = 0, stop = 0;
+void shut_dump( dump_t *dump ) {
+	if ( dump->info_fd > 0 )
+		close( dump->info_fd );
+	if ( dump->used_fd > 0 )
+		close( dump->used_fd );
+	if ( dump->data_fd > 0 )
+		close( dump->data_fd );
+	dump->info_fd = dump->used_fd = dump->data_fd = -1;
+}
+
+uintmax_t proc_handle_dump_nextbyproc(
+	int *err, proc_handle_t *handle, dump_t dump, proc_mapped_t *mapped
+)
+{
+	(void)dump;
+	return proc_mapped_next( err, handle, mapped->foot, mapped, 06 );
+}
+uintmax_t proc_handle_dump_nextbyfile(
+	int *err, proc_handle_t *handle, dump_t dump, proc_mapped_t *mapped
+)
+{
+	(void)handle;
+	if ( read( dump.info_fd, mapped, sizeof(proc_mapped_t) )
+		!= sizeof(proc_mapped_t) && err )
+		*err = errno;
+	return mapped->foot;
+}
+
+typedef uintmax_t (*func_proc_handle_dump_next)(
+	int *err, proc_handle_t *handle, dump_t dump, proc_mapped_t *mapped
+);
+
+typedef uintmax_t (*func_proc_handle_rdwr_t)(
+	int *err, proc_handle_t *handle,
+		uintmax_t addr, void *buff, uintmax_t size
+);
+
+node_t proc_handle_dump( tscan_t *tscan ) {
+	int ret;
+	node_t n = 0;
 	proc_mapped_t mapped = {0};
-	scan_t *scan;
-	space_t *space;
+	proc_handle_t *handle;
+	uchar *used, *data;
+	dump_t *dump;
+	uintmax_t i, bytes;
+	ssize_t size;
 	mode_t prot = 04;
-	node_t a;
+	struct pollfd pfd = {0};
+	func_proc_handle_dump_next next_mapped;
+	
+	if ( !tscan ) return 0;
+	
+	dump = &(tscan->dump[1]);
+	used = dump->used;
+	data = dump->data;
+	tscan->last_found = 0;
+	prot |= tscan->writeable ? 02 : 0;
+	handle = tscan->handle;
+	next_mapped =
+		tscan->done_scans
+			? proc_handle_dump_nextbyfile
+			: proc_handle_dump_nextbyproc;
+	pfd.fd = tscan->scan_pipe[0];
+	pfd.events = POLLIN;
+	
+	if ( !(tscan->upto) || tscan->upto < tscan->from )
+		tscan->upto = UINTMAX_C(~0);
+	
+	if ( !handle ) {
+		tscan->ret = EINVAL;
+		return 0;
+	}
+	
+	if ( (ret = check_dump( *dump )) != EXIT_SUCCESS )
+		goto done;
+	
+	if ( tscan->zero != 0 )
+		tscan->zero = ~0;
+	
+	if ( gasp_lseek( dump->info_fd, 0, SEEK_SET ) != 0 )
+	{
+		ret = errno;
+		goto done;
+	}
+	
+	if ( gasp_lseek( dump->used_fd, 0, SEEK_SET ) != 0 )
+	{
+		ret = errno;
+		goto done;
+	}
+	
+	if ( gasp_lseek( dump->data_fd, 0, SEEK_SET ) != 0 )
+	{
+		ret = errno;
+		goto done;
+	}
+	
+	/* Set Scan/Dump Number */
+	if ( gasp_write( dump->info_fd, &n, sizeof(node_t) )
+		!= sizeof(node_t) )
+	{
+		ret = errno;
+		goto done;
+	}
+	
+	/* Initialise mapped count */
+	n = 0;
+	if ( gasp_write( dump->info_fd, &n, sizeof(node_t) )
+		!= sizeof(node_t) )
+	{
+		ret = errno;
+		goto done;
+	}
+	while ( next_mapped( &ret, handle, *dump, &mapped )  )
+	{
+		tscan->done_upto = mapped.head;
+		/* Not interested in unreadable memory */
+		if ( (mapped.prot & prot) != prot )
+			continue;
+		
+		/* Not interested in out of range memory */
+		if ( mapped.foot <= tscan->from || mapped.head >= tscan->upto )
+			continue;
+		
+		for (
+			bytes = 0;
+			bytes < mapped.size;
+			bytes += i
+		)
+		{
+			i = mapped.size - bytes;
+			if ( i > DUMP_MAX_SIZE ) i = DUMP_MAX_SIZE;
+			
+			if ( poll( &pfd, 1, 100 ) )
+			{
+				read( tscan->scan_pipe[0], &ret, sizeof(int) );
+				switch ( ret )
+				{
+				case SIGKILL:
+					tscan->ret = EXIT_FAILURE;
+					return 0;
+				case SIGSTOP:
+					ret = SIGCONT;
+					write( tscan->main_pipe[1], &ret, sizeof(int) );
+					ret = SIGSTOP;
+					while ( ret != SIGCONT )
+					{
+						while ( poll( &pfd, 1, 1000 ) == 0 );
+						read( tscan->scan_pipe[0], &ret, sizeof(int) );
+					}
+				}
+			}
+			
+			/* Prevent unread memory from corrupting locations found */
+			(void)memset( data, tscan->zero, i );
+			
+			if ( !(size = proc_glance_data(
+				NULL, handle, mapped.head, data + bytes, i )) )
+				break;
+			
+			if ( gasp_write( dump->data_fd, data, size ) != size )
+			{
+				ret = errno;
+				goto done;
+			}
+		
+			/* Since this is a dump set all address booleans to true,
+			 * a later scan can simply override the values,
+			 * we use ~0 now because it's bit scan friendly,
+			 * not that we're doing those yet */
+			(void)memset( used, ~0, size );
+		
+			if ( gasp_write( dump->used_fd, used, size ) != size )
+			{
+				ret = errno;
+				goto done;
+			}
+		}
+		
+		if ( bytes == mapped.size ) {			
+			/* Add the mapping to the list */
+			if ( gasp_write(
+				dump->info_fd, &mapped, sizeof(proc_mapped_t) )
+				!= (ssize_t)sizeof(proc_mapped_t) )
+			{
+				ret = errno;
+				goto done;
+			}
+			++n;
+		}
+	}
+	
+	if ( gasp_lseek( dump->info_fd, 0, SEEK_SET ) != 0 ) {
+		ret = errno;
+		goto done;
+	}
+	
+	if ( gasp_write( dump->info_fd, &n, sizeof(node_t) )
+		!= sizeof(node_t) )
+		ret = errno;
+	
+	done:
+	tscan->ret = ret;
+	tscan->last_found = n;
+	return n;
+}
+
+#define SIZE_LIMIT (ULONG_MAX >> ((sizeof(long) * CHAR_BIT)/2))
+
+bool glance_dump( int *err, dump_t *dump, bool *both, size_t keep )
+{
+	int ret = EXIT_SUCCESS;
+	ssize_t size = 0;
+	size_t pos = DUMP_BUF_SIZE - keep;
+	uchar *data, *used;
+	proc_mapped_t *pmap, *nmap;
+	uintmax_t addr;
+	
+	if ( !dump )
+	{
+		ret = EINVAL;
+		goto failure;
+	}
+	
+	/* Initialise pointers */
+	pmap = dump->pmap;
+	nmap = dump->nmap;
+	used = dump->used;
+	data = dump->data;
+	
+	/* Swap info when changing region */
+	if ( dump->done == nmap->size )
+	{
+		if ( nmap > pmap )
+		{
+			nmap = pmap;
+			pmap = nmap + 1;
+		}
+		else
+		{
+			pmap = nmap;
+			nmap = pmap + 1;
+		}
+		dump->pmap = pmap;
+		dump->nmap = nmap;
+		dump->done = 0;
+	}
+	
+	/* Ensure invalid region handed back on failure */
+	*both = 1;
+	memset( nmap, 0 , sizeof(proc_mapped_t) );
+	
+	if ( gasp_read( dump->info_fd, nmap, sizeof(proc_mapped_t) )
+		!= sizeof(proc_mapped_t) )
+	{
+		if ( errno == EXIT_SUCCESS ) errno = EIO;
+		ret = errno;
+		goto failure;
+	}
+	
+	if ( !(nmap->size) ) {
+		ret = EINVAL;
+		goto failure;
+	}
+	
+	size = nmap->size - dump->done;
+	if ( size > DUMP_BUF_SIZE ) size = DUMP_BUF_SIZE;
+	
+	if ( gasp_read( dump->used_fd,
+			used + DUMP_BUF_SIZE, size ) != size )
+	{
+		if ( errno == EXIT_SUCCESS ) errno = EIO;
+		ret = errno;
+		goto failure;
+	}
+	if ( gasp_read( dump->data_fd,
+		data + DUMP_BUF_SIZE, size ) != size )
+	{
+		if ( errno == EXIT_SUCCESS ) errno = EIO;
+		ret = errno;
+		goto failure;
+	}
+	
+	addr = nmap->head;
+	dump->size = size;
+	if ( pos < DUMP_BUF_SIZE )
+	{
+		if ( dump->done || nmap->head == pmap->foot )
+		{
+			addr = dump->addr;
+			dump->size = size + keep;
+			(void)memmove( used, used + pos, dump->size );
+			(void)memmove( data, data + pos, dump->size );
+		}
+	}
+	dump->addr = addr;
+	
+	return 1;
+	
+	failure:
+	if ( err ) *err = ret;
+	ERRMSG( ret, "Failed to read dump file" );
+	if ( ret == ENOMEM ) {
+		fprintf( stderr, "Requested 0x%08jX bytes\n", size );
+	}
+	return 0;
+}
+
+bool change_dump(
+	dump_t *dump,
+	bool both,
+	size_t keep
+)
+{
+	uchar *data, *used;
+	ssize_t pos;
+	size_t size;
+	
+	if ( !dump ) return 0;
+	
+	size = dump->size;
+	used = dump->used;
+	data = dump->data;
+	
+	if ( both )
+	{
+		if ( !keep || keep >= DUMP_BUF_SIZE ) return ERANGE;
+		pos = keep;
+		size = DUMP_BUF_SIZE + keep;
+		gasp_lseek( dump->used_fd, -pos, SEEK_CUR );
+		gasp_lseek( dump->data_fd, -pos, SEEK_CUR );
+		gasp_write( dump->used_fd, used, size );
+		gasp_write( dump->data_fd, data, size );
+	}
+	else
+	{
+		gasp_write( dump->used_fd, used, size );
+		gasp_write( dump->data_fd, data, size );
+	}
+	
+	return 1;
+}
+
+bool bytescanner_read_mapped(
+	tscan_t *tscan, dump_t *dump, bool *both )
+{
+	int ret = 0;
+	struct pollfd pfd = {0};
+	if ( !tscan ) return 0;
+	
+	pfd.fd = tscan->scan_pipe[0];
+	pfd.events = POLLIN;
+	
+	if ( poll( &pfd, 1, 100 ) )
+	{
+		read( tscan->scan_pipe[0], &ret, sizeof(int) );
+		switch ( ret )
+		{
+		case SIGKILL:
+			tscan->ret = EXIT_FAILURE;
+			return 0;
+		case SIGSTOP:
+			ret = SIGCONT;
+			write( tscan->main_pipe[1], &ret, sizeof(int) );
+			ret = SIGSTOP;
+			while ( ret != SIGCONT )
+			{
+				while ( poll( &pfd, 1, 1000 ) == 0 );
+				read( tscan->scan_pipe[0], &ret, sizeof(int) );
+			}
+		}
+	}
+	
+	return glance_dump( &ret, dump, both, tscan->bytes - 1 );
+}
+
+bool bytescanner_cmp_and_add( tscan_t *tscan, bool both )
+{
+	uchar *used, *data;
+	uintmax_t addr, minus, a, stop;
+	dump_t *dump;
+	if ( !tscan ) return 0;
+	minus = tscan->bytes - 1;
+	dump = &(tscan->dump[1]);
+	used = dump->used;
+	data = dump->data;
+	addr = dump->addr;
+	stop = dump->size - tscan->bytes;
+	for ( a = 0; a < stop; ++a, ++addr )
+	{
+		if ( used[a] ) {
+			used[a] = (
+				memcmp( data + a, tscan->array, tscan->bytes ) == 0
+			);
+			if ( used[a] )
+				tscan->found++;
+		}
+		tscan->done_upto = addr;
+	}
+	both = change_dump( dump, both, minus );
+	return both;
+}
+
+void* proc_handle_bytescanner( void *_tscan ) {
+	tscan_t *tscan = (tscan_t*)_tscan;
+	uchar *buff = NULL, *used;
+	uintmax_t stop = 0, minus = tscan->bytes - 1;
+	mode_t prot = 04;
+	node_t a, number = 0, count = 0;
+	bool pboth = 0, both = 0;
 	
 	if ( !tscan ) {
 		errno = EDESTADDRREQ;
 		ERRMSG( errno, "bytescanner was given NULL" );
 		return NULL;
 	}
-	tscan->threadmade = 1;
 	
-	scan = &(tscan->scan);
-	scan->count = 0;
-	if ( (tscan->ret = errno = check_dump( tscan->next_dump ))
-		!= EXIT_SUCCESS ) {
-		fprintf( stderr, "Failed at check_dump()\n" );
+	tscan->scanning = 1;
+	tscan->found = 0;
+	tscan->done_upto = 0;
+	
+	if ( tscan->main_pipe[0] <= 0 || tscan->scan_pipe[0] <= 0 )
+	{
+		if ( tscan->main_pipe[0] > 0 ) close( tscan->main_pipe[0] );
+		if ( tscan->main_pipe[1] > 0 ) close( tscan->main_pipe[1] );
+		if ( tscan->scan_pipe[0] > 0 ) close( tscan->scan_pipe[0] );
+		if ( tscan->scan_pipe[1] > 0 ) close( tscan->scan_pipe[1] );
+		tscan->threadmade = 0;
+		return _tscan;
+	}
+	
+	if ( minus > tscan->bytes ) {
+		tscan->ret = EINVAL;
 		goto set_found;
 	}
-	array = (uchar*)(tscan->array);
+
+	if ( (tscan->ret = errno = check_dump( tscan->dump[1] ))
+		!= EXIT_SUCCESS )
+		goto set_found;
+
 	prot |= tscan->writeable ? 02 : 0;
 	
 	if ( (tscan->ret =
@@ -436,465 +1280,130 @@ void* bytescanner( void *_tscan ) {
 		return _tscan;
 	}
 	
-	scan->total = scan->count = 0;
-	space = &(scan->space);
-	
-	if ( gasp_lseek( tscan->next_dump.addr_fd, 0, SEEK_SET ) < 0 ) {
-		fprintf( stderr, "Failed at lseek(addr_fd)\n" );
+	if ( gasp_lseek( tscan->dump[1].used_fd, 0, SEEK_SET ) < 0 ) {
+		fprintf( stderr, "Failed at lseek(used_fd)\n" );
 		tscan->ret = errno;
 		goto set_found;
 	}
-	if ( gasp_lseek( tscan->next_dump.dump_fd, 0, SEEK_SET ) < 0 ) {
-		fprintf( stderr, "Failed at lseek(dump_fd)\n" );
+	if ( gasp_lseek( tscan->dump[1].data_fd, 0, SEEK_SET ) < 0 ) {
+		fprintf( stderr, "Failed at lseek(data_fd)\n" );
 		tscan->ret = errno;
 		goto set_found;
-	}
-	
-	/* Decide how we will clear memory */
-	for ( addr = 0; addr < tscan->bytes; ++addr ) {
-		if ( array[addr] ) {
-			clear = 0;
-			break;
-		}
 	}
 	
 	/* Reduce corrupted results */
-	(void)memset( space->block, clear, space->given );
-	
+	(void)memset( &(tscan->dump[0].pmap), 0, sizeof(proc_mapped_t) );
+	(void)memset( &(tscan->dump[0].nmap), 0, sizeof(proc_mapped_t) );
+	(void)memset( &(tscan->dump[1].pmap), 0, sizeof(proc_mapped_t) );
+	(void)memset( &(tscan->dump[1].nmap), 0, sizeof(proc_mapped_t) );
+
+	/* Get file position correct before we start each instance of
+	 * proc_mapped_t object to file */
+	write( tscan->dump[1].info_fd, &number, sizeof(node_t) );
+	write( tscan->dump[1].info_fd, &count, sizeof(node_t) );
+	count = 0;
 	if ( !(tscan->done_scans) ) {
-		while ( mapped.upto < tscan->upto &&
-			proc_mapped_next(
-				&(tscan->ret), tscan->handle,
-				mapped.upto, &mapped, prot )
+		while (
+			bytescanner_read_mapped( tscan, tscan->dump + 1, &both )
 		)
 		{
-			if ( tscan->wants2free )
+			fprintf( stderr, "%p-%p\n",
+				(void*)(tscan->dump[1].nmap->head),
+				(void*)(tscan->dump[1].nmap->foot)
+			);
+			
+			used = tscan->dump[1].used;
+			/* Ensure we check all addresses */
+			for ( a = 0; a < stop; ++a ) used[a] = ~0;
+			if ( !bytescanner_cmp_and_add( tscan, both ) )
 				goto set_found;
 			
-			if ( tscan->wants2rdwr ) {
-				tscan->ready2wait = 1;
-				while ( tscan->wants2rdwr ) sleep(1);
-				tscan->ready2wait = 0;
-			}
-			
-			/* Skip irrelevant regions */
-			if ( mapped.base < tscan->from
-				|| mapped.upto <= tscan->from
-				|| mapped.base >= tscan->upto
-				|| mapped.upto > tscan->upto
-				|| (mapped.prot & prot) != prot ) {
-				continue;
-			}
-
-			/* If continued page lines up with previous then move the bytes
-			 * we skipped to front of buffer to be compared now that we
-			 * will have the bytes after them */
-			addr = 0;
-			if ( prev > 0 && prev == mapped.base )
-				memmove( buff, buff + stop, (addr = tscan->bytes) );
-
-			/* Ensure we have enough memory to read into */
-			stop = mapped.upto - mapped.base;
-			if ( !(buff = more_space(
-				&(tscan->ret), space, addr + stop )) )
-				goto set_found;
-			
-			/* Reduce corrupted results */
-			(void)memset( buff + addr, clear, stop );
-			
-			/* Safe to read the memory block now */
-			if ( !proc_glance_data(
-				&(tscan->ret), tscan->handle,
-				mapped.base, buff + addr, stop ) )
-				goto set_found;
-				
-			stop += addr;
-			stop -= tscan->bytes;
-			for ( addr = 0; addr < stop; ++addr ) {
-				tscan->done_upto = mapped.base + addr;
-				if ( memcmp( buff + addr, array, tscan->bytes ) == 0 ) {
-					prev = mapped.base + addr;
-					if ( write( tscan->next_dump.addr_fd,
-							&prev, sizeof(void*) )
-						< (ssize_t)sizeof(void*)
-					)
-					{
-						tscan->ret = errno;
-						goto set_found;
-					}
-					if ( write( tscan->next_dump.dump_fd,
-							buff + addr, tscan->bytes )
-						< (ssize_t)(tscan->bytes)
-					)
-					{
-						tscan->ret = errno;
-						goto set_found;
-					}
-					scan->count++;
-				}
-			}
-			prev = mapped.upto;
 		}
 	}
-	else {
-		if ( gasp_lseek( tscan->prev_dump.info_fd, 0, SEEK_SET ) < 0 ) {
+	else
+	{
+		/* Reset pointer */
+		if ( gasp_lseek( tscan->dump[0].info_fd, 0, SEEK_SET ) < 0 ) {
 			tscan->ret = errno;
 			goto set_found;
 		}
-		read( tscan->prev_dump.info_fd, &(scan->total), sizeof(node_t) );
-		if ( gasp_lseek( tscan->prev_dump.addr_fd, 0, SEEK_SET ) < 0 ) {
+		
+		/* Align pointer to where the proc_mapped_t objects begin */
+		read( tscan->dump[0].info_fd, &number, sizeof(node_t) );
+		read( tscan->dump[0].info_fd, &count, sizeof(node_t) );
+		
+		/* Make sure we're are not attempting to compare against
+		 * incorrect results */
+		if ( number != tscan->done_scans )
+			goto set_found;
+		if ( gasp_lseek( tscan->dump[0].used_fd, 0, SEEK_SET ) < 0 ) {
 			tscan->ret = errno;
 			goto set_found;
 		}
-		if ( gasp_lseek( tscan->prev_dump.dump_fd, 0, SEEK_SET ) < 0 ) {
+		if ( gasp_lseek( tscan->dump[0].data_fd, 0, SEEK_SET ) < 0 ) {
 			tscan->ret = errno;
 			goto set_found;
 		}
-		for ( a = 0; a < scan->total; ++a ) {
-			if ( read( tscan->prev_dump.addr_fd, &done,
-				sizeof(void*) ) != sizeof(void*)
-			)
-			{
-				tscan->ret = errno;
+		while ( count-- &&
+			bytescanner_read_mapped( tscan, tscan->dump, &pboth )
+		)
+		{
+			if ( !bytescanner_read_mapped(
+				tscan, tscan->dump + 1, &both ) || pboth != both )
 				goto set_found;
-			}
-			if ( done >= mapped.base && done <= mapped.upto )
-				goto check_next_address;
-			while ( proc_mapped_next(
-				&(tscan->ret), tscan->handle,
-				mapped.upto, &mapped, prot )
-			)
-			{
-				if ( tscan->wants2free )
-					goto set_found;
-					
-				if ( tscan->wants2rdwr ) {
-					tscan->ready2wait = 1;
-					while ( tscan->wants2rdwr ) sleep(1);
-					tscan->ready2wait = 0;
-				}
-				
-				/* Skip irrelevant regions */
-				if ( mapped.base < tscan->from
-					|| mapped.upto <= tscan->from
-					|| mapped.base >= tscan->upto
-					|| mapped.upto > tscan->upto
-					|| (mapped.prot & prot) != prot )
-					continue;
-				
-	check_next_address:
-				/* If continued page lines up with previous then move the bytes
-				 * we skipped to front of buffer to be compared now that we
-				 * will have the bytes after them */
-				addr = 0;
-				if ( prev > 0 && prev == mapped.base )
-					memmove( buff, buff + stop, (addr = tscan->bytes) );
-
-				/* Ensure we have enough memory to read into */
-				stop = mapped.upto - mapped.base;
-				if ( !(buff = more_space(
-					&(tscan->ret), space, addr + stop )) )
-					goto set_found;
-				
-				/* Reduce corrupted results */
-				(void)memset( buff + addr, clear, stop );
-				
-				/* Safe to read the memory block now */
-				if ( !proc_glance_data(
-					&(tscan->ret), tscan->handle,
-					mapped.base, buff + addr, stop ) )
-					goto set_found;
-				
-				stop += addr;
-				stop -= tscan->bytes;
-				addr = done - mapped.base;
-				if ( memcmp( buff + addr, array, tscan->bytes ) == 0 ) {
-					if ( write( tscan->next_dump.addr_fd,
-							&done, sizeof(void*) )
-						< (ssize_t)(sizeof(void*))
-					)
-					{
-						tscan->ret = errno;
-						goto set_found;
-					}
-					if ( write( tscan->next_dump.dump_fd,
-							buff + addr, tscan->bytes )
-						< (ssize_t)(tscan->bytes)
-					)
-					{
-						tscan->ret = errno;
-						goto set_found;
-					}
-					scan->count++;
-				}
-				prev = mapped.upto;
-			}
-		tscan->done_upto = done;
+			buff = tscan->dump[0].used;
+			used = tscan->dump[1].used;
+			/* Ensure we check all addresses */
+			for ( a = 0; a < stop; ++a ) used[a] = buff[a];
+			if ( !bytescanner_cmp_and_add( tscan, both ) )
+				goto set_found;
 		}
 	}
 	tscan->ret = EXIT_SUCCESS;
 	tscan->done_upto = tscan->upto;
 	set_found:
-	scan->total = scan->count;
-	if ( gasp_lseek( tscan->next_dump.info_fd, 0, SEEK_SET ) == 0 )
-		write( tscan->next_dump.info_fd, &(scan->total), sizeof(node_t) );
+	
+	tscan->last_found = tscan->found;
+	if ( gasp_lseek( tscan->dump[1].info_fd, 0, SEEK_SET ) == 0 )
+		write( tscan->dump[1].info_fd, &(tscan->found), sizeof(node_t) );
 	tscan->done_scans++;
+	
+	close( tscan->scan_pipe[1] );
+	close( tscan->scan_pipe[0] );
+	close( tscan->main_pipe[1] );
+	close( tscan->main_pipe[0] );
+	tscan->scan_pipe[1] = -1;
+	tscan->scan_pipe[0] = -1;
+	tscan->main_pipe[1] = -1;
+	tscan->main_pipe[0] = -1;
+	
+	if ( tscan->ret != EXIT_SUCCESS )
+		ERRMSG( tscan->ret, "Byte scan failed to run fully" );
+	tscan->scanning = 0;
 	tscan->threadmade = 0;
 	return _tscan;
 }
 
-node_t proc_aobscan(
-	int *err, int prev_fd, int next_fd, scan_t *scan,
-	proc_handle_t *handle,
-	uchar *array, intptr_t bytes,
-	intptr_t from, intptr_t upto,
-	bool writable
-)
-{
-	int ret = EXIT_SUCCESS, clear = ~0;
-	uchar *buff = NULL;
-	intptr_t done = 0, prev = 0, addr = 0, stop = 0;
-	proc_mapped_t mapped = {0};
-	space_t *space;
-	node_t a;
-	node_t pages = 0, max_pages = 1000;
-	mode_t prot = 04 | (writable ? 02 : 0);
-	
-	errno = EXIT_SUCCESS;
-	
-	if ( (ret = proc__rwvmem_test( handle, array, bytes ))
-		!= EXIT_SUCCESS ) {
-		if ( err ) *err = ret;
-		return 0;
-	}
-	
-	if ( !scan ) {
-		ret = EDESTADDRREQ;
-		if ( err ) *err = ret;
-		ERRMSG( ret, "Need scan object to optimize memory usage" );
-		return 0;
-	}
-	
-	scan->count = 0;
-	space = &(scan->space);
-	
-	if ( prev_fd < 0 || next_fd < 0 ) {
-		ret = EDESTADDRREQ;
-		if ( err ) *err = ret;
-		ERRMSG( ret, "init_fd needs a file descriptor" );
-		return 0;
-	}
-	
-	if ( gasp_lseek( prev_fd, 0, SEEK_SET ) < 0
-		|| gasp_lseek( next_fd, 0, SEEK_SET ) < 0 ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "failed reset position for output list file" );
-		return 0;
-	}
-	
-	/* Decide how we will clear memory */
-	for ( addr = 0; addr < bytes; ++addr ) {
-		if ( array[addr] ) {
-			clear = 0;
-			break;
-		}
-	}
-	
-	/* Reduce corrupted results */
-	(void)memset( space->block, clear, space->given );
-	
-	for ( a = 0; a < scan->total; ++a ) {
-		if ( read( prev_fd, &done, sizeof(void*) ) != sizeof(void*) ) {
-			ret = errno;
-			if ( err ) *err = ret;
-			scan->total = scan->count;
-			return scan->count;
-		}
-		if ( done >= mapped.base && done <= mapped.upto )
-			goto check_next_address;
-		while ( pages < max_pages && proc_mapped_next(
-			&ret, handle, mapped.upto, &mapped, prot )
-		)
-		{
-			++pages;
-			/* Skip irrelevant regions */
-			if ( mapped.base < from
-				|| mapped.upto <= from
-				|| mapped.base >= upto
-				|| mapped.upto > upto
-				|| (mapped.prot & prot) != prot )
-				continue;
-check_next_address:
-			/* If continued page lines up with previous then move the bytes
-			 * we skipped to front of buffer to be compared now that we
-			 * will have the bytes after them */
-			addr = 0;
-			if ( prev > 0 && prev == mapped.base )
-				memmove( buff, buff + stop, (addr = bytes) );
-
-			/* Ensure we have enough memory to read into */
-			stop = mapped.upto - mapped.base;
-			if ( !(buff = more_space( &ret, space, addr + stop )) ) {
-				if ( err ) *err = ret;
-				scan->total = scan->count;
-				return scan->count;
-			}
-			
-			/* Reduce corrupted results */
-			(void)memset( buff + addr, clear, stop );
-			
-			/* Safe to read the memory block now */
-			if ( !proc_glance_data( &ret, handle,
-				mapped.base, buff + addr, stop ) ) {
-				if ( err ) *err = ret;
-				ERRMSG( ret, "Couldn't read memory" );
-				scan->total = scan->count;
-				return scan->count;
-			}
-			stop += addr;
-			stop -= bytes;
-			addr = done - mapped.base;
-			if ( memcmp( buff + addr, array, bytes ) == 0 ) {
-				if ( write( next_fd, &done, sizeof(void*) )
-					< (ssize_t)(sizeof(void*))
-				)
-				{
-					ret = errno;
-					if ( err ) *err = ret;
-					scan->total = scan->count;
-					return scan->count;
-				}
-				scan->count++;
-			}
-			prev = mapped.upto;
-		}
-	}
-	if ( err ) *err = EXIT_SUCCESS;
-	scan->total = scan->count;
-	return scan->count;
-}
-
-node_t proc_aobinit(
-	int *err, int init_fd, scan_t *scan,
-	proc_handle_t *handle,
-	uchar *array, intptr_t bytes,
-	intptr_t from, intptr_t upto,
-	bool writable
-)
-{
-	int ret = EXIT_SUCCESS, clear = ~0;
-	uchar *buff = NULL;
-	intptr_t prev = 0, addr = 0, stop = 0;
-	proc_mapped_t mapped = {0};
-	space_t *space;
-	mode_t prot = 04 | (writable ? 02 : 0);
-	
-	errno = EXIT_SUCCESS;
-	
-	if ( (ret = proc__rwvmem_test( handle, array, bytes ))
-		!= EXIT_SUCCESS ) {
-		if ( err ) *err = ret;
-		return 0;
-	}
-	
-	if ( !scan ) {
-		ret = EDESTADDRREQ;
-		if ( err ) *err = ret;
-		ERRMSG( ret, "Need scan object to optimize memory usage" );
-		return 0;
-	}
-	
-	scan->total = scan->count = 0;
-	space = &(scan->space);
-	
-	if ( init_fd < 0 ) {
-		ret = EDESTADDRREQ;
-		if ( err ) *err = ret;
-		ERRMSG( ret, "init_fd needs a file descriptor" );
-		return 0;
-	}
-	
-	if ( gasp_lseek( init_fd, 0, SEEK_SET ) < 0 ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "failed reset position for output list file" );
-		return 0;
-	}
-	
-	/* Decide how we will clear memory */
-	for ( addr = 0; addr < bytes; ++addr ) {
-		if ( array[addr] ) {
-			clear = 0;
-			break;
-		}
-	}
-	
-	/* Reduce corrupted results */
-	(void)memset( space->block, clear, space->given );
-	
-	while (
-		proc_mapped_next(
-			&ret, handle, mapped.upto, &mapped, prot )
-	)
+void* proc_handle_dumper( void * _tscan ) {
+	tscan_t *tscan = _tscan;
+	if ( !tscan ) return NULL;
+	tscan->threadmade = 1;
+	tscan->found = 0;
+	if ( tscan->main_pipe[0] <= 0 || tscan->scan_pipe[0] <= 0 )
 	{
-		/* Skip irrelevant regions */
-		if ( mapped.base < from
-			|| mapped.upto <= from
-			|| mapped.base >= upto
-			|| mapped.upto > upto
-			|| (mapped.prot & prot) != prot )
-			continue;
-
-		/* If continued page lines up with previous then move the bytes
-		 * we skipped to front of buffer to be compared now that we
-		 * will have the bytes after them */
-		addr = 0;
-		if ( prev > 0 && prev == mapped.base )
-			memmove( buff, buff + stop, (addr = bytes) );
-
-		/* Ensure we have enough memory to read into */
-		stop = mapped.upto - mapped.base;
-		if ( !(buff = more_space( &ret, space, addr + stop )) ) {
-			if ( err ) *err = ret;
-			ERRMSG( ret, "Couldn't allocate memory" );
-			scan->total = scan->count;
-			return scan->count;
-		}
-		
-		/* Reduce corrupted results */
-		(void)memset( buff + addr, clear, stop );
-		
-		/* Safe to read the memory block now */
-		if ( !proc_glance_data( &ret, handle,
-			mapped.base, buff + addr, stop ) ) {
-			if ( err ) *err = ret;
-			ERRMSG( ret, "Couldn't read memory" );
-			scan->total = scan->count;
-			return scan->count;
-		}
-		stop += addr;
-		stop -= bytes;
-		for ( addr = 0; addr < stop; ++addr ) {
-			if ( memcmp( buff + addr, array, bytes ) == 0 ) {
-				prev = mapped.base + addr;
-				if ( write( init_fd, &prev, sizeof(void*) )
-					< (ssize_t)sizeof(void*)
-				)
-				{
-					ret = errno;
-					if ( err ) *err = ret;
-					ERRMSG( ret, "Couldn't write an address"
-						" to output file" );
-					scan->total = scan->count;
-					return scan->count;
-				}
-				scan->count++;
-			}
-		}
-		prev = mapped.upto;
+		if ( tscan->main_pipe[0] > 0 ) close( tscan->main_pipe[0] );
+		if ( tscan->main_pipe[1] > 0 ) close( tscan->main_pipe[1] );
+		if ( tscan->scan_pipe[0] > 0 ) close( tscan->scan_pipe[0] );
+		if ( tscan->scan_pipe[1] > 0 ) close( tscan->scan_pipe[1] );
+		tscan->threadmade = 0;
+		return _tscan;
 	}
-	if ( err ) *err = EXIT_SUCCESS;
-	scan->total = scan->count;
-	return scan->count;
+	(void)memset( tscan->dump[0].used, ~0, DUMP_MAX_SIZE );
+	tscan->dumping = 1;
+	tscan->last_found = proc_handle_dump( tscan	);
+	tscan->scanning = 1;
+	tscan->dumping = 0;
+	return proc_handle_bytescanner( _tscan );
 }
 
 char const * substr( char const * src, char const *txt ) {
@@ -1027,7 +1536,7 @@ proc_notice_t* proc_notice_info(
 	space_t *name, *full, *cmdl;
 	int ret;
 	char *k, *v, *n;
-	intptr_t size;
+	intmax_t size;
 	
 	if ( !notice ) {
 		if ( err ) *err = EDESTADDRREQ;
@@ -1267,220 +1776,12 @@ proc_notice_t*
 	return NULL;
 }
 
-size_t proc__glance_peek(
+uintmax_t proc_glance_data(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, intptr_t size ) {
-	intptr_t done = 0, dst = 0, predone = 0;
-	int ret;
-	uchar *m = mem;
-	size_t temp;
-	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-
-	errno = EXIT_SUCCESS;
-	
-	for ( temp = 0; addr % sizeof(long); ++temp, --addr );
-	if ( temp ) {
-		dst = ptrace( PTRACE_PEEKDATA,
-			handle->notice.entryId, (void*)addr, NULL );
-		if ( errno != EXIT_SUCCESS )
-			return 0;
-		temp = (sizeof(long) - (predone = temp));
-		memcpy( m, (&dst) + predone, temp );
-		addr += sizeof(long);
-		size -= predone;
-	}
-	
-	while ( done < size ) {
-		dst = ptrace( PTRACE_PEEKTEXT,
-			handle->notice.entryId, (void*)(addr + done), NULL );
-		if ( errno != EXIT_SUCCESS )
-			return done + predone;
-		temp = size - done;
-		if ( temp > sizeof(long) ) temp = sizeof(long);
-		memcpy( m + predone + done, &dst, temp );
-		done += temp;
-	}
-	
-	return done + predone;
-}
-
-size_t proc__glance_vmem(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, intptr_t size ) {
-#ifdef _GNU_SOURCE
-	struct iovec internal, external;
-	intptr_t done, predone = 0;
-	int ret;
-	uchar *m = mem;
-	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-
-	errno = EXIT_SUCCESS;
-#if 0
-	if ( addr % 0xFF ) {
-		predone = proc__glance_peek( &ret, handle, addr, mem,
-			0xFF - (addr % 0xFF) );
-		if ( ret != EXIT_SUCCESS ) {
-			if ( err ) *err = ret;
-			ERRMSG( ret, "Couldn't read from VM" );
-			fprintf( stderr, "%p\n", (void*)addr );
-			return predone;
-		}
-		addr += predone;
-		size -= predone;
-	}
-#endif
-	internal.iov_base = m + predone;
-	internal.iov_len = size;
-	external.iov_base = (void*)addr;
-	external.iov_len = size;
-	
-	if ( (done = process_vm_readv(
-		handle->notice.entryId, &internal, 1, &external, 1, 0))
-		<= 0 )
-	{
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't glance at VM" );
-		fprintf( stderr, "%p\n", external.iov_base );
-	}
-	
-	return done;
-#else
-	if ( err ) *err = ENOSYS;
-	return 0;
-#endif
-}
-
-intptr_t proc__glance_file(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size
+	uintmax_t addr, void *mem, size_t size
 )
 {
-#ifdef gasp_pread
-	intptr_t done = 0;
-	int ret, fd;
-	char path[64] = {0};
-	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-	
-	if ( handle->memfd >= 0 )
-		fd = handle->memfd;
-	else {
-		sprintf( path, "%s/mem", handle->procdir );
-		if ( (fd = open(path,O_RDONLY)) < 0 ) {
-			if ( err ) *err = errno;
-			return 0;
-		}
-	}
-	
-	done = gasp_pread( fd, mem, size, addr );
-	if ( handle->memfd < 0 )
-		close(fd);
-
-	if ( done < 0 ) {
-		if ( err ) *err = errno;
-		if ( errno != ESPIPE && errno != EIO )
-			ERRMSG( errno, "Couldn't read process memory" );
-		return 0;
-	}
-	return done;
-#else
-	if ( err ) err = ENOSYS;
-	return 0;
-#endif
-}
-
-intptr_t proc__glance_self(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size
-)
-{
-	int ret;
-	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-	
-	if ( handle->notice.self ) {
-		(void)memmove( mem, (void*)addr, size );
-		if ( err ) *err = errno;
-		if ( errno != EXIT_SUCCESS )
-			ERRMSG( errno, "Couldn't override VM" );
-		return size;
-	}
-	
-	return 0;
-}
-
-intptr_t proc__glance_seek(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size
-)
-{
-	char path[SIZEOF_PROCDIR+5] = {0};
-	intptr_t done = 0;
-	int ret, fd;
-	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-	
-	if ( handle->memfd >= 0 )
-		fd = handle->memfd;
-	else {
-		sprintf( path, "%s/mem", handle->procdir );
-		if ( (fd = open( path, O_RDONLY )) < 0 ) {
-			if ( err ) *err = errno;
-			ERRMSG( errno, "Could'nt open process memory" );
-			fprintf( stderr, "Path: '%s'\n", path );
-			return 0;
-		}
-	}
-	
-	gasp_lseek( fd, addr, SEEK_SET );
-	if ( errno != EXIT_SUCCESS )
-		goto failed;
-	
-	done = gasp_read( fd, mem, size );
-	if ( done <= 0 || errno != EXIT_SUCCESS )
-		goto failed;
-
-	if ( handle->memfd < 0 )
-		close(fd);
-	return done;
-	
-	failed:
-	if ( handle->memfd < 0 )
-		close(fd);
-	if ( err ) *err = errno;
-	if ( errno != ESPIPE && errno != EIO )
-		ERRMSG( errno, "Couldn't read process memory" );
-	return 0;
-}
-
-intptr_t proc_glance_data(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size
-)
-{
-	intptr_t done;
+	uintmax_t done;
 	int ret = proc__rwvmem_test( handle, mem, size );
 	
 	if ( ret != EXIT_SUCCESS ) {
@@ -1532,178 +1833,12 @@ intptr_t proc_glance_data(
 	return done;
 }
 
-size_t proc__change_poke(
+uintmax_t proc_change_data(
 	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, intptr_t size ) {
-	intptr_t done = 0, dst = 0;
-	int ret;
-	uchar *m = mem;
-	size_t temp;
-	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-
-	errno = EXIT_SUCCESS;
-	
-	while ( done < size ) {
-		dst = ptrace( PTRACE_PEEKDATA,
-			handle->notice.entryId, addr + done, NULL );
-		temp = size - done;
-		if ( temp > sizeof(long) ) temp = sizeof(long);
-		memcpy( &dst, m + done, temp );
-		ptrace( PTRACE_POKEDATA,
-			handle->notice.entryId, addr + done, &dst );
-		done += temp;
-	}
-	
-	return done;
-}
-
-size_t proc__change_vmem(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, intptr_t size ) {
-#ifdef _GNU_SOURCE
-	struct iovec internal, external;
-	intptr_t done;
-	int ret;
-	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-
-	errno = EXIT_SUCCESS;
-	
-	internal.iov_base = mem;
-	internal.iov_len = size;
-	external.iov_base = (void*)addr;
-	external.iov_len = size;
-	
-	if ( (done = process_vm_writev(
-		handle->notice.entryId, &internal, 1, &external, 1, 0))
-		!= size )
-	{
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't write to VM" );
-		fprintf( stderr, "Address %p\n", external.iov_base );
-	}
-	
-	return done;
-#else
-	if ( err ) *err = ENOSYS;
-	return 0;
-#endif
-}
-
-intptr_t proc__change_file(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size
+	uintmax_t addr, void *mem, size_t size
 )
 {
-#ifdef gasp_pwrite
-	intptr_t done = 0;
-	int ret, fd;
-	
-	(void)fd;
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-	
-	if ( handle->perm != O_RDWR || handle->memfd < 0 )
-		return 0;
-	
-	done = gasp_pwrite( handle->memfd, mem, size, addr );
-	if ( done < 0 ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Couldn't write to process memory" );
-	}
-	return done;
-#else
-	if ( err ) err = ENOSYS;
-	return 0;
-#endif
-}
-
-size_t proc__change_self(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size
-)
-{
-	int ret;
-	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-	
-	if ( handle->notice.self ) {
-		errno = EXIT_SUCCESS;
-		(void)memmove( (void*)addr, mem, size );
-		if ( errno != EXIT_SUCCESS ) {
-			if ( err ) *err = errno;
-			ERRMSG( errno, "Couldn't override VM" );
-			return 0;
-		}
-		return size;
-	}
-	
-	return 0;
-}
-
-intptr_t proc__change_seek(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size
-)
-{
-	char path[SIZEOF_PROCDIR+5] = {0};
-	intptr_t done = 0;
-	int ret, fd;
-	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
-	{
-		if ( err ) *err = ret;
-		return 0;
-	}
-	
-	sprintf( path, "%s/mem", handle->procdir );
-	if ( (fd = open( path, O_WRONLY )) < 0 ) {
-		if ( err ) *err = errno;
-		ERRMSG( errno, "Could'nt open process memory" );
-		fprintf( stderr, "Path: '%s'\n", path );
-		return 0;
-	}
-	
-	gasp_lseek( fd, addr, SEEK_SET );
-	if ( errno != EXIT_SUCCESS )
-		goto failed;
-	
-	done = gasp_write( fd, mem, size );
-	if ( done <= 0 || errno != EXIT_SUCCESS )
-		goto failed;
-
-	close(fd);
-	return done;
-	
-	failed:
-	close(fd);
-	if ( err ) *err = errno;
-	ERRMSG( errno, "Couldn't write to process memory" );
-	return 0;
-}
-
-intptr_t proc_change_data(
-	int *err, proc_handle_t *handle,
-	intptr_t addr, void *mem, size_t size
-)
-{
-	intptr_t done;
+	uintmax_t done;
 	int ret = proc__rwvmem_test(handle,mem,size);
 
 	if ( ret != EXIT_SUCCESS ) {

@@ -8,7 +8,7 @@ void* change_nodes(
 	}
 	if ( !Nsize ) {
 		if ( !want ) {
-			(void)change_space( err, &(nodes->space), 0, 0 );
+			free_space( err, &(nodes->space) );
 			nodes->total = nodes->count = 0;
 			return NULL;
 		}

@@ -16,19 +16,22 @@ return function (ctx,now,prv)
 	GUI.draw_reboot(ctx)
 	GUI.draw_goback(ctx,now,prv)
 	
-	nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 2 )
-	nk.label( ctx, "Type:", nk.TEXT_LEFT )
-	scan = GUI.draw_type_field(ctx,font,scan)
-	
-	nk.layout_row_dynamic( ctx, pad_height(font,"Size:"), 4 )
-	nk.label( ctx, "Size:", nk.TEXT_LEFT )
-	scan = GUI.draw_size_field(ctx,font,scan)
+	if done.count == 0 then
+		nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 2 )
+		nk.label( ctx, "Type:", nk.TEXT_LEFT )
+		scan = GUI.draw_type_field(ctx,font,scan)
+		
+		nk.layout_row_dynamic( ctx, pad_height(font,"Size:"), 4 )
+		nk.label( ctx, "Size:", nk.TEXT_LEFT )
+		scan = GUI.draw_size_field(ctx,font,scan)
+	end
 	
 	nk.layout_row_dynamic( ctx, pad_height(font,"Find:"), 2 )
 	nk.label( ctx, "Find:", nk.TEXT_LEFT )
 	scan = GUI.draw_edit_field(ctx,font,scan)
 	
-	if GUI.cheat and GUI.cheat.app and GUI.cheat.app.regions then
+	if done.count == 0 and
+		GUI.cheat and GUI.cheat.app and GUI.cheat.app.regions then
 		if scan.regions then
 			list = scan.regions
 			tmp = scan.region_options
@@ -62,13 +65,56 @@ return function (ctx,now,prv)
 		end
 	end
 	
-	nk.label( ctx, "From:", nk.TEXT_LEFT )
-	tmp = GUI.draw_addr_field( ctx, font, { addr = scan.from } )
-	scan.from = tmp.addr
+	if done.count == 0  then
+		
+		nk.label( ctx, "From:", nk.TEXT_LEFT )
+		tmp = GUI.draw_addr_field( ctx, font, { addr = scan.from } )
+		scan.from = tmp.addr
+		
+		nk.label( ctx, "Upto:", nk.TEXT_LEFT )
+		tmp = GUI.draw_addr_field( ctx, font, { addr = scan.upto } )
+		scan.upto = tmp.addr
+		
+		nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 3 )
+		if nk.button( ctx, nil, "Dump" ) then
+			done = {
+				count = 1,
+				just_dump = true,
+				from = scan.from,
+				upto = scan.from,
+				addr = scan.from,
+				found = 0,
+				increment = math.ceil((scan.upto - scan.from) / 0x16)
+			}
+		end
+	else
+		nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 2 )
+	end
 	
-	nk.label( ctx, "Upto:", nk.TEXT_LEFT )
-	tmp = GUI.draw_addr_field( ctx, font, { addr = scan.upto } )
-	scan.upto = tmp.addr
+	if nk.button( ctx, nil, "Scan" ) then
+		done = {
+			count = done.count + 1,
+			from = scan.from,
+			upto = scan.from,
+			addr = scan.from,
+			found = 0,
+			increment = math.ceil((scan.upto - scan.from) / 0x16)
+		}
+		if not GUI.handle or GUI.handle:valid() == false then
+			return GUI.use_ui(ctx,"cfg-proc",now)
+		end
+		if GUI.handle:doing_scan() == false then
+			if done.just_dump == true then
+				GUI.handle:dump( scan.from,upto, true, scan.limit )
+				
+			else
+				GUI.handle:bytescan(
+					"table", scan.size, scan.as_bytes,
+					scan.from, scan.upto,
+					true, scan.limit, done.count - 1 )
+			end
+		end
+	end
 	
 	if nk.button( ctx, nil, "Clear" ) then
 		done = {
@@ -77,57 +123,45 @@ return function (ctx,now,prv)
 			upto = scan.from,
 			addr = scan.from,
 			found = 0,
-			added = 0,
 			increment = math.ceil((scan.upto - scan.from) / 0x16)
 		}
 	end
-	if nk.button( ctx, nil, "Scan" ) then
-		scan.activate = true
-		done = {
-			count = done.count + 1,
-			from = scan.from,
-			upto = scan.from,
-			addr = scan.from,
-			found = 0,
-			added = 0,
-			increment = math.ceil((scan.upto - scan.from) / 0x16)
-		}
-	end
+	
 	scan.done = done
 	GUI.scan = scan
-	if scan.activate == true and not done.activated and not GUI.quit then
-		if not GUI.handle or GUI.handle:valid() == false then
-			return GUI.use_ui(ctx,"cfg-proc",now)
-		end
-		tmp, v = GUI.handle:aobscan(
-			"table", scan.size, scan.as_bytes,
-			scan.from, scan.upto,
-			true, scan.limit, done.count - 1 )
-		done.upto = done.upto + done.increment
-		if done.upto > scan.upto then done.upto = scan.upto end
-		done.activated = true
-	end
+	
 	if done.count > 0 then
-		if GUI.handle:doing_scan() or done.addr < done.upto then
-			if GUI.handle:scan_done_upto() < done.upto then
-				list = done.list
-			else
+		list = nil
+		if GUI.handle:scan_done_upto() < done.upto then
+			list = done.list
+		else
+			done.added = 0
+			done.addr, done.found, tmp =
+				GUI.handle:get_scan_list(done.count - 1,scan.limit)
+			if done.found > 0 then
 				list = {}
-				done.added = 0
-				done.addr, tmp, done.found =
-					GUI.handle:get_scan_list(done.count - 1,scan.limit)
 				for i = 1,done.found,1 do
-					if done.added == scan.limit then break end
-					done.added = done.added + 1
-					list[done.added] = rebuild_cheat(scan)
-					list[done.added].generated = true
-					list[done.added].addr = tmp[i] or 0
+					if i == scan.limit then break end
+					list[i] = rebuild_cheat(scan)
+					list[i].generated = true
+					list[i].addr = tmp[i] or 0
+					-- Prevent unintended subgroups
+					list[i].count = nil
+					list[i].list = nil
+					list[i].prev = nil
+					list[i].split = nil
+					list[i].is_group = false
+					list[i].active = false
 				end
-				done.upto = done.upto + done.increment
-				if done.upto > scan.upto then done.upto = scan.upto end
 			end
-			done.list = list
+			done.added = i;
+			done.upto = done.upto + done.increment
+			if done.upto > scan.upto then done.upto = scan.upto end
 		end
+		done.list = list
+	end
+	
+	if done.count > 0 then
 	
 		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
 		
@@ -144,14 +178,13 @@ return function (ctx,now,prv)
 		tmp = string.format( "Scanned upto 0x%X", tmp )
 		nk.label( ctx, tmp, nk.TEXT_LEFT )
 		
-		tmp = string.format( "Showing %d of %d Results",
-			done.added, GUI.handle:scan_found() )
+		done.desc = string.format( "Showing %d of %d Results",
+			#(done.list or {}), done.found )
 		
-		nk.label( ctx, tmp, nk.TEXT_LEFT )
+		nk.label( ctx, done.desc, nk.TEXT_LEFT )
 		
-		list = done.list
-		for i = 1,done.added,1 do
-			GUI.draw_cheat( ctx, font, list[i] )
+		if done.list then
+			GUI.draw_cheat( ctx, font, done )
 		end
 	end
 	scan.done = done

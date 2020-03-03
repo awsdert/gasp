@@ -38,8 +38,9 @@ gasp_d_exe:=gasp-d.$(exe_ext)
 test_gasp_exe:=test-$(gasp_d_exe)
 deep_gasp_exe:=deep-$(gasp_exe)
 deep_gasp_d_exe:=deep-$(gasp_d_exe)
-PHONY_TARGETS:=makefile default all rebuild clean libs build debug
-PHONY_TARGETS+= run gede test
+PHONY_TARGETS:=makefile default all run gede test moon-libs
+PHONY_TARGETS+= rebuild clean libs build debug
+PHONY_TARGETS+= rebuild-all clean-all libs-all build-all debug-all
 
 .PHONY: $(PHONY_TARGETS)
 default: run
@@ -87,15 +88,17 @@ DFLAGS=-ggdb -D _DEBUG
 RPATH:=$(call rpath,.)
 
 all: libs build debug
-rebuild: clean libs build
+rebuild: clean libs build debug
+rebuild-all: clean-all libs-all build-all debug-all
 
-libs: moon_libs
+libs-all: libs moon-libs
+libs:
 
 #lua_lib:
 #	cd $(lua_dir) && make
 #	cp $(lua_src_dir)/liblua.so liblua.so
 
-moon_libs:
+moon-libs:
 	cd $(moongl_dir) && make
 	cd $(moonglfw_dir) && make
 	cd $(moonnuklear_dir) && make
@@ -103,18 +106,20 @@ moon_libs:
 	cp $(moonglfw_src_dir)/moonglfw.so moonglfw.so
 	cp $(moonnuklear_src_dir)/moonnuklear.so moonnuklear.so
 
-clean:
-	rm -f *.elf
-	rm -f *.o
+clean-all: clean
 	rm -f $(lua_src_dir)/*.o
 	rm -f $(moongl_src_dir)/*.o
 	rm -f $(moonglfw_src_dir)/*.o
 	rm -f $(moonnuklear_src_dir)/*.o
-	rm -f *.so
 	rm -f $(lua_src_dir)/*.so
 	rm -f $(moongl_src_dir)/*.so
 	rm -f $(moonglfw_src_dir)/*.so
 	rm -f $(moonnuklear_src_dir)/*.so
+
+clean:
+	rm -f *.elf
+	rm -f *.o
+	rm -f gasp*.so
 
 leaks: build debug
 	valgrind -s ./$(deep_gasp_d_exe) $(ARGS)
@@ -132,8 +137,10 @@ gede: debug
 test: $(deep_gasp_d_exe)
 	gede --args $(deep_gasp_d_exe)
 
+build-all: libs-all build
 build: $(gasp_exe) $(deep_gasp_exe)
 
+debug-all: libs-all debug
 debug: $(gasp_d_exe) $(deep_gasp_d_exe) $(test_gasp_exe)
 
 $(gasp_exe): $(init_gasp_objs)
@@ -157,10 +164,13 @@ $(test_gasp_exe): $(test_gasp_d_objs)
 %-d.o: %
 	$(CC) $(DFLAGS) $(CFLAGS) -o $@ -c $< $(LIBS)
 
+%-all.o:
+	@echo Why does the rule '$@' exist!?
+
 %.so.o:
 	@echo Why does the rule '$@' exist!?
 
-%: gasp.h
+%.c: gasp.h
 
 gasp.h: gasp_limits.h
 

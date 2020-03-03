@@ -187,22 +187,199 @@ typedef struct lua_proc_handle {
 	nodes_t bytes;
 } lua_proc_handle_t;
 
-void lua_proc_handle_checkrdwr( lua_proc_handle_t *handle ) {
+void lua_proc_handle__set_rdwr(
+	lua_proc_handle_t *handle, bool want2rdwr
+)
+{
+	int ret = SIGSTOP;
+	tscan_t *tscan;
+	struct pollfd pfd = {0};
+	node_t n = 0;
+	
 	if ( !handle || !(handle->tscan.threadmade) ) return;
-	handle->tscan.wants2rdwr = 1;
-	while (	!(handle->tscan.ready2wait) ) sleep(1);
+	tscan = &(handle->tscan);
+	
+	pfd.fd = tscan->scan_pipe[0];
+	pfd.events = POLLIN;
+	if ( !want2rdwr ) {
+		ret = SIGCONT;
+		tscan->wants2rdwr = 0;
+		write( tscan->scan_pipe[1], &ret, sizeof(int) );
+		return;
+	}
+	
+	tscan->wants2rdwr = 1;
+	write( tscan->scan_pipe[1], &ret, sizeof(int) );
+	ret = SIGKILL;
+	while ( ret != SIGCONT ) {
+		while ( poll( &pfd, 1, 1000 ) == 0 );
+		read( tscan->main_pipe[0], &ret, sizeof(int) );
+		switch ( ret ) {
+		case SIGKILL: fputs( "SIGKILL\n", stderr ); break;
+		case SIGSTOP: fputs( "SIGSTOP\n", stderr ); break;
+		case SIGCONT: fputs( "SIGCONT\n", stderr ); break;
+		default: fprintf( stderr, "%d\n", ret ); break;
+		}
+		/* Prevent hanging */
+		if ( n > UCHAR_MAX ) exit(1);
+		++n;
+	}
+}
+
+int lua_proc_handle__ret_empty_list( lua_State *L, node_t done ) {
+	lua_pushinteger(L,done);
+	lua_pushinteger(L,0);
+	lua_newtable( L );
+	return 3;
+}
+
+int lua_proc_handle__get_scan_list(
+	lua_State *L, lua_proc_handle_t *handle, node_t limit
+)
+{
+	int ret;
+	uintmax_t addr = 0;
+	node_t i, a, stop, count = 0;
+	dump_t *dump;
+	proc_mapped_t _pmap, _nmap, *pmap, *nmap;
+	uchar *used;
+	intmax_t ipos, upos, dpos;
+	uintmax_t minus;
+	bool both = 0;
+	tscan_t *tscan;
+	
+	if ( !L )
+		return 0;
+
+	if ( !handle )
+		return lua_proc_handle__ret_empty_list(L,0);
+	tscan = &(handle->tscan);
+	if ( tscan->dumping )
+		return lua_proc_handle__ret_empty_list(L,0);
+	minus = tscan->bytes - 1;
+	/* Initialise pointer */
+	dump = &(tscan->dump[1]);
+	/* Pause thread */
+	lua_proc_handle__set_rdwr(handle,1);
+	/* Grab current positions so can restore them later */
+	pmap = dump->pmap;
+	nmap = dump->nmap;
+	_pmap = *pmap;
+	_nmap = *nmap;
+	ipos = gasp_lseek( dump->info_fd, 0, SEEK_CUR );
+	upos = gasp_lseek( dump->used_fd, 0, SEEK_CUR );
+	dpos = gasp_lseek( dump->data_fd, 0, SEEK_CUR );
+	
+	/* Grab current count */
+	count = handle->tscan.found;
+	/* */
+	lua_pushinteger( L, handle->tscan.done_upto );
+	if ( count > limit ) count = limit;
+	lua_pushinteger( L, count );
+	lua_createtable( L, count, 0 );
+	if ( !count ) {
+		/* Un-Pause thread and return */
+		lua_proc_handle__set_rdwr(handle,0);
+		return 3;
+	}
+	/* Move pointers to where we want them*/
+	gasp_lseek( dump->info_fd, sizeof(node_t) * 2, SEEK_SET );
+	gasp_lseek( dump->used_fd, 0, SEEK_SET );
+	gasp_lseek( dump->data_fd, 0, SEEK_SET );
+	while ( glance_dump( &ret, dump, &both, tscan->bytes )
+		|| ret == ERANGE )
+	{
+		addr = dump->addr;
+		stop = dump->size - minus;
+		used = dump->used;
+		for ( a = 0; a < stop; ++a, ++addr ) {
+			if ( used[a] ) {
+				lua_pushinteger( L, ++i );
+				lua_pushinteger( L, addr );
+				lua_settable(L,-3);
+				/* Ensure we do not collect more than asked for */
+				if ( i == limit ) goto done;
+			}
+		}
+		
+	}
+	
+	done:
+	/* Restore position data */
+	*pmap = _pmap;
+	*nmap = _nmap;
+	gasp_lseek( dump->info_fd, ipos, SEEK_SET );
+	gasp_lseek( dump->used_fd, upos, SEEK_SET );
+	gasp_lseek( dump->data_fd, dpos, SEEK_SET );
+	
+	lua_proc_handle__set_rdwr(handle,0);
+	return 3;
+}
+bool lua_proc_handle__nth_scan( lua_proc_handle_t *handle ) {
+	char *path;
+	char const *GASP_PATH = getenv("GASP_PATH");
+	tscan_t *tscan;
+	space_t space = {0}, path_space = {0};
+	_Bool nth = 0;
+	
+	if ( !handle ) return 0;
+	if ( handle->nth_scan ) return 1;
+	
+	tscan = &(handle->tscan);
+	
+	
+	if ( !(path = more_space(
+		&(tscan->ret), &path_space, strlen( GASP_PATH ) + UCHAR_MAX))
+	) {
+		ERRMSG( tscan->ret, "Couldn't allocate memory for scan path" );
+		goto fail;
+	}
+	
+	if ( gasp_mkdir( &space, GASP_PATH ) != EXIT_SUCCESS )
+		goto fail;
+	
+	sprintf( path, "%s/scans", GASP_PATH );
+	if ( gasp_mkdir( &space, path ) != EXIT_SUCCESS )
+		goto fail;
+	
+	if ( !(handle->nth_scan) ) {
+		for ( handle->scan_instance = 0;
+			handle->scan_instance < LONG_MAX;
+			handle->scan_instance++
+		)
+		{
+			sprintf( path, "%s/scans/%lu",
+				GASP_PATH, (ulong)(handle->scan_instance) );
+			if ( gasp_isdir( path ) != EXIT_SUCCESS
+				&& gasp_mkdir( &space, path ) == EXIT_SUCCESS )
+				goto done;
+		}
+		goto fail;
+	}
+	done:
+	nth = 1;
+	fail:
+	free_space(NULL,&path_space);
+	free_space(NULL,&space);
+	return nth;
 }
 
 void lua_proc_handle_shutfiles( lua_proc_handle_t *handle )
 {
-	handle->tscan.wants2free = 1;
+	int ret = SIGKILL;
+	tscan_t *tscan = &(handle->tscan);
+	struct pollfd pfd = {0};
+	pfd.fd = tscan->main_pipe[0];
+	pfd.events = 0;
+	
+	if ( tscan->pipesmade ) {
+		write( tscan->scan_pipe[1], &ret, sizeof(int) );
+		while ( poll( &pfd, 1, 1000 ) == 0 );
+	}
 	/* sleep call is needed here to ensure system passes execution to
 	 * the other thread when it exists on the same CPU core */
-	while ( handle->tscan.threadmade ) sleep(1);
-	shut_dump_files( handle->tscan.prev_dump );
-	memset( &(handle->tscan.prev_dump), -1, sizeof(dump_t) );
-	shut_dump_files( handle->tscan.next_dump );
-	memset( &(handle->tscan.next_dump), -1, sizeof(dump_t) );
+	shut_dump_files( &(handle->tscan.dump[0]) );
+	shut_dump_files( &(handle->tscan.dump[1]) );
 }
 
 bool lua_proc_handle_undo( lua_proc_handle_t *handle, node_t count, bool all )
@@ -211,35 +388,35 @@ bool lua_proc_handle_undo( lua_proc_handle_t *handle, node_t count, bool all )
 	char *path;
 	int ret = EXIT_SUCCESS;
 	node_t i;
+	space_t space = {0};
+	_Bool success = 0;
 	if ( !(path = more_space(
-		&ret, &(handle->tscan.scan.space),
-		strlen( GASP_PATH ) + UCHAR_MAX))
+		&ret, &space, strlen( GASP_PATH ) + UCHAR_MAX))
 	) {
 		ERRMSG( ret, "Couldn't allocate memory for scan path" );
-		return 0;
+		goto fail;
 	}
 	if ( all ) {
 		sprintf( path, "%s/scans/%lu",
 				GASP_PATH, (ulong)(handle->scan_instance) );
-		if ( access( path, F_OK ) == 0 ) {
-			sprintf( path, "rm -r \"%s/scans/%lu\"",
-					GASP_PATH, (ulong)(handle->scan_instance) );
-			fprintf( stderr, "%s\n", path );
-			system( path );
-		}
+		gasp_rmdir( &space, path, 1 );
 		handle->scan_instance = 0;
-		handle->scan_count = 0;
+		count = 0;
 		handle->nth_scan = 0;
-		return 1;
+		goto done;
 	}
 	for ( i = handle->scan_count - 1; i > count; --i ) {
-		sprintf( path, "rm -r \"%s/scans/%lu/%lu*\"",
+		sprintf( path, "rm \"%s/scans/%lu/%lu*\"",
 				GASP_PATH, (ulong)(handle->scan_instance), (ulong)i );
 		fprintf( stderr, "%s\n", path );
 		system( path );
 	}
+	done:
+	success = 1;
 	handle->scan_count = count;
-	return 1;
+	fail:
+	free_space( NULL, &space );
+	return success;
 }
 
 int lua_proc_handle_term( lua_State *L ) {
@@ -248,7 +425,8 @@ int lua_proc_handle_term( lua_State *L ) {
 	lua_proc_handle_undo( handle, 0, 1 );
 	proc_handle_shut( handle->handle );
 	handle->handle = NULL;
-	free_space( NULL, &(handle->tscan.scan.space) );
+	shut_dump_files( &(handle->tscan.dump[0]) );
+	shut_dump_files( &(handle->tscan.dump[1]) );
 	free_nodes( uchar, NULL, &(handle->bytes) );
 	return 0;
 }
@@ -272,8 +450,8 @@ int lua_proc_handle_init( lua_State *L ) {
 int lua_proc_handle_glance_data( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	intptr_t addr = luaL_checkinteger(L,2);
-	intptr_t size = luaL_checkinteger(L,3);
+	uintmax_t addr = luaL_checkinteger(L,2);
+	uintmax_t size = luaL_checkinteger(L,3);
 	uchar * array;
 	if ( !(handle->handle) || size < 1 ) {
 		lua_newtable(L);
@@ -285,9 +463,9 @@ int lua_proc_handle_glance_data( lua_State *L ) {
 		lua_newtable(L);
 		return 1;
 	}
-	lua_proc_handle_checkrdwr(handle);
+	lua_proc_handle__set_rdwr(handle,1);
 	size = proc_glance_data( NULL, handle->handle, addr, array, size );
-	handle->tscan.wants2rdwr = 0;
+	lua_proc_handle__set_rdwr(handle,0);
 	if ( size < 1 ) {
 		free(array);
 		lua_newtable(L);
@@ -305,7 +483,7 @@ int lua_proc_handle_glance_data( lua_State *L ) {
 int lua_proc_handle_change_data( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	intptr_t addr = luaL_checkinteger(L,2), size;
+	uintmax_t addr = luaL_checkinteger(L,2), size;
 	uchar * array = NULL;
 	nodes_t *nodes;
 	
@@ -320,7 +498,7 @@ int lua_proc_handle_change_data( lua_State *L ) {
 		return 1;
 	}
 	
-	lua_proc_handle_checkrdwr(handle);
+	//lua_proc_handle__set_rdwr(handle);
 	
 	size = proc_change_data( NULL, handle->handle, addr, array, nodes->count );
 	
@@ -353,38 +531,8 @@ int lua_proc_handle_doing_scan( lua_State *L ) {
 int lua_proc_handle_scan_found( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushinteger( L, handle->tscan.scan.count );
+	lua_pushinteger( L, handle->tscan.found );
 	return 1;
-}
-
-int lua_proc_handle__get_scan_list(
-	lua_State *L, lua_proc_handle_t *handle, node_t limit
-)
-{
-	intptr_t addr = 0;
-	node_t i, count = 0;
-	lua_proc_handle_checkrdwr(handle);
-	count = handle->tscan.scan.count;
-	lua_pushinteger( L, handle->tscan.done_upto );
-	if ( count > limit ) count = limit;
-	if ( !count ) {
-		lua_newtable( L );
-		lua_pushinteger( L, 0 );
-		return 3;
-	}
-	lua_createtable( L, count, 0 );
-	gasp_lseek( handle->tscan.next_dump.addr_fd, 0, SEEK_SET );
-	for ( i = 0; i < count; ++i ) {
-		gasp_read( handle->tscan.next_dump.addr_fd,
-			&addr, sizeof(void*) );
-		lua_pushinteger( L, i+1 );
-		lua_pushinteger( L, addr );
-		lua_settable(L,-3);
-	}
-	gasp_lseek( handle->tscan.next_dump.addr_fd, 0, SEEK_END );
-	lua_pushinteger( L, count );
-	handle->tscan.wants2rdwr = 0;
-	return 3;
 }
 
 int lua_proc_handle_get_scan_list( lua_State *L ) {
@@ -394,155 +542,173 @@ int lua_proc_handle_get_scan_list( lua_State *L ) {
 		luaL_optinteger( L, 3, 100 ) );
 }
 
-int lua_proc_handle_aobscan( lua_State *L ) {
+bool lua_proc_handle_prep_scan(
+	lua_proc_handle_t *handle,
+	node_t done,
+	node_t last_found,
+	uintmax_t from, uintmax_t upto, bool writable, int zero
+)
+{
+	int ret = EXIT_SUCCESS;
+	tscan_t *tscan;
+	dump_t *dump;
+	if ( !handle ) return 0;
+	
+	tscan = &(handle->tscan);
+	
+	if ( !(handle->handle) || tscan->threadmade )
+		return 0;
+	
+	handle->nth_scan = lua_proc_handle__nth_scan( handle );
+	
+	lua_proc_handle_undo( handle, done, !done );
+	
+	dump = &(tscan->dump[0]);
+	(void)memset( dump, 0, sizeof(dump_t) );
+	dump->pmap = &(dump->mapped[0]);
+	dump->nmap = &(dump->mapped[1]);
+	
+	dump = &(tscan->dump[1]);
+	(void)memset( dump, 0, sizeof(dump_t) );
+	dump->pmap = &(dump->mapped[0]);
+	dump->nmap = &(dump->mapped[1]);
+	
+	tscan->handle = handle->handle;
+	tscan->bytes = handle->bytes.count;
+	tscan->array = tscan->bytes ? handle->bytes.space.block : NULL;
+	tscan->from = from;
+	tscan->upto = upto;
+	tscan->writeable = writable;
+	tscan->done_upto = 0;
+	tscan->done_scans = done;
+	tscan->dumping = 0;
+	tscan->scanning = 0;
+	tscan->threadmade = 0;
+	tscan->found = 0;
+	tscan->last_found = last_found;
+	tscan->main_pipe[0] = -1;
+	tscan->main_pipe[1] = -1;
+	tscan->scan_pipe[0] = -1;
+	tscan->scan_pipe[1] = -1;
+	tscan->zero = zero;
+	
+	if ( pipe2( tscan->main_pipe, 0 ) == -1 )
+		return 0;
+	if ( pipe2( tscan->scan_pipe, 0 ) == -1 )
+	{
+		close( tscan->main_pipe[0] );
+		close( tscan->main_pipe[1] );
+		return 0;
+	}
+	
+	if ( (ret = open_dump_files(
+		dump, handle->scan_instance, done )) != EXIT_SUCCESS ) {
+		close( tscan->main_pipe[0] );
+		close( tscan->main_pipe[1] );
+		close( tscan->scan_pipe[0] );
+		close( tscan->scan_pipe[1] );
+		ERRMSG( ret, "Couldn't open output file" );
+		return 0;
+	}
+	
+	if ( done && (ret = open_dump_files(
+		&(tscan->dump[0]), handle->scan_instance, done ))
+		!= EXIT_SUCCESS
+	)
+	{
+		close( tscan->main_pipe[0] );
+		close( tscan->main_pipe[1] );
+		close( tscan->scan_pipe[0] );
+		close( tscan->scan_pipe[1] );
+		shut_dump_files( dump );
+		ERRMSG( ret, "Couldn't open input file" );
+		return 0;
+	}
+	
+	tscan->pipesmade = 1;
+	return 1;
+}
+
+int lua_proc_handle_dump( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	char *path;
-	char const *GASP_PATH = getenv("GASP_PATH");
-	int ret, index = 4;
-	node_t i = 0;
+	tscan_t *tscan;
+	uintmax_t from = luaL_optinteger(L,2,0);
+	uintmax_t upto = luaL_optinteger(L,3,INTPTR_MAX);
+	_Bool writable = lua_toboolean(L,4);
+	tscan =  &(handle->tscan);
+	
+	handle->bytes.count = 0;
+	
+	if ( !lua_proc_handle_prep_scan(
+			handle, 0, 0, from, upto, writable, 0 )
+	)
+	{
+		lua_pushboolean(L,0);
+		return 1;
+	}
+	
+	pthread_create(
+		&(tscan->thread), NULL, proc_handle_dumper, &(handle->tscan) );
+	lua_pushboolean(L, 1 );
+	handle->scan_count++;
+	return 1;
+}
+
+int lua_proc_handle_bytescan( lua_State *L ) {
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	int index = 4;
 	uchar *array;
-	intptr_t from = luaL_optinteger(L,index+1,0);
-	intptr_t upto = luaL_optinteger(L,index+2,INTPTR_MAX);
+	tscan_t *tscan;
+	uintmax_t a;
+	uintmax_t from = luaL_optinteger(L,index+1,0);
+	uintmax_t upto = luaL_optinteger(L,index+2,INTPTR_MAX);
 	_Bool writable = lua_toboolean(L,index+3);
 	node_t limit = luaL_optinteger(L,index+4,100), count;
 	_Bool all;
+	
 	if ( limit > LONG_MAX ) limit = 100;
 	
-	if ( !(handle->handle) ) {
-		lua_newtable(L);
-		lua_pushinteger(L,0);
-		return 2;
-	}
-	
-	if ( handle->tscan.threadmade )
-		return lua_proc_handle__get_scan_list(L, handle, limit);
-	
-	if ( !(path = more_space(
-		&ret, &(handle->tscan.scan.space), strlen( GASP_PATH ) + UCHAR_MAX))
-	) {
-		ERRMSG( ret, "Couldn't allocate memory for scan path" );
-		lua_newtable(L);
-		lua_pushinteger(L,0);
-		return 2;
-	}
+	tscan = &(handle->tscan);
 	
 	count = luaL_optinteger(L,index+5,handle->scan_count);
 	all = luaL_optinteger(L,index+6,0);
-	if ( all ) count = 0;
-	if ( count < handle->scan_count || all )
-		lua_proc_handle_undo( handle, count, all );
-	else if ( count > handle->scan_count )
-		return 0;
-	if ( !(array = lua_extract_bytes(
-		NULL, L, index, &(handle->bytes) ))
+	if ( all ) {
+		count = 0;
+		tscan->last_found = 0;
+	}
+	
+	if ( !(array
+		= lua_extract_bytes( NULL, L, index, &(handle->bytes) )) )
+	{
+		lua_pushboolean( L, 0 );
+		return 1;
+	}
+	
+	if ( count > tscan->done_scans ||
+		!lua_proc_handle_prep_scan(
+			handle, count, tscan->last_found, from, upto, writable, ~0 )
 	)
 	{
-		fprintf( stderr, "2: %s\n", GASP_PATH );
-		lua_newtable(L);
-		lua_pushinteger(L,0);
-		return 2;
+		lua_pushboolean( L, 0 );
+		return 1;
 	}
 	
-	if ( access(GASP_PATH, F_OK) != 0 ) {
-		sprintf( path, "mkdir %s", GASP_PATH );
-		system(path);
-	}
-	
-	sprintf( path, "%s/scans", GASP_PATH );
-	if ( access(path, F_OK) != 0 ) {
-		sprintf( path, "mkdir %s/scans", GASP_PATH );
-		system(path);
-	}
-	
-	if ( !(handle->nth_scan) ) {
-		for ( handle->scan_instance = 0;
-			handle->scan_instance < LONG_MAX;
-			handle->scan_instance++
-		)
-		{
-			sprintf( path, "%s/scans/%lu",
-				GASP_PATH, (ulong)(handle->scan_instance) );
-			if ( access( path, F_OK ) != 0 ) {
-				sprintf( path, "mkdir %s/scans/%lu",
-					GASP_PATH, (ulong)(handle->scan_instance) );
-				system(path);
-				break;
-			}
+	/* Decide how we will clear memory */
+	for ( a = 0; a < tscan->bytes; ++a ) {
+		if ( array[a] ) {
+			tscan->zero = 0;
+			break;
 		}
-		handle->nth_scan = 1;
 	}
 	
-	handle->tscan.handle = handle->handle;
-	handle->tscan.array = array;
-	handle->tscan.bytes = handle->bytes.count;
-	handle->tscan.from = from;
-	handle->tscan.upto = upto;
-	handle->tscan.writeable = writable;
-	handle->tscan.done_upto = 0;
-	handle->tscan.done_scans = count;
-	
-	if ( count ) {
-		if ( (ret = open_dump_files(
-			&(handle->tscan.prev_dump), &(handle->tscan.scan),
-			handle->scan_instance, count )) != EXIT_SUCCESS ) {
-			ERRMSG( ret, "Couldn't open input file" );
-			lua_newtable(L);
-			lua_pushinteger(L,0);
-			return 2;
-		}
-		if ( (ret = open_dump_files(
-			&(handle->tscan.next_dump), &(handle->tscan.scan),
-			handle->scan_instance, count )) != EXIT_SUCCESS ) {
-			ERRMSG( ret, "Couldn't open output file" );
-			lua_newtable(L);
-			lua_pushinteger(L,0);
-			return 2;
-		}
-#if 1
-		pthread_create( &(handle->tscan.thread), NULL,
-			bytescanner, &(handle->tscan) );
-#else
-		count = proc_aobscan(
-			NULL,
-			handle->tscan.prev_dump.addr_fd,
-			handle->tscan.next_dump.addr_fd,
-			&(handle->tscan->scan), handle->handle,
-			array, handle->bytes.count, from, upto, writable );
-#endif
-	}
-	else {
-		if ( (ret = open_dump_files(
-			&(handle->tscan.next_dump), &(handle->tscan.scan),
-			handle->scan_instance, 0 )) != EXIT_SUCCESS ) {
-			ERRMSG( ret, "Couldn't open output file" );
-			lua_newtable(L);
-			lua_pushinteger(L,0);
-			return 2;
-		}
-#if 1
-		pthread_create( &(handle->tscan.thread), NULL,
-			bytescanner, &(handle->tscan) );
-#else
-		count = proc_aobinit(
-			NULL,
-			handle->tscan.next_dump.addr_fd,
-			&(handle->tscan->scan), handle->handle,
-			array, handle->bytes.count, from, upto, writable );
-#endif
-	}
-	if ( count > limit ) count = limit;
-	lua_createtable( L, count, 0 );
-	gasp_lseek( handle->tscan.next_dump.addr_fd, 0, SEEK_SET );
-	for ( i = 0; i < count; ++i ) {
-		gasp_read( handle->tscan.next_dump.addr_fd, &from, sizeof(void*) );
-		lua_pushinteger( L, i+1 );
-		lua_pushinteger( L, from );
-		lua_settable(L,-3);
-	}
-	lua_pushinteger( L, count - 1 );
+	pthread_create(
+		&(tscan->thread), NULL, proc_handle_dumper, &(handle->tscan) );
+
+	lua_pushboolean( L, 1 );
 	handle->scan_count++;
-	return 2;
+	return 1;
 }
 
 int lua_proc_handle_text( lua_State *L ) {
@@ -564,7 +730,8 @@ luaL_Reg lua_class_proc_handle_func_list[] = {
 	{ "valid", lua_proc_handle_valid },
 	{ "glance", lua_proc_handle_glance_data },
 	{ "change", lua_proc_handle_change_data },
-	{ "aobscan", lua_proc_handle_aobscan },
+	{ "dump", lua_proc_handle_dump },
+	{ "bytescan", lua_proc_handle_bytescan },
 	{ "doing_scan", lua_proc_handle_doing_scan },
 	{ "scan_found", lua_proc_handle_scan_found },
 	{ "scan_done_upto", lua_proc_handle_scan_done_upto },
@@ -640,11 +807,11 @@ void lua_proc_create_handle_class( lua_State *L ) {
 	/* _G["Foo"] = newclass */
 	lua_setglobal(L, PROC_HANDLE_CLASS );
 }
-#define PROC_MEMORY_CLASS "class_proc_memory"
+#define DUMP_CLASS "class_proc_memory"
 
 int lua_proc_memory_term( lua_State *L ) {
 	space_t *space = (space_t*)
-		luaL_checkudata(L,1,PROC_MEMORY_CLASS);
+		luaL_checkudata(L,1,DUMP_CLASS);
 	less_space( NULL, space, 0 );
 	return 0;
 }
@@ -652,14 +819,14 @@ int lua_proc_memory_term( lua_State *L ) {
 int lua_proc_memory_init( lua_State *L ) {
 	int want = luaL_checkinteger(L,2);
 	space_t *space = (space_t*)
-		luaL_checkudata(L,1,PROC_MEMORY_CLASS);
+		luaL_checkudata(L,1,DUMP_CLASS);
 	if ( space ) lua_proc_memory_term( L );
 	lua_pushboolean( L, !!more_space( NULL, space, want ) );
 	return 1;
 }
 
 int lua_proc_memory_text( lua_State *L ) {
-	lua_pushstring( L, PROC_MEMORY_CLASS );
+	lua_pushstring( L, DUMP_CLASS );
 	return 1;
 }
 int lua_proc_memory_grab( lua_State *L ) {
@@ -667,7 +834,7 @@ int lua_proc_memory_grab( lua_State *L ) {
 	if ( !space ) return 0;
 	space->given = 0;
 	space->block = NULL;
-	luaL_setmetatable(L,PROC_MEMORY_CLASS);
+	luaL_setmetatable(L,DUMP_CLASS);
 	return 1;
 }
 
@@ -681,7 +848,7 @@ luaL_Reg lua_class_proc_memory_func_list[] = {
 int lua_proc_memory_node( lua_State *L ) {
 	char const *name = NULL;
 	space_t *space = (space_t*)
-		luaL_checkudata(L,1,PROC_MEMORY_CLASS);
+		luaL_checkudata(L,1,DUMP_CLASS);
 	node_t num = 0;
 	int i, len = 0;
 	luaL_Reg *reg;
@@ -741,7 +908,7 @@ void lua_proc_create_memory_class( lua_State *L ) {
 	lib_id = lua_gettop(L);
 	
 	/* metatable = {} */
-	luaL_newmetatable(L, PROC_MEMORY_CLASS);
+	luaL_newmetatable(L, DUMP_CLASS);
 	meta_id = lua_gettop(L);
 	luaL_setfuncs(L, lua_class_proc_memory_meta_list, 0);
 	
@@ -757,7 +924,7 @@ void lua_proc_create_memory_class( lua_State *L ) {
 	lua_setmetatable( L, lib_id );
 
 	/* _G["Foo"] = newclass */
-	lua_setglobal(L, PROC_MEMORY_CLASS );
+	lua_setglobal(L, DUMP_CLASS );
 }
 void lua_create_proc_classes( lua_State *L ) {
 	lua_proc_create_glance_class(L);

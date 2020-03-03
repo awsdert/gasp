@@ -1,5 +1,5 @@
 local cfg = {
-	fps = 30,
+	fps = 60,
 	volume = 0.5,
 	clipboard = false,
 	anti_aliasing = false,

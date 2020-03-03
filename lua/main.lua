@@ -298,7 +298,9 @@ local function draw_cheat(ctx,font,v)
 	v = rebuild_cheat(v)
 	
 	GUI.keep_cheat = nil
-	
+	if v.from then
+		print("1")
+	end
 	if v.is_group == true then
 		return GUI.draw_cheats( ctx, font, v )
 	end
@@ -320,12 +322,29 @@ local function draw_cheat(ctx,font,v)
 
 	-- Method of changing the value
 	nk.label(ctx,v.method or "=",nk.TEXT_LEFT)
-	
+	if v.from then
+		print("2")
+	end
 	v = GUI.draw_desc_field(ctx,font,rebuild_cheat(v))
+	if v.from then
+		print("3")
+	end
 	v = GUI.draw_addr_field(ctx,font,rebuild_cheat(v))
+	if v.from then
+		print("4")
+	end
 	v = GUI.draw_type_field(ctx,font,rebuild_cheat(v))
+	if v.from then
+		print("5")
+	end
 	v = GUI.draw_size_field(ctx,font,rebuild_cheat(v))
+	if v.from then
+		print("6")
+	end
 	v = GUI.draw_cheat_edit(ctx,font,rebuild_cheat(v))
+	if v.from then
+		print("7")
+	end
 	GUI.keep_cheat = rebuild_cheat(v)
 	return rebuild_cheat(v)
 end

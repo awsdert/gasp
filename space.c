@@ -1,15 +1,16 @@
 #include "gasp.h"
 void* change_space( int *err, space_t *space, size_t want, int dir ) {
+	int ret = errno = EXIT_SUCCESS;
 	uchar *block;
-	errno = EXIT_SUCCESS;
 	if ( !space ) {
 		if ( !want ) {
 			released:
-			if ( err ) *err = EXIT_SUCCESS;
+			if ( err ) *err = ret;
 			return NULL;
 		}
-		if ( err ) *err = EDESTADDRREQ;
-		ERRMSG( EDESTADDRREQ, "Need somewhere to place allocated memory" );
+		ret = EDESTADDRREQ;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Need somewhere to place allocated memory" );
 		return NULL;
 	}
 	if ( want % 16 ) want += (16 - (want % 16));
@@ -19,7 +20,9 @@ void* change_space( int *err, space_t *space, size_t want, int dir ) {
 	}
 	/* Shrink */
 	if ( dir < 0 && want > space->given ) {
-		if ( err ) *err = ERANGE;
+		ret = ERANGE;
+		if ( err ) *err = ret;
+		ERRMSG( ret, "Tried to grow shrink-only memory" );
 		return NULL;
 	}
 	/* Expand */
@@ -37,23 +40,25 @@ void* change_space( int *err, space_t *space, size_t want, int dir ) {
 	if ( !(space->block) ) {
 		space->block = malloc( want );
 		if ( !(space->block) ) {
-			if ( err ) *err = errno;
 			space->given = 0;
-			return NULL;
+			goto failed;
 		}
-		if ( err ) *err = EXIT_SUCCESS;
+		if ( err ) *err = ret;
 		(void)memset( space->block, 0, want );
 		space->given = want;
 		return space->block;
 	}
 	block = realloc( space->block, want );
 	if ( !block ) {
+		failed:
+		if ( errno == EXIT_SUCCESS ) errno = ENOMEM;
+		ret = errno;
 		if ( err ) *err = errno;
 		return NULL;
 	}
 	if ( space->given < want )
 		(void)memset( block + space->given, 0, want - space->given );
-	if ( err ) *err = EXIT_SUCCESS;
+	if ( err ) *err = ret;
 	space->given = want;
 	return (space->block = block);
 }

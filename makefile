@@ -38,9 +38,10 @@ gasp_d_exe:=gasp-d.$(exe_ext)
 test_gasp_exe:=test-$(gasp_d_exe)
 deep_gasp_exe:=deep-$(gasp_exe)
 deep_gasp_d_exe:=deep-$(gasp_d_exe)
-PHONY_TARGETS:=makefile default all run gede test moon-libs
-PHONY_TARGETS+= rebuild clean libs build debug
-PHONY_TARGETS+= rebuild-all clean-all libs-all build-all debug-all
+BASIC_TARGETS:=rebuild clean libs build debug test
+PHONY_TARGETS:=makefile default all run gede moon-libs
+PHONY_TARGETS+= $(BASIC_TARGETS)
+PHONY_TARGETS+= $(BASIC_TARGETS:%=%-all)
 
 .PHONY: $(PHONY_TARGETS)
 default: run
@@ -88,8 +89,8 @@ DFLAGS=-ggdb -D _DEBUG
 RPATH:=$(call rpath,.)
 
 all: libs build debug
-rebuild: clean libs build debug
-rebuild-all: clean-all libs-all build-all debug-all
+rebuild-all: clean-all libs-all build-all debug-all test-all
+rebuild: clean libs build debug test
 
 libs-all: libs moon-libs
 libs:
@@ -134,6 +135,7 @@ run: build
 gede: debug
 	gede --args ./$(gasp_d_exe) $(ARGS)
 
+test-all: libs-all test
 test: $(deep_gasp_d_exe)
 	gede --args $(deep_gasp_d_exe)
 

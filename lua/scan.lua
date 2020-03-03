@@ -65,17 +65,23 @@ return function (ctx,now,prv)
 		end
 	end
 	
-	if done.count == 0  then
-		
-		nk.label( ctx, "From:", nk.TEXT_LEFT )
+	nk.label( ctx, "From:", nk.TEXT_LEFT )
+	if done.count == 0 then
 		tmp = GUI.draw_addr_field( ctx, font, { addr = scan.from } )
 		scan.from = tmp.addr
+	else
+		nk.label( ctx, string.format( "0x%X", scan.from ), nk.TEXT_LEFT )
+	end
 		
-		nk.label( ctx, "Upto:", nk.TEXT_LEFT )
+	nk.label( ctx, "Upto:", nk.TEXT_LEFT )
+	if done.count == 0 then
 		tmp = GUI.draw_addr_field( ctx, font, { addr = scan.upto } )
-		scan.upto = tmp.addr
-		
-		nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 3 )
+		scan.from = tmp.addr
+	else
+		nk.label( ctx, string.format( "0x%X", scan.upto ), nk.TEXT_LEFT )
+	end
+	if done.count == 0 then
+		nk.layout_row_dynamic( ctx, pad_height(font,"Dump"), 3 )
 		if nk.button( ctx, nil, "Dump" ) then
 			done = {
 				count = 1,
@@ -103,7 +109,7 @@ return function (ctx,now,prv)
 		if not GUI.handle or GUI.handle:valid() == false then
 			return GUI.use_ui(ctx,"cfg-proc",now)
 		end
-		if GUI.handle:doing_scan() == false then
+		if GUI.handle:thread_active() == false then
 			if done.just_dump == true then
 				GUI.handle:dump( scan.from,upto, true, scan.limit )
 				
@@ -132,7 +138,9 @@ return function (ctx,now,prv)
 	
 	if done.count > 0 then
 		list = nil
-		if GUI.handle:scan_done_upto() < done.upto then
+		if GUI.handle:dumping() then
+			list = done.list
+		elseif GUI.handle:scan_done_upto() < done.upto then
 			list = done.list
 		else
 			done.added = 0
@@ -165,10 +173,12 @@ return function (ctx,now,prv)
 	
 		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
 		
-		if GUI.handle:doing_scan() == true then
-			tmp = "Scan thread is running"
+		if GUI.handle:dumping() == true then
+			tmp = "Thread is dumping"
+		elseif GUI.handle:scanning() == true then
+			tmp = "Scan thread is scanning"
 		else
-			tmp = "Scan thread is not running"
+			tmp = "Thread is not running"
 		end
 		nk.label( ctx, tmp, nk.TEXT_LEFT )
 		

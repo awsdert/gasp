@@ -988,7 +988,7 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 			(void)memset( data, tscan->zero, i );
 			
 			if ( !(size = proc_glance_data(
-				NULL, handle, mapped.head, data + bytes, i )) )
+				NULL, handle, mapped.head, data, i )) )
 				break;
 			
 			if ( gasp_write( dump->data_fd, data, size ) != size )
@@ -1037,8 +1037,6 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	tscan->last_found = n;
 	return n;
 }
-
-#define SIZE_LIMIT (ULONG_MAX >> ((sizeof(long) * CHAR_BIT)/2))
 
 bool glance_dump( int *err, dump_t *dump, bool *both, size_t keep )
 {
@@ -1292,10 +1290,10 @@ void* proc_handle_bytescanner( void *_tscan ) {
 	}
 	
 	/* Reduce corrupted results */
-	(void)memset( &(tscan->dump[0].pmap), 0, sizeof(proc_mapped_t) );
-	(void)memset( &(tscan->dump[0].nmap), 0, sizeof(proc_mapped_t) );
-	(void)memset( &(tscan->dump[1].pmap), 0, sizeof(proc_mapped_t) );
-	(void)memset( &(tscan->dump[1].nmap), 0, sizeof(proc_mapped_t) );
+	(void)memset( tscan->dump[0].pmap, 0, sizeof(proc_mapped_t) );
+	(void)memset( tscan->dump[0].nmap, 0, sizeof(proc_mapped_t) );
+	(void)memset( tscan->dump[1].pmap, 0, sizeof(proc_mapped_t) );
+	(void)memset( tscan->dump[1].nmap, 0, sizeof(proc_mapped_t) );
 
 	/* Get file position correct before we start each instance of
 	 * proc_mapped_t object to file */

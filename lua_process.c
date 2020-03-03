@@ -521,10 +521,22 @@ int lua_proc_handle_scan_done_upto( lua_State *L ) {
 	lua_pushinteger( L, handle->tscan.done_upto );
 	return 1;
 }
-int lua_proc_handle_doing_scan( lua_State *L ) {
+int lua_proc_handle_thread_active( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	lua_pushboolean( L, handle->tscan.threadmade );
+	return 1;
+}
+int lua_proc_handle_scanning( lua_State *L ) {
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	lua_pushboolean( L, handle->tscan.scanning );
+	return 1;
+}
+int lua_proc_handle_dumping( lua_State *L ) {
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	lua_pushboolean( L, handle->tscan.dumping );
 	return 1;
 }
 
@@ -732,7 +744,9 @@ luaL_Reg lua_class_proc_handle_func_list[] = {
 	{ "change", lua_proc_handle_change_data },
 	{ "dump", lua_proc_handle_dump },
 	{ "bytescan", lua_proc_handle_bytescan },
-	{ "doing_scan", lua_proc_handle_doing_scan },
+	{ "dumping", lua_proc_handle_dumping },
+	{ "scanning", lua_proc_handle_scanning },
+	{ "thread_active", lua_proc_handle_thread_active },
 	{ "scan_found", lua_proc_handle_scan_found },
 	{ "scan_done_upto", lua_proc_handle_scan_done_upto },
 	{ "done_scans", lua_proc_handle_done_scans },

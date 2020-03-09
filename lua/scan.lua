@@ -80,8 +80,9 @@ return function (ctx,now,prv)
 	else
 		nk.label( ctx, string.format( "0x%X", scan.upto ), nk.TEXT_LEFT )
 	end
+	
+	nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 3 )
 	if done.count == 0 then
-		nk.layout_row_dynamic( ctx, pad_height(font,"Dump"), 3 )
 		if nk.button( ctx, nil, "Dump" ) then
 			done = {
 				count = 1,
@@ -92,9 +93,15 @@ return function (ctx,now,prv)
 				found = 0,
 				increment = math.ceil((scan.upto - scan.from) / 0x16)
 			}
+			if not GUI.handle or GUI.handle:valid() == false then
+				return GUI.use_ui(ctx,"cfg-proc",now)
+			end
+			if GUI.handle:thread_active() == false then
+				GUI.handle:dump( scan.from,upto, true, scan.limit )
+			end
 		end
 	else
-		nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 2 )
+		nk.label( ctx, "Done", nk.TEXT_CENTERED )
 	end
 	
 	if nk.button( ctx, nil, "Scan" ) then
@@ -110,15 +117,10 @@ return function (ctx,now,prv)
 			return GUI.use_ui(ctx,"cfg-proc",now)
 		end
 		if GUI.handle:thread_active() == false then
-			if done.just_dump == true then
-				GUI.handle:dump( scan.from,upto, true, scan.limit )
-				
-			else
-				GUI.handle:bytescan(
-					"table", scan.size, scan.as_bytes,
-					scan.from, scan.upto,
-					true, scan.limit, done.count - 1 )
-			end
+			GUI.handle:bytescan(
+				"table", scan.size, scan.as_bytes,
+				scan.from, scan.upto,
+				true, scan.limit, done.count - 1 )
 		end
 	end
 	
@@ -136,18 +138,44 @@ return function (ctx,now,prv)
 	scan.done = done
 	GUI.scan = scan
 	
+	scan.dumping = GUI.handle:dumping()
+	scan.scanning = GUI.handle:scanning()
+	
 	if done.count > 0 then
-		list = nil
-		if GUI.handle:dumping() then
-			list = done.list
-		elseif GUI.handle:scan_done_upto() < done.upto then
-			list = done.list
+	
+		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
+		
+		if scan.dumping == true then
+			tmp = "Thread is dumping"
+		elseif scan.scanning == true then
+			tmp = "Scan thread is scanning"
 		else
+			tmp = "Thread is not running"
+		end
+		nk.label( ctx, tmp, nk.TEXT_LEFT )
+		
+		tmp = GUI.handle:scan_done_upto()
+		nk.progress( ctx, tmp, scan.upto, nk.FIXED )
+		
+		if scan.dumping == true then
+			tmp = string.format( "Dumping from 0x%X", tmp )
+		else
+			tmp = string.format( "Scanned upto 0x%X", tmp )
+		end
+		nk.label( ctx, tmp, nk.TEXT_LEFT )
+		
+		if scan.dumping == true then
+			list = done.list or {}
+		elseif scan.scanning == true and
+			GUI.handle:scan_done_upto() < done.upto
+		then
+			list = done.list or {}
+		else
+			list = {}
 			done.added = 0
 			done.addr, done.found, tmp =
 				GUI.handle:get_scan_list(done.count - 1,scan.limit)
 			if done.found > 0 then
-				list = {}
 				for i = 1,done.found,1 do
 					if i == scan.limit then break end
 					list[i] = rebuild_cheat(scan)
@@ -162,39 +190,16 @@ return function (ctx,now,prv)
 					list[i].active = false
 				end
 			end
-			done.added = i;
 			done.upto = done.upto + done.increment
 			if done.upto > scan.upto then done.upto = scan.upto end
 		end
-		done.list = list
-	end
-	
-	if done.count > 0 then
-	
-		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
 		
-		if GUI.handle:dumping() == true then
-			tmp = "Thread is dumping"
-		elseif GUI.handle:scanning() == true then
-			tmp = "Scan thread is scanning"
-		else
-			tmp = "Thread is not running"
-		end
-		nk.label( ctx, tmp, nk.TEXT_LEFT )
-		
-		tmp = GUI.handle:scan_done_upto()
-		nk.progress( ctx, tmp, scan.upto, nk.FIXED )
-		
-		tmp = string.format( "Scanned upto 0x%X", tmp )
-		nk.label( ctx, tmp, nk.TEXT_LEFT )
-		
-		done.desc = string.format( "Showing %d of %d Results",
-			#(done.list or {}), done.found )
-		
-		nk.label( ctx, done.desc, nk.TEXT_LEFT )
-		
-		if done.list then
-			GUI.draw_cheat( ctx, font, done )
+		if #list > 0 then
+			done.desc = string.format( "Showing %d of %d Results",
+			#list, done.found )
+			nk.label( ctx, done.desc, nk.TEXT_LEFT )
+			done.list = list
+			done = GUI.draw_cheat( ctx, font, done )
 		end
 	end
 	scan.done = done

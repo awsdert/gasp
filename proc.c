@@ -983,6 +983,13 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 		ret = errno;
 		goto done;
 	}
+	
+	/* Since this is a dump set all address booleans to true,
+	 * a later scan can simply override the values,
+	 * we use ~0 now because it's bit scan friendly,
+	 * not that we're doing those yet */
+	(void)memset( used, ~0, DUMP_MAX_SIZE );
+	
 	while ( next_mapped( &ret, handle, *dump, &mapped )  )
 	{
 		tscan->done_upto = mapped.head;
@@ -1024,17 +1031,14 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 				goto done;
 			}
 		
-			/* Since this is a dump set all address booleans to true,
-			 * a later scan can simply override the values,
-			 * we use ~0 now because it's bit scan friendly,
-			 * not that we're doing those yet */
-			(void)memset( used, ~0, size );
-		
 			if ( gasp_write( dump->used_fd, used, size ) != size )
 			{
 				ret = errno;
 				goto done;
 			}
+			
+			fsync( dump->used_fd );
+			fsync( dump->data_fd );
 		}
 		
 		if ( bytes == mapped.size ) {			
@@ -1060,6 +1064,7 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 		ret = errno;
 	
 	done:
+	fsync( dump->info_fd );
 	tscan->ret = ret;
 	tscan->last_found = n;
 	return n;
@@ -1199,6 +1204,8 @@ bool change_dump(
 		gasp_write( dump->data_fd, data, size );
 	}
 	
+	fsync( dump->used_fd );
+	fsync( dump->data_fd );
 	return 1;
 }
 

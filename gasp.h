@@ -222,7 +222,7 @@ typedef struct tscan {
 	bool scanning;
 	bool threadmade;
 	bool pipesmade;
-	int main_pipe[2], scan_pipe[2], zero;
+	int main_pipes[2], scan_pipes[2], zero;
 	pthread_t thread;
 	int ret;
 	dump_t dump[2];
@@ -318,6 +318,8 @@ mode_t file_change_perm(
  * @return Handle of process or NULL
 **/
 proc_handle_t* proc_handle_open( int *err, int pid );
+bool gasp_tpolli( int int_pipes[2], int *sig, int msTimeout );
+bool gasp_tpollo( int ext_pipes[2], int sig, int msTimeout );
 /** @brief used to load the next dumpped region into memory, appends
  * to existing first then if not a boundary match (meaning
  * prev foot not equal to next head)
@@ -329,41 +331,6 @@ bool glance_dump( int *err, dump_t *dump, bool *both, size_t keep );
 void proc_handle_shut(
 	proc_handle_t* handle );
 node_t proc_handle_dump( tscan_t *tscan );
-/** @brief Scans process mapped pages for array between from and upto
- * @param err Where to pass errors to
- * @param prev_fd File descriptor of file to read address list into
- * @param next_fd File descriptor of file to write address list into
- * @param handle Handle opened with proc_handle_open()
- * @param array Array of bytes to look for
- * @param bytes Number of bytes in array
- * @param from Where to start search
- * @param upto Where to end search
- * @param writable Must be writable if this is true
- * @return Count of addresses that matched/where written to file
-**/
-node_t proc_aobscan(
-	int *err, int prev_fd, int next_fd, scan_t *scan,
-	proc_handle_t *handle,
-	uchar *array, uintmax_t bytes,
-	uintmax_t from, uintmax_t upto,
-	bool writable );
-/** @brief Scans process mapped pages for array between from and upto
- * @param err Where to pass errors to
- * @param init_fd File descriptor of file to write address list into
- * @param handle Handle opened with proc_handle_open()
- * @param array Array of bytes to look for
- * @param bytes Number of bytes in array
- * @param from Where to start search
- * @param upto Where to end search
- * @param writable Must be writable if this is true
- * @return Count of addresses that matched/where written to file
-**/
-node_t proc_aobinit(
-	int *err, int init_fd, scan_t *scan,
-	proc_handle_t *handle,
-	uchar *array, uintmax_t bytes,
-	uintmax_t from, uintmax_t upto,
-	bool writable );
 /** @brief Reads what was in memory at the time of the read/pread call
  * @param err Where to pass errors to
  * @param handle Handle opened with proc_handle_open()

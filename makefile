@@ -89,8 +89,8 @@ DFLAGS=-ggdb -D _DEBUG
 RPATH:=$(call rpath,.)
 
 all: libs build debug
-rebuild-all: clean-all libs-all build-all debug-all test-all
-rebuild: clean libs build debug test
+rebuild-all: clean-all libs-all build-all debug-all
+rebuild: clean libs build debug
 
 libs-all: libs moon-libs
 libs:

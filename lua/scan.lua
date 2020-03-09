@@ -76,7 +76,7 @@ return function (ctx,now,prv)
 	nk.label( ctx, "Upto:", nk.TEXT_LEFT )
 	if done.count == 0 then
 		tmp = GUI.draw_addr_field( ctx, font, { addr = scan.upto } )
-		scan.from = tmp.addr
+		scan.upto = tmp.addr
 	else
 		nk.label( ctx, string.format( "0x%X", scan.upto ), nk.TEXT_LEFT )
 	end

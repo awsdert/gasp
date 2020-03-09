@@ -187,43 +187,19 @@ typedef struct lua_proc_handle {
 	nodes_t bytes;
 } lua_proc_handle_t;
 
-void lua_proc_handle__set_rdwr(
+bool lua_proc_handle__set_rdwr(
 	lua_proc_handle_t *handle, bool want2rdwr
 )
 {
-	int ret = SIGSTOP;
 	tscan_t *tscan;
-	struct pollfd pfd = {0};
-	node_t n = 0;
 	
-	if ( !handle || !(handle->tscan.threadmade) ) return;
+	if ( !handle ) return 0;
 	tscan = &(handle->tscan);
+	if ( !(tscan->threadmade) ) return 1;
 	
-	pfd.fd = tscan->scan_pipe[0];
-	pfd.events = POLLIN;
-	if ( !want2rdwr ) {
-		ret = SIGCONT;
-		tscan->wants2rdwr = 0;
-		write( tscan->scan_pipe[1], &ret, sizeof(int) );
-		return;
-	}
-	
-	tscan->wants2rdwr = 1;
-	write( tscan->scan_pipe[1], &ret, sizeof(int) );
-	ret = SIGKILL;
-	while ( ret != SIGCONT ) {
-		while ( poll( &pfd, 1, 1000 ) == 0 );
-		read( tscan->main_pipe[0], &ret, sizeof(int) );
-		switch ( ret ) {
-		case SIGKILL: fputs( "SIGKILL\n", stderr ); break;
-		case SIGSTOP: fputs( "SIGSTOP\n", stderr ); break;
-		case SIGCONT: fputs( "SIGCONT\n", stderr ); break;
-		default: fprintf( stderr, "%d\n", ret ); break;
-		}
-		/* Prevent hanging */
-		if ( n > UCHAR_MAX ) exit(1);
-		++n;
-	}
+	tscan->wants2rdwr = want2rdwr;
+	return gasp_tpollo(
+		tscan->scan_pipes, want2rdwr ? SIGSTOP : SIGCONT, -1 );
 }
 
 int lua_proc_handle__ret_empty_list( lua_State *L, node_t done ) {
@@ -366,16 +342,23 @@ bool lua_proc_handle__nth_scan( lua_proc_handle_t *handle ) {
 
 void lua_proc_handle_shutfiles( lua_proc_handle_t *handle )
 {
-	int ret = SIGKILL;
+	int ret = SIGSTOP;
 	tscan_t *tscan = &(handle->tscan);
-	struct pollfd pfd = {0};
-	pfd.fd = tscan->main_pipe[0];
-	pfd.events = 0;
 	
 	if ( tscan->pipesmade ) {
-		write( tscan->scan_pipe[1], &ret, sizeof(int) );
-		while ( poll( &pfd, 1, 1000 ) == 0 );
+		if ( tscan->threadmade ) {
+			(void)gasp_tpollo( tscan->scan_pipes, SIGKILL, -1 );
+			(void)gasp_tpolli( tscan->main_pipes, &ret, -1 );
+		}
+		close( tscan->main_pipes[0] );
+		close( tscan->main_pipes[1] );
+		close( tscan->scan_pipes[0] );
+		close( tscan->scan_pipes[1] );
+		tscan->main_pipes[0] = tscan->main_pipes[1] = -1;
+		tscan->scan_pipes[0] = tscan->scan_pipes[1] = -1;
+		tscan->pipesmade = 0;
 	}
+	
 	/* sleep call is needed here to ensure system passes execution to
 	 * the other thread when it exists on the same CPU core */
 	shut_dump_files( &(handle->tscan.dump[0]) );
@@ -598,27 +581,27 @@ bool lua_proc_handle_prep_scan(
 	tscan->threadmade = 0;
 	tscan->found = 0;
 	tscan->last_found = last_found;
-	tscan->main_pipe[0] = -1;
-	tscan->main_pipe[1] = -1;
-	tscan->scan_pipe[0] = -1;
-	tscan->scan_pipe[1] = -1;
+	tscan->main_pipes[0] = -1;
+	tscan->main_pipes[1] = -1;
+	tscan->scan_pipes[0] = -1;
+	tscan->scan_pipes[1] = -1;
 	tscan->zero = zero;
 	
-	if ( pipe2( tscan->main_pipe, 0 ) == -1 )
+	if ( pipe2( tscan->main_pipes, 0 ) == -1 )
 		return 0;
-	if ( pipe2( tscan->scan_pipe, 0 ) == -1 )
+	if ( pipe2( tscan->scan_pipes, 0 ) == -1 )
 	{
-		close( tscan->main_pipe[0] );
-		close( tscan->main_pipe[1] );
+		close( tscan->main_pipes[0] );
+		close( tscan->main_pipes[1] );
 		return 0;
 	}
 	
 	if ( (ret = open_dump_files(
 		dump, handle->scan_instance, done )) != EXIT_SUCCESS ) {
-		close( tscan->main_pipe[0] );
-		close( tscan->main_pipe[1] );
-		close( tscan->scan_pipe[0] );
-		close( tscan->scan_pipe[1] );
+		close( tscan->main_pipes[0] );
+		close( tscan->main_pipes[1] );
+		close( tscan->scan_pipes[0] );
+		close( tscan->scan_pipes[1] );
 		ERRMSG( ret, "Couldn't open output file" );
 		return 0;
 	}
@@ -628,10 +611,10 @@ bool lua_proc_handle_prep_scan(
 		!= EXIT_SUCCESS
 	)
 	{
-		close( tscan->main_pipe[0] );
-		close( tscan->main_pipe[1] );
-		close( tscan->scan_pipe[0] );
-		close( tscan->scan_pipe[1] );
+		close( tscan->main_pipes[0] );
+		close( tscan->main_pipes[1] );
+		close( tscan->scan_pipes[0] );
+		close( tscan->scan_pipes[1] );
 		shut_dump_files( dump );
 		ERRMSG( ret, "Couldn't open input file" );
 		return 0;

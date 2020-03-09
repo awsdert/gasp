@@ -868,6 +868,48 @@ typedef uintmax_t (*func_proc_handle_rdwr_t)(
 		uintmax_t addr, void *buff, uintmax_t size
 );
 
+bool gasp_tpolli( int int_pipes[2], int *sig, int msTimeout )
+{
+	struct pollfd pfd = {0};
+	pfd.fd = int_pipes[0];
+	pfd.events = POLLIN;
+	if ( poll( &pfd, 1, msTimeout ) != 1 )
+		return 0;
+	read( int_pipes[0], sig, sizeof(int) );
+	return 1;
+}
+
+bool gasp_tpollo( int ext_pipes[2], int sig, int msTimeout )
+{
+	struct pollfd pfd = {0};
+	pfd.fd = ext_pipes[1];
+	pfd.events = POLLOUT;
+	if ( poll( &pfd, 1, msTimeout ) <= 0 )
+		return 0;
+	write( ext_pipes[1], &sig, sizeof(int) );
+	return 1;
+}
+
+bool gasp_thread_should_die( int ext_pipes[2], int int_pipes[2] )
+{
+	int ret = SIGCONT;
+	if ( !gasp_tpolli( int_pipes, &ret, 1 ) )
+		return 0;
+	switch ( ret )
+	{
+	case SIGKILL:
+		return 1;
+	case SIGCONT:
+	case SIGSTOP:
+		if ( !gasp_tpollo( ext_pipes, SIGCONT, -1 ) )
+			return 1;
+		if ( !gasp_tpolli( int_pipes, &ret, -1 ) )
+			return 1;
+		return (ret != SIGCONT);
+	}
+	return 0;
+}
+
 node_t proc_handle_dump( tscan_t *tscan ) {
 	int ret;
 	node_t n = 0;
@@ -878,7 +920,6 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	uintmax_t i, bytes;
 	ssize_t size;
 	mode_t prot = 04;
-	struct pollfd pfd = {0};
 	func_proc_handle_dump_next next_mapped;
 	
 	if ( !tscan ) return 0;
@@ -893,8 +934,6 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 		tscan->done_scans
 			? proc_handle_dump_nextbyfile
 			: proc_handle_dump_nextbyproc;
-	pfd.fd = tscan->scan_pipe[0];
-	pfd.events = POLLIN;
 	
 	if ( !(tscan->upto) || tscan->upto < tscan->from )
 		tscan->upto = UINTMAX_C(~0);
@@ -964,24 +1003,12 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 			i = mapped.size - bytes;
 			if ( i > DUMP_MAX_SIZE ) i = DUMP_MAX_SIZE;
 			
-			if ( poll( &pfd, 1, 100 ) )
+			if ( gasp_thread_should_die(
+				tscan->main_pipes, tscan->scan_pipes )
+			)
 			{
-				read( tscan->scan_pipe[0], &ret, sizeof(int) );
-				switch ( ret )
-				{
-				case SIGKILL:
-					tscan->ret = EXIT_FAILURE;
-					return 0;
-				case SIGSTOP:
-					ret = SIGCONT;
-					write( tscan->main_pipe[1], &ret, sizeof(int) );
-					ret = SIGSTOP;
-					while ( ret != SIGCONT )
-					{
-						while ( poll( &pfd, 1, 1000 ) == 0 );
-						read( tscan->scan_pipe[0], &ret, sizeof(int) );
-					}
-				}
+				tscan->ret = EXIT_FAILURE;
+				return 0;
 			}
 			
 			/* Prevent unread memory from corrupting locations found */
@@ -1086,11 +1113,13 @@ bool glance_dump( int *err, dump_t *dump, bool *both, size_t keep )
 	{
 		if ( errno == EXIT_SUCCESS ) errno = EIO;
 		ret = errno;
+		ERRMSG( ret, "Failed to read info file" );
 		goto failure;
 	}
 	
 	if ( !(nmap->size) ) {
 		ret = EINVAL;
+		ERRMSG( ret, "Invalid region size recorded" );
 		goto failure;
 	}
 	
@@ -1102,6 +1131,7 @@ bool glance_dump( int *err, dump_t *dump, bool *both, size_t keep )
 	{
 		if ( errno == EXIT_SUCCESS ) errno = EIO;
 		ret = errno;
+		ERRMSG( ret, "Failed to read used addresses file" );
 		goto failure;
 	}
 	if ( gasp_read( dump->data_fd,
@@ -1109,6 +1139,7 @@ bool glance_dump( int *err, dump_t *dump, bool *both, size_t keep )
 	{
 		if ( errno == EXIT_SUCCESS ) errno = EIO;
 		ret = errno;
+		ERRMSG( ret, "Failed to read dump file" );
 		goto failure;
 	}
 	
@@ -1130,7 +1161,6 @@ bool glance_dump( int *err, dump_t *dump, bool *both, size_t keep )
 	
 	failure:
 	if ( err ) *err = ret;
-	ERRMSG( ret, "Failed to read dump file" );
 	if ( ret == ENOMEM ) {
 		fprintf( stderr, "Requested 0x%08jX bytes\n", size );
 	}
@@ -1172,45 +1202,33 @@ bool change_dump(
 	return 1;
 }
 
-bool bytescanner_read_mapped(
+bool proc_handle__aobscan_next(
 	tscan_t *tscan, dump_t *dump, bool *both )
 {
 	int ret = 0;
-	struct pollfd pfd = {0};
 	if ( !tscan ) return 0;
-	
-	pfd.fd = tscan->scan_pipe[0];
-	pfd.events = POLLIN;
-	
-	if ( poll( &pfd, 1, 100 ) )
+	if ( gasp_thread_should_die(
+		tscan->main_pipes, tscan->scan_pipes ) )
 	{
-		read( tscan->scan_pipe[0], &ret, sizeof(int) );
-		switch ( ret )
-		{
-		case SIGKILL:
-			tscan->ret = EXIT_FAILURE;
-			return 0;
-		case SIGSTOP:
-			ret = SIGCONT;
-			write( tscan->main_pipe[1], &ret, sizeof(int) );
-			ret = SIGSTOP;
-			while ( ret != SIGCONT )
-			{
-				while ( poll( &pfd, 1, 1000 ) == 0 );
-				read( tscan->scan_pipe[0], &ret, sizeof(int) );
-			}
-		}
+		tscan->ret = EXIT_FAILURE;
+		return 0;
 	}
-	
 	return glance_dump( &ret, dump, both, tscan->bytes - 1 );
 }
 
-bool bytescanner_cmp_and_add( tscan_t *tscan, bool both )
+bool proc_handle__aobscan_test( tscan_t *tscan, bool both )
 {
 	uchar *used, *data;
 	uintmax_t addr, minus, a, stop;
 	dump_t *dump;
 	if ( !tscan ) return 0;
+	if ( gasp_thread_should_die(
+		tscan->main_pipes, tscan->scan_pipes )
+	)
+	{
+		tscan->ret = EXIT_FAILURE;
+		return 0;
+	}
 	minus = tscan->bytes - 1;
 	dump = &(tscan->dump[1]);
 	used = dump->used;
@@ -1232,12 +1250,11 @@ bool bytescanner_cmp_and_add( tscan_t *tscan, bool both )
 	return both;
 }
 
-void* proc_handle_bytescanner( void *_tscan ) {
-	tscan_t *tscan = (tscan_t*)_tscan;
+void* proc_handle_aobscan( tscan_t *tscan ) {
 	uchar *buff = NULL, *used;
-	uintmax_t stop = 0, minus = tscan->bytes - 1;
+	uintmax_t stop = 0, minus;
 	mode_t prot = 04;
-	node_t a, number = 0, count = 0;
+	node_t a, number = 0, regions = 0;
 	bool pboth = 0, both = 0;
 	
 	if ( !tscan ) {
@@ -1246,19 +1263,9 @@ void* proc_handle_bytescanner( void *_tscan ) {
 		return NULL;
 	}
 	
-	tscan->scanning = 1;
+	minus = tscan->bytes - 1;
 	tscan->found = 0;
 	tscan->done_upto = 0;
-	
-	if ( tscan->main_pipe[0] <= 0 || tscan->scan_pipe[0] <= 0 )
-	{
-		if ( tscan->main_pipe[0] > 0 ) close( tscan->main_pipe[0] );
-		if ( tscan->main_pipe[1] > 0 ) close( tscan->main_pipe[1] );
-		if ( tscan->scan_pipe[0] > 0 ) close( tscan->scan_pipe[0] );
-		if ( tscan->scan_pipe[1] > 0 ) close( tscan->scan_pipe[1] );
-		tscan->threadmade = 0;
-		return _tscan;
-	}
 	
 	if ( minus > tscan->bytes ) {
 		tscan->ret = EINVAL;
@@ -1275,7 +1282,7 @@ void* proc_handle_bytescanner( void *_tscan ) {
 		proc__rwvmem_test(tscan->handle, tscan->array, tscan->bytes ))
 		!= EXIT_SUCCESS ){
 		fprintf( stderr, "Failed at proc__rwvmen_test()\n" );
-		return _tscan;
+		return tscan;
 	}
 	
 	if ( gasp_lseek( tscan->dump[1].used_fd, 0, SEEK_SET ) < 0 ) {
@@ -1298,11 +1305,11 @@ void* proc_handle_bytescanner( void *_tscan ) {
 	/* Get file position correct before we start each instance of
 	 * proc_mapped_t object to file */
 	write( tscan->dump[1].info_fd, &number, sizeof(node_t) );
-	write( tscan->dump[1].info_fd, &count, sizeof(node_t) );
-	count = 0;
+	write( tscan->dump[1].info_fd, &regions, sizeof(node_t) );
 	if ( !(tscan->done_scans) ) {
 		while (
-			bytescanner_read_mapped( tscan, tscan->dump + 1, &both )
+			regions-- &&
+			proc_handle__aobscan_next( tscan, tscan->dump + 1, &both )
 		)
 		{
 			fprintf( stderr, "%p-%p\n",
@@ -1313,7 +1320,7 @@ void* proc_handle_bytescanner( void *_tscan ) {
 			used = tscan->dump[1].used;
 			/* Ensure we check all addresses */
 			for ( a = 0; a < stop; ++a ) used[a] = ~0;
-			if ( !bytescanner_cmp_and_add( tscan, both ) )
+			if ( !proc_handle__aobscan_test( tscan, both ) )
 				goto set_found;
 			
 		}
@@ -1328,7 +1335,7 @@ void* proc_handle_bytescanner( void *_tscan ) {
 		
 		/* Align pointer to where the proc_mapped_t objects begin */
 		read( tscan->dump[0].info_fd, &number, sizeof(node_t) );
-		read( tscan->dump[0].info_fd, &count, sizeof(node_t) );
+		read( tscan->dump[0].info_fd, &regions, sizeof(node_t) );
 		
 		/* Make sure we're are not attempting to compare against
 		 * incorrect results */
@@ -1342,18 +1349,18 @@ void* proc_handle_bytescanner( void *_tscan ) {
 			tscan->ret = errno;
 			goto set_found;
 		}
-		while ( count-- &&
-			bytescanner_read_mapped( tscan, tscan->dump, &pboth )
+		while ( regions-- &&
+			proc_handle__aobscan_next( tscan, tscan->dump, &pboth )
 		)
 		{
-			if ( !bytescanner_read_mapped(
+			if ( !proc_handle__aobscan_next(
 				tscan, tscan->dump + 1, &both ) || pboth != both )
 				goto set_found;
 			buff = tscan->dump[0].used;
 			used = tscan->dump[1].used;
 			/* Ensure we check all addresses */
 			for ( a = 0; a < stop; ++a ) used[a] = buff[a];
-			if ( !bytescanner_cmp_and_add( tscan, both ) )
+			if ( !proc_handle__aobscan_test( tscan, both ) )
 				goto set_found;
 		}
 	}
@@ -1362,46 +1369,31 @@ void* proc_handle_bytescanner( void *_tscan ) {
 	set_found:
 	
 	tscan->last_found = tscan->found;
-	if ( gasp_lseek( tscan->dump[1].info_fd, 0, SEEK_SET ) == 0 )
-		write( tscan->dump[1].info_fd, &(tscan->found), sizeof(node_t) );
 	tscan->done_scans++;
-	
-	close( tscan->scan_pipe[1] );
-	close( tscan->scan_pipe[0] );
-	close( tscan->main_pipe[1] );
-	close( tscan->main_pipe[0] );
-	tscan->scan_pipe[1] = -1;
-	tscan->scan_pipe[0] = -1;
-	tscan->main_pipe[1] = -1;
-	tscan->main_pipe[0] = -1;
 	
 	if ( tscan->ret != EXIT_SUCCESS )
 		ERRMSG( tscan->ret, "Byte scan failed to run fully" );
-	tscan->scanning = 0;
-	tscan->threadmade = 0;
-	return _tscan;
+	return tscan;
 }
 
 void* proc_handle_dumper( void * _tscan ) {
 	tscan_t *tscan = _tscan;
+	
 	if ( !tscan ) return NULL;
 	tscan->threadmade = 1;
 	tscan->found = 0;
-	if ( tscan->main_pipe[0] <= 0 || tscan->scan_pipe[0] <= 0 )
-	{
-		if ( tscan->main_pipe[0] > 0 ) close( tscan->main_pipe[0] );
-		if ( tscan->main_pipe[1] > 0 ) close( tscan->main_pipe[1] );
-		if ( tscan->scan_pipe[0] > 0 ) close( tscan->scan_pipe[0] );
-		if ( tscan->scan_pipe[1] > 0 ) close( tscan->scan_pipe[1] );
-		tscan->threadmade = 0;
-		return _tscan;
-	}
-	(void)memset( tscan->dump[0].used, ~0, DUMP_MAX_SIZE );
+	
 	tscan->dumping = 1;
-	tscan->last_found = proc_handle_dump( tscan	);
-	tscan->scanning = 1;
+	(void)proc_handle_dump( tscan );
 	tscan->dumping = 0;
-	return proc_handle_bytescanner( _tscan );
+	
+	tscan->scanning = 1;
+	(void)proc_handle_aobscan( tscan );
+	tscan->scanning = 0;
+	
+	gasp_tpollo( tscan->main_pipes, SIGCONT, 0 );
+	tscan->threadmade = 0;
+	return _tscan;
 }
 
 char const * substr( char const * src, char const *txt ) {

@@ -195,6 +195,14 @@ typedef struct proc_handle {
 #define DUMP_BUF_SIZE BUFSIZ
 #define DUMP_MAX_SIZE (DUMP_BUF_SIZE * 2)
 typedef struct dump {
+	/* Scan number */
+	node_t number;
+	/* Regions left */
+	node_t region;
+	/* How many bytes are kept from previous part of region if
+	 * in same region or foot of last region matches head of current
+	 * region */
+	size_t kept;
 	int info_fd;
 	int used_fd;
 	int data_fd;
@@ -209,9 +217,10 @@ typedef struct dump {
 	uchar used[DUMP_MAX_SIZE], data[DUMP_MAX_SIZE];
 } dump_t;
 
-int open_dump_files( dump_t *dump, long inst, long done );
-int check_dump( dump_t dump );
-void shut_dump_files( dump_t *dump );
+int dump_files_open( dump_t *dump, long inst, long done );
+int dump_files_test( dump_t dump );
+void dump_files_shut( dump_t *dump );
+int dump_files_reset_offsets( dump_t *dump, bool read_info );
 
 typedef struct tscan {
 	bool wants2rdwr;
@@ -324,7 +333,7 @@ bool gasp_tpollo( int ext_pipes[2], int sig, int msTimeout );
  * to existing first then if not a boundary match (meaning
  * prev foot not equal to next head)
 **/
-bool glance_dump( int *err, dump_t *dump, bool *both, size_t keep );
+bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep );
 /** @brief Deallocates any memory before deallocating the handle itself
  * @param handle The process handle to deallocate
 **/

@@ -213,7 +213,7 @@ bool lua_proc_handle__set_rdwr(
 	)
 	{
 		if ( want2rdwr )
-			return gasp_tpolli( tscan->scan_pipes, &ret, -1 );
+			return gasp_tpolli( tscan->main_pipes, &ret, -1 );
 	}
 	return 1;
 }
@@ -230,14 +230,12 @@ int lua_proc_handle__get_scan_list(
 )
 {
 	int ret;
-	uintmax_t addr = 0;
 	node_t i, a, stop, count = 0;
-	dump_t *dump;
-	proc_mapped_t _pmap, _nmap, *pmap, *nmap;
+	dump_t *dump, _dump = {0};
+	//proc_mapped_t _pmap, _nmap, *pmap, *nmap;
 	uchar *used;
 	intmax_t ipos, upos, dpos;
-	uintmax_t minus;
-	bool both = 0;
+	uintmax_t addr, minus;
 	tscan_t *tscan;
 	
 	if ( !L )
@@ -254,11 +252,8 @@ int lua_proc_handle__get_scan_list(
 	/* Pause thread */
 	if ( !lua_proc_handle__set_rdwr(handle,1) )
 		return lua_proc_handle__ret_empty_list(L,tscan->done_scans,tscan->found);
-	/* Grab current positions so can restore them later */
-	pmap = dump->pmap;
-	nmap = dump->nmap;
-	_pmap = *pmap;
-	_nmap = *nmap;
+	/* Grab current state */
+	_dump = *dump;
 	ipos = gasp_lseek( dump->info_fd, 0, SEEK_CUR );
 	upos = gasp_lseek( dump->used_fd, 0, SEEK_CUR );
 	dpos = gasp_lseek( dump->data_fd, 0, SEEK_CUR );
@@ -280,17 +275,15 @@ int lua_proc_handle__get_scan_list(
 	}
 	
 	/* Move pointers to where we want them*/
-	gasp_lseek( dump->info_fd, sizeof(node_t) * 2, SEEK_SET );
-	gasp_lseek( dump->used_fd, 0, SEEK_SET );
-	gasp_lseek( dump->data_fd, 0, SEEK_SET );
+	dump_files_reset_offsets( dump, 1 );
 	
 	/* Read through scanned regions for addresses to declare */
-	while ( glance_dump( &ret, dump, &both, tscan->bytes )
+	while ( dump_files_glance_stored( &ret, dump, tscan->bytes )
 		|| ret == ERANGE )
 	{
-		addr = dump->addr;
 		stop = dump->size - minus;
 		used = dump->used;
+		addr = dump->addr;
 		for ( a = 0; a < stop; ++a, ++addr ) {
 			if ( used[a] ) {
 				lua_pushinteger( L, ++i );
@@ -303,9 +296,8 @@ int lua_proc_handle__get_scan_list(
 	}
 	
 	done:
-	/* Restore position data */
-	*pmap = _pmap;
-	*nmap = _nmap;
+	/* Restore prior state */
+	*dump = _dump;
 	gasp_lseek( dump->info_fd, ipos, SEEK_SET );
 	gasp_lseek( dump->used_fd, upos, SEEK_SET );
 	gasp_lseek( dump->data_fd, dpos, SEEK_SET );
@@ -383,8 +375,8 @@ void lua_proc_handle_shutfiles( lua_proc_handle_t *handle )
 	
 	/* sleep call is needed here to ensure system passes execution to
 	 * the other thread when it exists on the same CPU core */
-	shut_dump_files( &(handle->tscan.dump[0]) );
-	shut_dump_files( &(handle->tscan.dump[1]) );
+	dump_files_shut( &(handle->tscan.dump[0]) );
+	dump_files_shut( &(handle->tscan.dump[1]) );
 }
 
 bool lua_proc_handle_undo( lua_proc_handle_t *handle, node_t count, bool all )
@@ -430,8 +422,8 @@ int lua_proc_handle_term( lua_State *L ) {
 	lua_proc_handle_undo( handle, 0, 1 );
 	proc_handle_shut( handle->handle );
 	handle->handle = NULL;
-	shut_dump_files( &(handle->tscan.dump[0]) );
-	shut_dump_files( &(handle->tscan.dump[1]) );
+	dump_files_shut( &(handle->tscan.dump[0]) );
+	dump_files_shut( &(handle->tscan.dump[1]) );
 	free_nodes( uchar, NULL, &(handle->bytes) );
 	return 0;
 }
@@ -616,7 +608,7 @@ bool lua_proc_handle_prep_scan(
 		return 0;
 	}
 	
-	if ( (ret = open_dump_files(
+	if ( (ret = dump_files_open(
 		dump, handle->scan_instance, done )) != EXIT_SUCCESS ) {
 		close( tscan->main_pipes[0] );
 		close( tscan->main_pipes[1] );
@@ -626,7 +618,7 @@ bool lua_proc_handle_prep_scan(
 		return 0;
 	}
 	
-	if ( done && (ret = open_dump_files(
+	if ( done && (ret = dump_files_open(
 		&(tscan->dump[0]), handle->scan_instance, done ))
 		!= EXIT_SUCCESS
 	)
@@ -635,7 +627,7 @@ bool lua_proc_handle_prep_scan(
 		close( tscan->main_pipes[1] );
 		close( tscan->scan_pipes[0] );
 		close( tscan->scan_pipes[1] );
-		shut_dump_files( dump );
+		dump_files_shut( dump );
 		ERRMSG( ret, "Couldn't open input file" );
 		return 0;
 	}

@@ -82,11 +82,11 @@ return function (ctx,now,prv)
 	end
 	
 	nk.layout_row_dynamic( ctx, pad_height(font,"Type"), 3 )
+	
 	if done.count == 0 then
 		if nk.button( ctx, nil, "Dump" ) then
 			done = {
 				count = 1,
-				just_dump = true,
 				from = scan.from,
 				upto = scan.from,
 				addr = scan.from,
@@ -101,27 +101,31 @@ return function (ctx,now,prv)
 			end
 		end
 	else
-		nk.label( ctx, "Done", nk.TEXT_CENTERED )
+		nk.label( ctx, "Dump", nk.TEXT_CENTERED )
 	end
 	
-	if nk.button( ctx, nil, "Scan" ) then
-		done = {
-			count = done.count + 1,
-			from = scan.from,
-			upto = scan.from,
-			addr = scan.from,
-			found = 0,
-			increment = math.ceil((scan.upto - scan.from) / 0x16)
-		}
-		if not GUI.handle or GUI.handle:valid() == false then
-			return GUI.use_ui(ctx,"cfg-proc",now)
+	if not GUI.handle or GUI.handle:thread_active() == false then
+		if nk.button( ctx, nil, "Scan" ) then
+			done = {
+				count = done.count + 1,
+				from = scan.from,
+				upto = scan.from,
+				addr = scan.from,
+				found = 0,
+				increment = math.ceil((scan.upto - scan.from) / 0x16)
+			}
+			if not GUI.handle or GUI.handle:valid() == false then
+				return GUI.use_ui(ctx,"cfg-proc",now)
+			end
+			if GUI.handle:thread_active() == false then
+				GUI.handle:bytescan(
+					"table", scan.size, scan.as_bytes,
+					scan.from, scan.upto,
+					true, scan.limit, done.count - 1 )
+			end
 		end
-		if GUI.handle:thread_active() == false then
-			GUI.handle:bytescan(
-				"table", scan.size, scan.as_bytes,
-				scan.from, scan.upto,
-				true, scan.limit, done.count - 1 )
-		end
+	else
+		nk.label( ctx, "Scan", nk.TEXT_CENTERED )
 	end
 	
 	if nk.button( ctx, nil, "Clear" ) then
@@ -133,13 +137,18 @@ return function (ctx,now,prv)
 			found = 0,
 			increment = math.ceil((scan.upto - scan.from) / 0x16)
 		}
+		if GUI.handle then
+			GUI.handle:killscan()
+		end
 	end
 	
 	scan.done = done
 	GUI.scan = scan
 	
-	scan.dumping = GUI.handle:dumping()
-	scan.scanning = GUI.handle:scanning()
+	if GUI.handle then
+		scan.dumping = GUI.handle:dumping()
+		scan.scanning = GUI.handle:scanning()
+	end
 	
 	if done.count > 0 then
 	
@@ -194,7 +203,7 @@ return function (ctx,now,prv)
 			if done.upto > scan.upto then done.upto = scan.upto end
 		end
 		
-		if #list > 0 then
+		if done.found > 0 then
 			done.desc = string.format( "Showing %d of %d Results",
 			#list, done.found )
 			nk.label( ctx, done.desc, nk.TEXT_LEFT )

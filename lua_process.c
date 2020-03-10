@@ -187,24 +187,40 @@ typedef struct lua_proc_handle {
 	nodes_t bytes;
 } lua_proc_handle_t;
 
+bool lua_proc_handle__end_scan( tscan_t *tscan ) {
+	int ret = SIGSTOP;
+	_Bool success = 1;
+	if ( tscan->threadmade ) {
+		success = gasp_tpollo( tscan->scan_pipes, SIGKILL, -1 );
+		if ( success && tscan->threadmade )
+			success = gasp_tpolli( tscan->main_pipes, &ret, -1 );
+	}
+	return success;
+}
+
 bool lua_proc_handle__set_rdwr(
 	lua_proc_handle_t *handle, bool want2rdwr
 )
 {
+	int ret = want2rdwr ? SIGSTOP : SIGCONT;
 	tscan_t *tscan;
 	
 	if ( !handle ) return 0;
 	tscan = &(handle->tscan);
-	if ( !(tscan->threadmade) ) return 1;
-	
 	tscan->wants2rdwr = want2rdwr;
-	return gasp_tpollo(
-		tscan->scan_pipes, want2rdwr ? SIGSTOP : SIGCONT, -1 );
+	if ( tscan->threadmade &&
+		gasp_tpollo( tscan->scan_pipes, ret, -1 )
+	)
+	{
+		if ( want2rdwr )
+			return gasp_tpolli( tscan->scan_pipes, &ret, -1 );
+	}
+	return 1;
 }
 
-int lua_proc_handle__ret_empty_list( lua_State *L, node_t done ) {
+int lua_proc_handle__ret_empty_list( lua_State *L, node_t done, node_t found ) {
 	lua_pushinteger(L,done);
-	lua_pushinteger(L,0);
+	lua_pushinteger(L,found);
 	lua_newtable( L );
 	return 3;
 }
@@ -228,15 +244,16 @@ int lua_proc_handle__get_scan_list(
 		return 0;
 
 	if ( !handle )
-		return lua_proc_handle__ret_empty_list(L,0);
+		return lua_proc_handle__ret_empty_list(L,0,0);
 	tscan = &(handle->tscan);
 	if ( tscan->dumping )
-		return lua_proc_handle__ret_empty_list(L,0);
+		return lua_proc_handle__ret_empty_list(L,tscan->done_scans,tscan->found);
 	minus = tscan->bytes - 1;
 	/* Initialise pointer */
 	dump = &(tscan->dump[1]);
 	/* Pause thread */
-	lua_proc_handle__set_rdwr(handle,1);
+	if ( !lua_proc_handle__set_rdwr(handle,1) )
+		return lua_proc_handle__ret_empty_list(L,tscan->done_scans,tscan->found);
 	/* Grab current positions so can restore them later */
 	pmap = dump->pmap;
 	nmap = dump->nmap;
@@ -246,22 +263,28 @@ int lua_proc_handle__get_scan_list(
 	upos = gasp_lseek( dump->used_fd, 0, SEEK_CUR );
 	dpos = gasp_lseek( dump->data_fd, 0, SEEK_CUR );
 	
-	/* Grab current count */
-	count = handle->tscan.found;
-	/* */
+	/* Grab current address and amount found */
 	lua_pushinteger( L, handle->tscan.done_upto );
+	lua_pushinteger( L, (count = handle->tscan.found) );
+	
+	/* Clamp down the number we use to what was declared as the limit */
 	if ( count > limit ) count = limit;
-	lua_pushinteger( L, count );
+	
+	/* Pre-create the entire table */
 	lua_createtable( L, count, 0 );
+	
 	if ( !count ) {
 		/* Un-Pause thread and return */
 		lua_proc_handle__set_rdwr(handle,0);
 		return 3;
 	}
+	
 	/* Move pointers to where we want them*/
 	gasp_lseek( dump->info_fd, sizeof(node_t) * 2, SEEK_SET );
 	gasp_lseek( dump->used_fd, 0, SEEK_SET );
 	gasp_lseek( dump->data_fd, 0, SEEK_SET );
+	
+	/* Read through scanned regions for addresses to declare */
 	while ( glance_dump( &ret, dump, &both, tscan->bytes )
 		|| ret == ERANGE )
 	{
@@ -273,11 +296,10 @@ int lua_proc_handle__get_scan_list(
 				lua_pushinteger( L, ++i );
 				lua_pushinteger( L, addr );
 				lua_settable(L,-3);
-				/* Ensure we do not collect more than asked for */
-				if ( i == limit ) goto done;
+				/* Stop when we hit the allocated amount */
+				if ( i == count ) goto done;
 			}
 		}
-		
 	}
 	
 	done:
@@ -481,11 +503,9 @@ int lua_proc_handle_change_data( lua_State *L ) {
 		return 1;
 	}
 	
-	//lua_proc_handle__set_rdwr(handle);
-	
+	//lua_proc_handle__set_rdwr(handle,1);
 	size = proc_change_data( NULL, handle->handle, addr, array, nodes->count );
-	
-	handle->tscan.wants2rdwr = 0;
+	//lua_proc_handle__set_rdwr(handle,0);
 
 	lua_pushinteger(L,(size > 0) ? size : 0);
 	return 1;
@@ -650,6 +670,15 @@ int lua_proc_handle_dump( lua_State *L ) {
 	return 1;
 }
 
+int lua_proc_handle_killscan( lua_State *L ) {
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	lua_pushboolean( L,
+		lua_proc_handle__end_scan( &(handle->tscan) )
+	);
+	return 1;
+}
+
 int lua_proc_handle_bytescan( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
@@ -727,6 +756,7 @@ luaL_Reg lua_class_proc_handle_func_list[] = {
 	{ "change", lua_proc_handle_change_data },
 	{ "dump", lua_proc_handle_dump },
 	{ "bytescan", lua_proc_handle_bytescan },
+	{ "killscan", lua_proc_handle_killscan },
 	{ "dumping", lua_proc_handle_dumping },
 	{ "scanning", lua_proc_handle_scanning },
 	{ "thread_active", lua_proc_handle_thread_active },

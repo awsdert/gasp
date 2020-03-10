@@ -810,6 +810,26 @@ int open_dump_files( dump_t *dump, long inst, long done ) {
 	return ret;
 }
 
+int reset_dump_offsets( dump_t dump ) {
+	
+	if ( gasp_lseek( dump.info_fd, 0, SEEK_SET ) != 0 ) {
+		ERRMSG( errno, "Couldn't reset info offset" );
+		return errno;
+	}
+	
+	if ( gasp_lseek( dump.used_fd, 0, SEEK_SET ) != 0 ) {
+		ERRMSG( errno, "Couldn't reset used addresses offset" );
+		return errno;
+	}
+	
+	if ( gasp_lseek( dump.data_fd, 0, SEEK_SET ) != 0 ) {
+		ERRMSG( errno, "Couldn't reset data offset" );
+		return errno;
+	}
+	
+	return EXIT_SUCCESS;
+}
+
 void shut_dump_files( dump_t *dump ) {
 	if ( dump->info_fd >= 0 ) close( dump->info_fd );
 	if ( dump->used_fd >= 0 ) close( dump->used_fd );
@@ -949,19 +969,7 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	if ( tscan->zero != 0 )
 		tscan->zero = ~0;
 	
-	if ( gasp_lseek( dump->info_fd, 0, SEEK_SET ) != 0 )
-	{
-		ret = errno;
-		goto done;
-	}
-	
-	if ( gasp_lseek( dump->used_fd, 0, SEEK_SET ) != 0 )
-	{
-		ret = errno;
-		goto done;
-	}
-	
-	if ( gasp_lseek( dump->data_fd, 0, SEEK_SET ) != 0 )
+	if ( (ret = reset_dump_offsets( *dump )) != EXIT_SUCCESS )
 	{
 		ret = errno;
 		goto done;
@@ -1028,12 +1036,14 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 			if ( gasp_write( dump->data_fd, data, size ) != size )
 			{
 				ret = errno;
+				ERRMSG( errno, "Failed to write glanced at data" );
 				goto done;
 			}
 		
 			if ( gasp_write( dump->used_fd, used, size ) != size )
 			{
 				ret = errno;
+				ERRMSG( errno, "Failed to write used addresses" );
 				goto done;
 			}
 			
@@ -1048,25 +1058,33 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 				!= (ssize_t)sizeof(proc_mapped_t) )
 			{
 				ret = errno;
+				ERRMSG( errno, "Failed to note region" );
 				goto done;
 			}
 			++n;
 		}
 	}
 	
-	if ( gasp_lseek( dump->info_fd, 0, SEEK_SET ) != 0 ) {
-		ret = errno;
-		goto done;
+	done:
+	
+	if ( gasp_lseek( dump->info_fd, sizeof(node_t), SEEK_SET ) < 0 ) {
+		ERRMSG( errno, "Couldn't set info offset to where"
+			" we should set region count" );
+	}
+	else {
+		fprintf( stderr, "Setting region count to %lu\n", n );
+		if ( gasp_write(
+			dump->info_fd, &n, sizeof(node_t) ) != sizeof(node_t)
+		)
+		{
+			ERRMSG( errno, "Failed to write region count" );
+		}
 	}
 	
-	if ( gasp_write( dump->info_fd, &n, sizeof(node_t) )
-		!= sizeof(node_t) )
-		ret = errno;
-	
-	done:
 	fsync( dump->info_fd );
 	tscan->ret = ret;
 	tscan->last_found = n;
+	
 	return n;
 }
 
@@ -1258,11 +1276,11 @@ bool proc_handle__aobscan_test( tscan_t *tscan, bool both )
 }
 
 void* proc_handle_aobscan( tscan_t *tscan ) {
-	uchar *buff = NULL, *used;
-	uintmax_t stop = 0, minus;
+	uintmax_t minus;
 	mode_t prot = 04;
-	node_t a, number = 0, regions = 0;
-	bool pboth = 0, both = 0;
+	node_t number = 0, regions = 0;
+	bool pboth = 0, both = 0, have_prev_results = 0;
+	dump_t *dump;
 	
 	if ( !tscan ) {
 		errno = EDESTADDRREQ;
@@ -1273,15 +1291,17 @@ void* proc_handle_aobscan( tscan_t *tscan ) {
 	minus = tscan->bytes - 1;
 	tscan->found = 0;
 	tscan->done_upto = 0;
+	dump = &(tscan->dump[1]);
 	
 	if ( minus > tscan->bytes ) {
 		tscan->ret = EINVAL;
 		goto set_found;
 	}
 
-	if ( (tscan->ret = errno = check_dump( tscan->dump[1] ))
-		!= EXIT_SUCCESS )
+	if ( (tscan->ret = errno = check_dump( *dump )) != EXIT_SUCCESS ) {
+		ERRMSG( tscan->ret, "Invalid dump to scan" );
 		goto set_found;
+	}
 
 	prot |= tscan->writeable ? 02 : 0;
 	
@@ -1292,89 +1312,76 @@ void* proc_handle_aobscan( tscan_t *tscan ) {
 		return tscan;
 	}
 	
-	if ( gasp_lseek( tscan->dump[1].used_fd, 0, SEEK_SET ) < 0 ) {
-		fprintf( stderr, "Failed at lseek(used_fd)\n" );
+	if ( (tscan->ret = reset_dump_offsets( *dump )) != EXIT_SUCCESS ) {
 		tscan->ret = errno;
-		goto set_found;
-	}
-	if ( gasp_lseek( tscan->dump[1].data_fd, 0, SEEK_SET ) < 0 ) {
-		fprintf( stderr, "Failed at lseek(data_fd)\n" );
-		tscan->ret = errno;
+		fprintf( stderr, "Failed at reset_dump_offsets()\n" );
 		goto set_found;
 	}
 	
 	/* Reduce corrupted results */
-	(void)memset( tscan->dump[0].pmap, 0, sizeof(proc_mapped_t) );
-	(void)memset( tscan->dump[0].nmap, 0, sizeof(proc_mapped_t) );
-	(void)memset( tscan->dump[1].pmap, 0, sizeof(proc_mapped_t) );
-	(void)memset( tscan->dump[1].nmap, 0, sizeof(proc_mapped_t) );
+	(void)memset( dump->mapped, 0, sizeof(proc_mapped_t) * 2 );
+	(void)memset( tscan->dump->mapped, 0, sizeof(proc_mapped_t) * 2 );
 
-	/* Get file position correct before we start each instance of
-	 * proc_mapped_t object to file */
-	write( tscan->dump[1].info_fd, &number, sizeof(node_t) );
-	write( tscan->dump[1].info_fd, &regions, sizeof(node_t) );
-	if ( !(tscan->done_scans) ) {
-		while (
-			regions-- &&
-			proc_handle__aobscan_next( tscan, tscan->dump + 1, &both )
+	/* Get scan number, region count and align offset to first region */
+	read( dump->info_fd, &number, sizeof(node_t) );
+	read( dump->info_fd, &regions, sizeof(node_t) );
+	
+	if ( check_dump( tscan->dump[0] ) == EXIT_SUCCESS ) {
+		
+		if ( (tscan->ret = reset_dump_offsets( tscan->dump[0] ))
+			!= EXIT_SUCCESS
 		)
 		{
-			fprintf( stderr, "%p-%p\n",
-				(void*)(tscan->dump[1].nmap->head),
-				(void*)(tscan->dump[1].nmap->foot)
-			);
-			
-			used = tscan->dump[1].used;
-			/* Ensure we check all addresses */
-			for ( a = 0; a < stop; ++a ) used[a] = ~0;
-			if ( !proc_handle__aobscan_test( tscan, both ) )
-				goto set_found;
-			
+			fprintf( stderr, "Failed at 2nd reset_dump_offsets()\n" );
+			goto set_found;
 		}
+		
+		/* Align pointer to region info */
+		if ( gasp_lseek(
+			tscan->dump->info_fd, sizeof(node_t) * 2, SEEK_SET ) < 0
+		)
+		{
+			tscan->ret = errno;
+			fprintf( stderr, "Failed at lseek()\n" );	 
+			goto set_found;
+		}
+		
+		have_prev_results = 1;
 	}
-	else
+	else {
+		memset( tscan->dump->used, ~0, DUMP_MAX_SIZE );
+		memset( tscan->dump->data, tscan->zero, DUMP_MAX_SIZE );
+	}
+	
+	fprintf( stderr, "Starting scan (%lu Regions)...\n", regions );
+	while (
+		regions-- &&
+		proc_handle__aobscan_next( tscan, dump, &both )
+	)
 	{
-		/* Reset pointer */
-		if ( gasp_lseek( tscan->dump[0].info_fd, 0, SEEK_SET ) < 0 ) {
-			tscan->ret = errno;
-			goto set_found;
-		}
+		fprintf( stderr, "%p-%p\n",
+			(void*)(dump->nmap->head), (void*)(dump->nmap->foot) );
 		
-		/* Align pointer to where the proc_mapped_t objects begin */
-		read( tscan->dump[0].info_fd, &number, sizeof(node_t) );
-		read( tscan->dump[0].info_fd, &regions, sizeof(node_t) );
-		
-		/* Make sure we're are not attempting to compare against
-		 * incorrect results */
-		if ( number != tscan->done_scans )
-			goto set_found;
-		if ( gasp_lseek( tscan->dump[0].used_fd, 0, SEEK_SET ) < 0 ) {
-			tscan->ret = errno;
-			goto set_found;
+		if ( have_prev_results ) {
+			/* Ensure we check only addresses that have been marked
+			 * as a result previously */
+			proc_handle__aobscan_next( tscan, tscan->dump, &pboth );
+			memcpy( dump->used, tscan->dump->used, DUMP_MAX_SIZE );
 		}
-		if ( gasp_lseek( tscan->dump[0].data_fd, 0, SEEK_SET ) < 0 ) {
-			tscan->ret = errno;
-			goto set_found;
-		}
-		while ( regions-- &&
-			proc_handle__aobscan_next( tscan, tscan->dump, &pboth )
-		)
-		{
-			if ( !proc_handle__aobscan_next(
-				tscan, tscan->dump + 1, &both ) || pboth != both )
-				goto set_found;
-			buff = tscan->dump[0].used;
-			used = tscan->dump[1].used;
+		else {
 			/* Ensure we check all addresses */
-			for ( a = 0; a < stop; ++a ) used[a] = buff[a];
-			if ( !proc_handle__aobscan_test( tscan, both ) )
-				goto set_found;
+			memset( dump->used, ~0, DUMP_MAX_SIZE );
 		}
+		
+		if ( !proc_handle__aobscan_test( tscan, both ) )
+			goto set_found;
 	}
+	fprintf( stderr, "Finished scan\n" );
+	
 	tscan->ret = EXIT_SUCCESS;
 	tscan->done_upto = tscan->upto;
-	set_found:
 	
+	set_found:
 	tscan->last_found = tscan->found;
 	tscan->done_scans++;
 	

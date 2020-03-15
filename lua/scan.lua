@@ -163,52 +163,50 @@ return function (ctx,now,prv)
 		end
 		nk.label( ctx, tmp, nk.TEXT_LEFT )
 		
-		tmp = GUI.handle:scan_done_upto()
-		nk.progress( ctx, tmp, scan.upto, nk.FIXED )
+		done.addr = GUI.handle:scan_done_upto()
+		nk.progress( ctx, done.addr, scan.upto, nk.FIXED )
 		
 		if scan.dumping == true then
-			tmp = string.format( "Dumping from 0x%X", tmp )
+			tmp = string.format( "Dumping from 0x%X", done.addr )
 		else
-			tmp = string.format( "Scanned upto 0x%X", tmp )
+			tmp = string.format( "Scanned upto 0x%X", done.addr )
 		end
 		nk.label( ctx, tmp, nk.TEXT_LEFT )
 		
-		if scan.dumping == true then
-			list = done.list or {}
-		elseif GUI.handle:scan_done_upto() < done.upto then
-			list = done.list or {}
-		else
-			list = {}
-			done.added = 0
-			done.addr, done.found, tmp =
-				GUI.handle:get_scan_list(done.count - 1,scan.limit)
-			for i = 1,done.found,1 do
-				if i == scan.limit then break end
-				list[i] = rebuild_cheat(scan)
-				list[i].generated = true
-				list[i].addr = tmp[i] or 0
-				-- Prevent unintended subgroups
-				list[i].count = nil
-				list[i].list = nil
-				list[i].prev = nil
-				list[i].split = nil
-				list[i].is_group = false
-				list[i].active = false
+		list = {}
+		if GUI.handle:dumping() == false then
+			if done.addr < done.upto then
+				list = done.list or {}
+			else
+				done.added = 0
+				done.addr, done.found, tmp =
+					GUI.handle:get_scan_list(done.count - 1,scan.limit)
+				for i = 1,done.found,1 do
+					if i == scan.limit then break end
+					list[i] = rebuild_cheat(scan)
+					list[i].generated = true
+					list[i].addr = tmp[i] or 0
+					-- Prevent unintended subgroups
+					list[i].count = nil
+					list[i].list = nil
+					list[i].prev = nil
+					list[i].split = nil
+					list[i].is_group = false
+					list[i].active = false
+				end
+				done.upto = done.upto + done.increment
+				if done.upto > scan.upto then done.upto = scan.upto end
 			end
-			done.upto = done.upto + done.increment
-			if done.upto > scan.upto then done.upto = scan.upto end
 		end
-		
-		done.desc = string.format( "Showing upto %d of %d Results",
-			#list, done.found )
-		nk.label( ctx, done.desc, nk.TEXT_LEFT )
-		
-		--[[
+				
 		if #list > 0 then
+			done.desc = string.format( "Showing upto %d of %d Results",
+				#list, done.found )
+			nk.label( ctx, done.desc, nk.TEXT_LEFT )
+		
 			done.list = list
 			done = GUI.draw_cheat( ctx, font, done )
 		end
-		--]]
 	end
 	scan.done = done
 	GUI.scan = scan

@@ -254,9 +254,9 @@ int lua_proc_handle__get_scan_list(
 		return lua_proc_handle__ret_empty_list(L,tscan->done_scans,tscan->found);
 	/* Grab current state */
 	_dump = *dump;
-	ipos = gasp_lseek( dump->info_fd, 0, SEEK_CUR );
-	upos = gasp_lseek( dump->used_fd, 0, SEEK_CUR );
-	dpos = gasp_lseek( dump->data_fd, 0, SEEK_CUR );
+	ipos = gasp_lseek( dump->info.fd, 0, SEEK_CUR );
+	upos = gasp_lseek( dump->used.fd, 0, SEEK_CUR );
+	dpos = gasp_lseek( dump->data.fd, 0, SEEK_CUR );
 	
 	/* Grab current address and amount found */
 	lua_pushinteger( L, handle->tscan.done_upto );
@@ -274,17 +274,17 @@ int lua_proc_handle__get_scan_list(
 		return 3;
 	}
 	
-	/* Move pointers to where we want them*/
+	/* Move pointers to where we want them */
 	dump_files_reset_offsets( dump, 1 );
 	
 	/* Read through scanned regions for addresses to declare */
 	while ( dump_files_glance_stored( &ret, dump, tscan->bytes )
 		|| ret == ERANGE )
 	{
-		stop = dump->size - minus;
-		used = dump->used;
+		stop = (DUMP_BUF_SIZE + dump->size) - minus;
+		used = dump->_used;
 		addr = dump->addr;
-		for ( a = 0; a < stop; ++a, ++addr ) {
+		for ( a = dump->base; a < stop; ++a, ++addr ) {
 			if ( used[a] ) {
 				lua_pushinteger( L, ++i );
 				lua_pushinteger( L, addr );
@@ -298,60 +298,12 @@ int lua_proc_handle__get_scan_list(
 	done:
 	/* Restore prior state */
 	*dump = _dump;
-	gasp_lseek( dump->info_fd, ipos, SEEK_SET );
-	gasp_lseek( dump->used_fd, upos, SEEK_SET );
-	gasp_lseek( dump->data_fd, dpos, SEEK_SET );
+	gasp_lseek( dump->info.fd, ipos, SEEK_SET );
+	gasp_lseek( dump->used.fd, upos, SEEK_SET );
+	gasp_lseek( dump->data.fd, dpos, SEEK_SET );
 	
 	lua_proc_handle__set_rdwr(handle,0);
 	return 3;
-}
-bool lua_proc_handle__nth_scan( lua_proc_handle_t *handle ) {
-	char *path;
-	char const *GASP_PATH = getenv("GASP_PATH");
-	tscan_t *tscan;
-	space_t space = {0}, path_space = {0};
-	_Bool nth = 0;
-	
-	if ( !handle ) return 0;
-	if ( handle->nth_scan ) return 1;
-	
-	tscan = &(handle->tscan);
-	
-	
-	if ( !(path = more_space(
-		&(tscan->ret), &path_space, strlen( GASP_PATH ) + UCHAR_MAX))
-	) {
-		ERRMSG( tscan->ret, "Couldn't allocate memory for scan path" );
-		goto fail;
-	}
-	
-	if ( gasp_mkdir( &space, GASP_PATH ) != EXIT_SUCCESS )
-		goto fail;
-	
-	sprintf( path, "%s/scans", GASP_PATH );
-	if ( gasp_mkdir( &space, path ) != EXIT_SUCCESS )
-		goto fail;
-	
-	if ( !(handle->nth_scan) ) {
-		for ( handle->scan_instance = 0;
-			handle->scan_instance < LONG_MAX;
-			handle->scan_instance++
-		)
-		{
-			sprintf( path, "%s/scans/%lu",
-				GASP_PATH, (ulong)(handle->scan_instance) );
-			if ( gasp_isdir( path ) != EXIT_SUCCESS
-				&& gasp_mkdir( &space, path ) == EXIT_SUCCESS )
-				goto done;
-		}
-		goto fail;
-	}
-	done:
-	nth = 1;
-	fail:
-	free_space(NULL,&path_space);
-	free_space(NULL,&space);
-	return nth;
 }
 
 void lua_proc_handle_shutfiles( lua_proc_handle_t *handle )
@@ -364,10 +316,8 @@ void lua_proc_handle_shutfiles( lua_proc_handle_t *handle )
 			(void)gasp_tpollo( tscan->scan_pipes, SIGKILL, -1 );
 			(void)gasp_tpolli( tscan->main_pipes, &ret, -1 );
 		}
-		close( tscan->main_pipes[0] );
-		close( tscan->main_pipes[1] );
-		close( tscan->scan_pipes[0] );
-		close( tscan->scan_pipes[1] );
+		gasp_close_pipes( tscan->scan_pipes );
+		gasp_close_pipes( tscan->main_pipes );
 		tscan->main_pipes[0] = tscan->main_pipes[1] = -1;
 		tscan->scan_pipes[0] = tscan->scan_pipes[1] = -1;
 		tscan->pipesmade = 0;
@@ -553,12 +503,16 @@ bool lua_proc_handle_prep_scan(
 	lua_proc_handle_t *handle,
 	node_t done,
 	node_t last_found,
-	uintmax_t from, uintmax_t upto, bool writable, int zero
+	uintmax_t from,
+	uintmax_t upto,
+	bool writable,
+	int zero
 )
 {
 	int ret = EXIT_SUCCESS;
 	tscan_t *tscan;
 	dump_t *dump;
+	space_t space = {0};
 	if ( !handle ) return 0;
 	
 	tscan = &(handle->tscan);
@@ -566,19 +520,30 @@ bool lua_proc_handle_prep_scan(
 	if ( !(handle->handle) || tscan->threadmade )
 		return 0;
 	
-	handle->nth_scan = lua_proc_handle__nth_scan( handle );
+	if ( !(handle->nth_scan) ) {
+		for ( handle->scan_instance = 0;
+			ret == EXIT_SUCCESS && handle->scan_instance < LONG_MAX;
+			handle->scan_instance++
+		)
+		{
+			ret = dump_files__dir( &space, handle->scan_instance, 0 );
+		}
+		free_space(NULL,&space);
+		if ( ret == ENOTDIR )
+			handle->nth_scan = 1;
+		else {
+			ERRMSG( ret, "Couldn't allocate a folder for scans" );
+			return 0;
+		}
+	}
 	
 	lua_proc_handle_undo( handle, done, !done );
 	
 	dump = &(tscan->dump[0]);
 	(void)memset( dump, 0, sizeof(dump_t) );
-	dump->pmap = &(dump->mapped[0]);
-	dump->nmap = &(dump->mapped[1]);
 	
 	dump = &(tscan->dump[1]);
 	(void)memset( dump, 0, sizeof(dump_t) );
-	dump->pmap = &(dump->mapped[0]);
-	dump->nmap = &(dump->mapped[1]);
 	
 	tscan->handle = handle->handle;
 	tscan->bytes = handle->bytes.count;
@@ -597,23 +562,26 @@ bool lua_proc_handle_prep_scan(
 	tscan->main_pipes[1] = -1;
 	tscan->scan_pipes[0] = -1;
 	tscan->scan_pipes[1] = -1;
-	tscan->zero = zero;
+	tscan->zero = zero ? ~0 : 0;
 	
 	if ( pipe2( tscan->main_pipes, 0 ) == -1 )
 		return 0;
 	if ( pipe2( tscan->scan_pipes, 0 ) == -1 )
 	{
-		close( tscan->main_pipes[0] );
-		close( tscan->main_pipes[1] );
+		gasp_close_pipes( tscan->main_pipes );
+		tscan->main_pipes[0] = -1;
+		tscan->main_pipes[1] = -1;
 		return 0;
 	}
 	
 	if ( (ret = dump_files_open(
 		dump, handle->scan_instance, done )) != EXIT_SUCCESS ) {
-		close( tscan->main_pipes[0] );
-		close( tscan->main_pipes[1] );
-		close( tscan->scan_pipes[0] );
-		close( tscan->scan_pipes[1] );
+		gasp_close_pipes( tscan->scan_pipes );
+		gasp_close_pipes( tscan->main_pipes );
+		tscan->scan_pipes[0] = -1;
+		tscan->scan_pipes[1] = -1;
+		tscan->main_pipes[0] = -1;
+		tscan->main_pipes[1] = -1;
 		ERRMSG( ret, "Couldn't open output file" );
 		return 0;
 	}
@@ -623,10 +591,12 @@ bool lua_proc_handle_prep_scan(
 		!= EXIT_SUCCESS
 	)
 	{
-		close( tscan->main_pipes[0] );
-		close( tscan->main_pipes[1] );
-		close( tscan->scan_pipes[0] );
-		close( tscan->scan_pipes[1] );
+		gasp_close_pipes( tscan->scan_pipes );
+		gasp_close_pipes( tscan->main_pipes );
+		tscan->scan_pipes[0] = -1;
+		tscan->scan_pipes[1] = -1;
+		tscan->main_pipes[0] = -1;
+		tscan->main_pipes[1] = -1;
 		dump_files_shut( dump );
 		ERRMSG( ret, "Couldn't open input file" );
 		return 0;
@@ -734,8 +704,14 @@ int lua_proc_handle_text( lua_State *L ) {
 int lua_proc_handle_grab( lua_State *L ) {
 	lua_proc_handle_t *handle =
 		(lua_proc_handle_t*)lua_newuserdata(L,sizeof(lua_proc_handle_t));
+	tscan_t *tscan;
 	if ( !handle ) return 0;
+	tscan = &(handle->tscan);
 	memset( handle, 0, sizeof(lua_proc_handle_t) );
+	tscan->scan_pipes[0] = -1;
+	tscan->scan_pipes[1] = -1;
+	tscan->main_pipes[0] = -1;
+	tscan->main_pipes[1] = -1;
 	luaL_setmetatable(L,PROC_HANDLE_CLASS);
 	return 1;
 }

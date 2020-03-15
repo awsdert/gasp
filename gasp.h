@@ -81,9 +81,12 @@ void* change_space( int *err, space_t *space, size_t want, int dir );
 	change_space( err, space, want, -1 )
 #define free_space( err, space )\
 	change_space( err, space, 0, 0 )
-	
-int gasp_isdir( char const *path );
-int gasp_mkdir( space_t *space, char const *path );
+
+void gasp_close_pipes( int pipes[2] );
+int dump_files__dir( space_t *space, long inst, bool make );
+int gasp_open( int *fd, char const *path, int perm );
+int gasp_isdir( char const *path, bool make );
+#define gasp_mkdir( path ) gasp_isdir( path, 1 )
 int gasp_rmdir( space_t *space, char const *path, bool recursive );
 	
 typedef size_t node_t;
@@ -194,6 +197,13 @@ typedef struct proc_handle {
 
 #define DUMP_BUF_SIZE BUFSIZ
 #define DUMP_MAX_SIZE (DUMP_BUF_SIZE * 2)
+typedef struct dump_file {
+	int fd;
+	long prv;
+	long pos;
+	size_t size;
+	uchar *data;
+} dump_file_t;
 typedef struct dump {
 	/* Scan number */
 	node_t number;
@@ -203,18 +213,18 @@ typedef struct dump {
 	 * in same region or foot of last region matches head of current
 	 * region */
 	size_t kept;
-	int info_fd;
-	int used_fd;
-	int data_fd;
+	dump_file_t info, used, data;
 	/* Iterate through memory by swapping pointers to the below */
-	proc_mapped_t mapped[2], *pmap, *nmap;
+	proc_mapped_t mapped[2];
 	/* How much of nmap has been read */
 	uintmax_t done;
 	/* Which address to report */
 	uintmax_t addr;
 	/* Where to stop comparing from 0 */
 	size_t size;
-	uchar used[DUMP_MAX_SIZE], data[DUMP_MAX_SIZE];
+	/* Where to start comparing from */
+	size_t base;
+	uchar _used[DUMP_MAX_SIZE], _data[DUMP_MAX_SIZE];
 } dump_t;
 
 int dump_files_open( dump_t *dump, long inst, long done );

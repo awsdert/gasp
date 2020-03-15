@@ -457,7 +457,7 @@ uintmax_t proc__glance_file(
 	}
 	
 	done = gasp_pread( fd, mem, size, addr );
-	if ( handle->memfd < 0 )
+	if ( handle->memfd <= 0 )
 		close(fd);
 
 	if ( done < 0 ) {
@@ -532,12 +532,12 @@ uintmax_t proc__glance_seek(
 	if ( done <= 0 || errno != EXIT_SUCCESS )
 		goto failed;
 
-	if ( handle->memfd < 0 )
+	if ( handle->memfd <= 0 )
 		close(fd);
 	return done;
 	
 	failed:
-	if ( handle->memfd < 0 )
+	if ( handle->memfd <= 0 )
 		close(fd);
 	if ( err ) *err = errno;
 	if ( errno != ESPIPE && errno != EIO )
@@ -628,7 +628,7 @@ uintmax_t proc__change_file(
 		return 0;
 	}
 	
-	if ( handle->perm != O_RDWR || handle->memfd < 0 )
+	if ( handle->perm != O_RDWR || handle->memfd <= 0 )
 		return 0;
 	
 	done = gasp_pwrite( handle->memfd, mem, size, addr );
@@ -711,14 +711,25 @@ uintmax_t proc__change_seek(
 	return 0;
 }
 
-int gasp_isdir( char const *path ) {
+void gasp_close_pipes( int pipes[2] ) {
+	if ( pipes[1] > 0 ) close( pipes[1] );
+	if ( pipes[0] > 0 ) close( pipes[0] );
+}
+
+int gasp_isdir( char const *path, bool make ) {
 	struct stat st = {0};
 	if ( !path )
 		return EINVAL;
 	if ( stat( path, &st ) != 0 )
 	{
-		if ( errno == ENOENT )
-			errno = EXIT_FAILURE;
+		if ( errno == ENOTDIR || errno == ENOENT ) {
+			if ( make ) {
+				errno = EXIT_SUCCESS;
+				(void)mkdir(path,0755);
+				return errno;
+			}
+			errno = ENOTDIR;
+		}
 		return errno;
 	}
 	if ( !S_ISDIR(st.st_mode) )
@@ -726,24 +737,10 @@ int gasp_isdir( char const *path ) {
 	return EXIT_SUCCESS;
 }
 
-int gasp_mkdir( space_t *space, char const *path ) {
-	int ret = gasp_isdir( path );
-	char *temp;
-	if ( ret != EXIT_FAILURE )
-		return ret;
-	if ( !space )
-		return EDESTADDRREQ;
-	if ( !(temp = more_space( &ret, space, strlen( path ) + 9 )) )
-		return ret;
-	(void)sprintf( temp, "mkdir \"%s\"\n", path );
-	fprintf( stderr, "%s\n", temp );
-	return system( temp );
-}
-
 int gasp_rmdir( space_t *space, char const *path, bool recursive ) {
-	int ret = gasp_isdir( path );
+	int ret = gasp_isdir( path, 0 );
 	char *temp;
-	if ( ret == EXIT_FAILURE )
+	if ( ret == ENOENT )
 		return EXIT_SUCCESS;
 	if ( ret != EXIT_SUCCESS )
 		return ret;
@@ -777,35 +774,127 @@ int gasp_open( int *fd, char const *path, int perm )
 	return ret;
 }
 
-int dump_files_open( dump_t *dump, long inst, long done ) {
+void dump_files__shut_file( dump_file_t *dump_file ) {
+	if ( dump_file->fd > 0 )
+		close( dump_file->fd );
+	if ( dump_file->data )
+		memset( dump_file->data, 0, dump_file->size );
+	memset( dump_file, 0, sizeof(dump_file_t) );
+}
+
+int dump_files__open_file(
+	dump_file_t *dump_file,
+	space_t *space, long inst, long scan,
+	char const *ext
+)
+{
 	int ret = EXIT_SUCCESS;
+	char const *GASP_PATH;
 	char *path;
-	char const *GASP_PATH = getenv("GASP_PATH");
-	size_t len = strlen(GASP_PATH) + (2 * (sizeof(node_t) * CHAR_BIT));
-	space_t space = {0}, path_space = {0};
-	if ( !dump ) return EDESTADDRREQ;
-	if ( !(path = more_space( &ret, &path_space, len )) )
+	size_t len;
+	
+	if ( !dump_file || !space || !ext ) return EDESTADDRREQ;
+	memset( dump_file, 0, sizeof(dump_file_t) );
+	
+	GASP_PATH = getenv("GASP_PATH");
+	len = strlen(GASP_PATH) + (2 * (sizeof(node_t) * CHAR_BIT));
+	if ( !(path = more_space( &ret, space, len )) )
 		return ret;
-	if ( (ret = gasp_mkdir( &space, GASP_PATH )) != EXIT_SUCCESS )
-		goto fail;
+
+	sprintf( path, "%s/scans/%ld/%ld%s", GASP_PATH, inst, scan, ext );
+	return gasp_open( &(dump_file->fd), path, 0700 );
+}
+
+int dump_files__dir( space_t *space, long inst, bool make ) {
+	int ret = EXIT_SUCCESS;
+	char const *GASP_PATH;
+	char *path;
+	size_t len;
+	
+	if ( !space )
+		return EDESTADDRREQ;
+	GASP_PATH = getenv("GASP_PATH");
+	if ( !GASP_PATH )
+		return EINVAL;
+	len = strlen(GASP_PATH) + (2 * (sizeof(node_t) * CHAR_BIT));
+	
+	if ( !(path = more_space( &ret, space, len )) )
+		return ret;
+	
+	if ( (ret = gasp_isdir( GASP_PATH, make )) != EXIT_SUCCESS )
+		return ret;
+	
 	sprintf( path, "%s/scans", GASP_PATH );
-	if ( (ret = gasp_mkdir( &space, path )) != EXIT_SUCCESS )
-		goto fail;
+	if ( (ret = gasp_isdir( path, make )) != EXIT_SUCCESS )
+		return ret;
+	
 	sprintf( path, "%s/scans/%ld", GASP_PATH, inst );
-	if ( (ret = gasp_mkdir( &space, path )) != EXIT_SUCCESS )
+	if ( (ret = gasp_isdir( path, make )) != EXIT_SUCCESS )
+		return ret;
+	
+	return EXIT_SUCCESS;
+}
+
+int dump_files_open( dump_t *dump, long inst, long scan ) {
+	int ret = EXIT_SUCCESS;
+	space_t space = {0};
+	if ( !dump ) return EDESTADDRREQ;
+	
+	/* Cleanse structure of random data */
+	memset( dump, 0, sizeof( dump_t ) );
+	
+	if ( (ret = dump_files__dir( &space, inst, 1 ))
+		!= EXIT_SUCCESS ) {
+		ERRMSG( ret, "Couldn't create needed directories" );
 		goto fail;
-	sprintf( path, "%s/scans/%ld/%ld.info", GASP_PATH, inst, done );
-	if ( (ret = gasp_open( &(dump->info_fd), path, 0700 ))
+	}
+
+	if ( (ret =
+		dump_files__open_file(
+			&(dump->info), &space, inst, scan, "info" ))
 		!= EXIT_SUCCESS )
+	{
+		ERRMSG( ret,
+			"Couldn't create/open %/gasp/scans/#/*.info file"
+		);
 		goto fail;
-	sprintf( path, "%s/scans/%ld/%ld.used", GASP_PATH, inst, done );
-	if ( (ret = gasp_open( &(dump->used_fd), path, 0700 ))
-		!= EXIT_SUCCESS )
+	}
+	
+	dump->info.data = (uchar*)(dump->mapped);
+	dump->info.size = sizeof(proc_mapped_t) * 2;
+	
+	if ( (ret =
+		dump_files__open_file(
+			&(dump->used), &space, inst, scan, "used" ))
+		!= EXIT_SUCCESS
+	)
+	{
+		ERRMSG( ret,
+			"Couldn't create/open %/gasp/scans/#/*.used file"
+		);
+		dump_files__shut_file( &(dump->info) );
 		goto fail;
-	sprintf( path, "%s/scans/%ld/%ld.data", GASP_PATH, inst, done );
-	ret = gasp_open( &(dump->data_fd), path, 0700 );
+	}
+	dump->used.data = dump->_used;
+	dump->used.size = DUMP_MAX_SIZE;
+	
+	if ( (ret =
+		dump_files__open_file(
+			&(dump->data), &space, inst, scan, "data" ))
+		!= EXIT_SUCCESS
+	)
+	{
+		ERRMSG( ret,
+			"Couldn't create/open %/gasp/scans/#/*.data file"
+		);
+		dump_files__shut_file( &(dump->info) );
+		dump_files__shut_file( &(dump->used) );
+		goto fail;
+	}
+	dump->data.data = dump->_data;
+	dump->data.size = DUMP_MAX_SIZE;
+	
 	fail:
-	free_space( NULL, &path_space );
 	free_space( NULL, &space );
 	return ret;
 }
@@ -815,29 +904,29 @@ int dump_files_reset_offsets( dump_t *dump, bool read_info ) {
 	ssize_t size = sizeof(node_t);
 	long set_info = read_info ? 0 : size * 2;
 	
-	if ( gasp_lseek( dump->info_fd, set_info, SEEK_SET ) != set_info ) {
+	if ( gasp_lseek( dump->info.fd, set_info, SEEK_SET ) != set_info ) {
 		ERRMSG( errno, "Couldn't reset info offset" );
 		return errno;
 	}
 	
 	if ( read_info ) {
-		if ( gasp_read( dump->info_fd, &(dump->number), size ) != size ) {
+		if ( gasp_read( dump->info.fd, &(dump->number), size ) != size ) {
 			ERRMSG( errno, "Failed to read scan number" );
 			return errno;
 		}
 		
-		if ( gasp_read( dump->info_fd, &(dump->region), size ) != size ) {
+		if ( gasp_read( dump->info.fd, &(dump->region), size ) != size ) {
 			ERRMSG( errno, "Failed to read region count" );
 			return errno;
 		}
 	}
 	
-	if ( gasp_lseek( dump->used_fd, 0, SEEK_SET ) != 0 ) {
+	if ( gasp_lseek( dump->used.fd, 0, SEEK_SET ) != 0 ) {
 		ERRMSG( errno, "Couldn't reset used addresses offset" );
 		return errno;
 	}
 	
-	if ( gasp_lseek( dump->data_fd, 0, SEEK_SET ) != 0 ) {
+	if ( gasp_lseek( dump->data.fd, 0, SEEK_SET ) != 0 ) {
 		ERRMSG( errno, "Couldn't reset data offset" );
 		return errno;
 	}
@@ -846,20 +935,20 @@ int dump_files_reset_offsets( dump_t *dump, bool read_info ) {
 }
 
 void dump_files_shut( dump_t *dump ) {
-	if ( dump->info_fd >= 0 ) close( dump->info_fd );
-	if ( dump->used_fd >= 0 ) close( dump->used_fd );
-	if ( dump->data_fd >= 0 ) close( dump->data_fd );
-	memset( dump, 0, sizeof(dump_t) );
-	memset( dump->used, 0, DUMP_MAX_SIZE );
-	memset( dump->data, 0, DUMP_MAX_SIZE );
-	dump->info_fd = dump->used_fd = dump->data_fd = -1;
+	if ( !dump )
+		return;
+	dump_files__shut_file( &(dump->info) );
+	dump_files__shut_file( &(dump->used) );
+	dump_files__shut_file( &(dump->data) );
+	memset( dump, 0, sizeof( dump_t ) );
+	dump->info.fd = dump->used.fd = dump->data.fd = -1;
 }
 
 int dump_files_test( dump_t dump ) {
-	if ( dump.info_fd <= 0 || dump.used_fd <= 0 || dump.data_fd <= 0 )
+	if ( dump.info.fd <= 0 || dump.used.fd <= 0 || dump.data.fd <= 0 )
 	{
 		fprintf( stderr, "info_fd = %d, used_fd = %d, data_fd = %d\n",
-			dump.info_fd, dump.used_fd, dump.data_fd );
+			dump.info.fd, dump.used.fd, dump.data.fd );
 		return EBADF;
 	}
 	return EXIT_SUCCESS;
@@ -877,7 +966,7 @@ uintmax_t proc_handle_dump_nextbyfile(
 )
 {
 	(void)handle;
-	if ( read( dump.info_fd, mapped, sizeof(proc_mapped_t) )
+	if ( read( dump.info.fd, mapped, sizeof(proc_mapped_t) )
 		!= sizeof(proc_mapped_t) && err )
 		*err = errno;
 	return mapped->foot;
@@ -895,6 +984,8 @@ typedef uintmax_t (*func_proc_handle_rdwr_t)(
 bool gasp_tpolli( int int_pipes[2], int *sig, int msTimeout )
 {
 	struct pollfd pfd = {0};
+	if ( int_pipes[0] <= 0 )
+		return 0;
 	pfd.fd = int_pipes[0];
 	pfd.events = POLLIN;
 	if ( poll( &pfd, 1, msTimeout ) != 1 )
@@ -906,9 +997,11 @@ bool gasp_tpolli( int int_pipes[2], int *sig, int msTimeout )
 bool gasp_tpollo( int ext_pipes[2], int sig, int msTimeout )
 {
 	struct pollfd pfd = {0};
+	if ( ext_pipes[1] <= 0 )
+		return 0;
 	pfd.fd = ext_pipes[1];
 	pfd.events = POLLOUT;
-	if ( poll( &pfd, 1, msTimeout ) <= 0 )
+	if ( poll( &pfd, 1, msTimeout ) != 1 )
 		return 0;
 	write( ext_pipes[1], &sig, sizeof(int) );
 	return 1;
@@ -917,13 +1010,12 @@ bool gasp_tpollo( int ext_pipes[2], int sig, int msTimeout )
 bool gasp_thread_should_die( int ext_pipes[2], int int_pipes[2] )
 {
 	int ret = SIGCONT;
-	if ( !gasp_tpolli( int_pipes, &ret, 1 ) )
+	if ( !gasp_tpolli( int_pipes, &ret, 0 ) )
 		return 0;
 	switch ( ret )
 	{
 	case SIGKILL:
 		return 1;
-	case SIGCONT:
 	case SIGSTOP:
 		if ( !gasp_tpollo( ext_pipes, SIGCONT, -1 ) )
 			return 1;
@@ -949,9 +1041,10 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	if ( !tscan ) return 0;
 	
 	dump = &(tscan->dump[1]);
-	used = dump->used;
-	data = dump->data;
+	used = dump->_used;
+	data = dump->_data;
 	tscan->last_found = 0;
+	tscan->done_upto = 0;
 	prot |= tscan->writeable ? 02 : 0;
 	handle = tscan->handle;
 	next_mapped =
@@ -974,13 +1067,13 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 		tscan->zero = ~0;
 	
 	/* Align offset to where we want to write data to */	
-	if ( gasp_lseek( dump->info_fd, 0, SEEK_SET ) ) {
+	if ( gasp_lseek( dump->info.fd, 0, SEEK_SET ) ) {
 		ret = errno;
 		goto done;
 	}
 	
 	/* Set Scan/Dump Number */
-	if ( gasp_write( dump->info_fd, &n, sizeof(node_t) )
+	if ( gasp_write( dump->info.fd, &n, sizeof(node_t) )
 		!= sizeof(node_t) )
 	{
 		ret = errno;
@@ -999,7 +1092,7 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	
 	/* Initialise mapped count */
 	n = 0;
-	if ( gasp_write( dump->info_fd, &n, sizeof(node_t) )
+	if ( gasp_write( dump->info.fd, &n, sizeof(node_t) )
 		!= sizeof(node_t) )
 	{
 		ret = errno;
@@ -1011,7 +1104,7 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	 * we use ~0 now because it's bit scan friendly,
 	 * not that we're doing those yet */
 	(void)memset( used, ~0, DUMP_MAX_SIZE );
-	
+
 	while ( next_mapped( &ret, handle, *dump, &mapped )  )
 	{
 		tscan->done_upto = mapped.head;
@@ -1047,28 +1140,28 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 				NULL, handle, mapped.head, data, i )) )
 				break;
 			
-			if ( gasp_write( dump->data_fd, data, size ) != size )
+			if ( gasp_write( dump->data.fd, data, size ) != size )
 			{
 				ret = errno;
 				ERRMSG( errno, "Failed to write glanced at data" );
 				goto done;
 			}
 		
-			if ( gasp_write( dump->used_fd, used, size ) != size )
+			if ( gasp_write( dump->used.fd, used, size ) != size )
 			{
 				ret = errno;
 				ERRMSG( errno, "Failed to write used addresses" );
 				goto done;
 			}
 			
-			fsync( dump->used_fd );
-			fsync( dump->data_fd );
+			fsync( dump->used.fd );
+			fsync( dump->data.fd );
 		}
 		
 		if ( bytes == mapped.size ) {			
 			/* Add the mapping to the list */
 			if ( gasp_write(
-				dump->info_fd, &mapped, sizeof(proc_mapped_t) )
+				dump->info.fd, &mapped, sizeof(proc_mapped_t) )
 				!= (ssize_t)sizeof(proc_mapped_t) )
 			{
 				ret = errno;
@@ -1081,21 +1174,21 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	
 	done:
 	
-	if ( gasp_lseek( dump->info_fd, sizeof(node_t), SEEK_SET ) < 0 ) {
+	if ( gasp_lseek( dump->info.fd, sizeof(node_t), SEEK_SET ) < 0 ) {
 		ERRMSG( errno, "Couldn't set info offset to where"
 			" we should set region count" );
 	}
 	else {
 		fprintf( stderr, "Setting region count to %lu\n", n );
 		if ( gasp_write(
-			dump->info_fd, &n, sizeof(node_t) ) != sizeof(node_t)
+			dump->info.fd, &n, sizeof(node_t) ) != sizeof(node_t)
 		)
 		{
 			ERRMSG( errno, "Failed to write region count" );
 		}
 	}
 	
-	fsync( dump->info_fd );
+	fsync( dump->info.fd );
 	tscan->ret = ret;
 	tscan->last_found = n;
 	
@@ -1106,7 +1199,6 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 {
 	int ret = EXIT_SUCCESS;
 	ssize_t size = 0;
-	size_t pos;
 	uchar *data, *used;
 	proc_mapped_t *pmap, *nmap;
 	
@@ -1117,10 +1209,10 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 	}
 	
 	/* Initialise pointers */
-	pmap = dump->pmap;
-	nmap = dump->nmap;
-	used = dump->used;
-	data = dump->data;
+	pmap = dump->mapped;
+	nmap = dump->mapped + 1;
+	used = dump->_used;
+	data = dump->_data;
 	
 	dump->kept = 0;
 	
@@ -1135,16 +1227,11 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 		dump->region--;
 		dump->addr = pmap->foot;
 		
-		if ( nmap > pmap ) { nmap = pmap; pmap = nmap + 1; }
-		else { pmap = nmap; nmap = pmap + 1; }
-		
-		dump->pmap = pmap;
-		dump->nmap = nmap;
-		
-		/* Ensure invalid region handed back on failure */
-		memset( nmap, 0 , sizeof(proc_mapped_t) );
+		(void)memmove(
+			dump->mapped, dump->mapped + 1, sizeof(proc_mapped_t) );
+		(void)memset( dump->mapped + 1, 0 , sizeof(proc_mapped_t) );
 	
-		if ( gasp_read( dump->info_fd, nmap, sizeof(proc_mapped_t) )
+		if ( gasp_read( dump->info.fd, nmap, sizeof(proc_mapped_t) )
 			!= sizeof(proc_mapped_t) )
 		{
 			if ( errno == EXIT_SUCCESS ) errno = EIO;
@@ -1159,7 +1246,6 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 			goto failure;
 		}
 		
-		/* This is expected to increase before next call */
 		dump->addr = nmap->head;
 	}
 	
@@ -1167,20 +1253,20 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 	if ( size > DUMP_BUF_SIZE ) size = DUMP_BUF_SIZE;
 	
 	if ( gasp_read(
-		dump->used_fd, used + DUMP_BUF_SIZE, size ) != size
+		dump->used.fd, used + DUMP_BUF_SIZE, size ) != size
 	)
 	{
 		if ( errno == EXIT_SUCCESS ) errno = EIO;
 		ret = errno;
 		ERRMSG( ret, "Failed to read used addresses file" );
 		fprintf( stderr,
-			"dump->done = %zu, dump->size = %zu\n"
+			"dump->done = %zu, dump->size = %zu\n",
 			dump->done, dump->size );
 		goto failure;
 	}
 	
 	if ( gasp_read(
-		dump->data_fd, data + DUMP_BUF_SIZE, size ) != size
+		dump->data.fd, data + DUMP_BUF_SIZE, size ) != size
 	)
 	{
 		if ( errno == EXIT_SUCCESS ) errno = EIO;
@@ -1203,15 +1289,7 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 		
 		dump->addr -= keep;
 		dump->kept = keep;
-		dump->size += keep;
-		pos = DUMP_BUF_SIZE - keep;
-		(void)memmove( used, used + pos, dump->size );
-		(void)memmove( data, data + pos, dump->size );
-	}
-	else {
-		dump->kept = 0;
-		(void)memmove( used, used + DUMP_BUF_SIZE, DUMP_BUF_SIZE );
-		(void)memmove( data, data + DUMP_BUF_SIZE, DUMP_BUF_SIZE );
+		dump->base = DUMP_BUF_SIZE - keep;
 	}
 	dump->done += size;
 	
@@ -1232,17 +1310,14 @@ bool dump_files_change_stored( dump_t *dump )
 	if ( !dump )
 		return 0;
 	
-	if ( dump->kept )
-	{
-		pos = dump->kept;
-		gasp_lseek( dump->used_fd, -pos, SEEK_CUR );
-		gasp_lseek( dump->data_fd, -pos, SEEK_CUR );
-	}
-	gasp_write( dump->used_fd, dump->used, dump->size );
-	gasp_write( dump->data_fd, dump->data, dump->size );
+	pos = DUMP_MAX_SIZE - dump->base;
+	gasp_lseek( dump->used.fd, -pos, SEEK_CUR );
+	gasp_lseek( dump->data.fd, -pos, SEEK_CUR );
+	gasp_write( dump->used.fd, dump->_used, dump->size );
+	gasp_write( dump->data.fd, dump->_data, dump->size );
 	
-	fsync( dump->used_fd );
-	fsync( dump->data_fd );
+	fsync( dump->used.fd );
+	fsync( dump->data.fd );
 	return 1;
 }
 
@@ -1273,11 +1348,11 @@ bool proc_handle__aobscan_test( tscan_t *tscan )
 		return 0;
 	}
 	dump = &(tscan->dump[1]);
-	used = dump->used;
-	data = dump->data;
-	stop = dump->size - tscan->bytes;
+	used = dump->_used;
+	data = dump->_data;
+	stop = (DUMP_BUF_SIZE + dump->size) - (tscan->bytes - 1);
 	addr = dump->addr;
-	for ( a = 0; a < stop; ++a, ++addr )
+	for ( a = dump->base; a < stop; ++a, ++addr )
 	{
 		if ( used[a] ) {
 			used[a] = (
@@ -1350,32 +1425,38 @@ void* proc_handle_aobscan( tscan_t *tscan ) {
 		have_prev_results = 1;
 	}
 	else {
-		memset( tscan->dump->used, ~0, DUMP_MAX_SIZE );
-		memset( tscan->dump->data, tscan->zero, DUMP_MAX_SIZE );
+		memset( tscan->dump->_used, ~0, DUMP_MAX_SIZE );
+		memset( tscan->dump->_data, tscan->zero, DUMP_MAX_SIZE );
 	}
-	
+
+#if 0
 	fprintf( stderr, "Starting scan (%lu Regions)...\n", dump->region );
+#endif
 	while ( proc_handle__aobscan_next( tscan, dump ) )
 	{
+#if 1
 		fprintf( stderr, "%p-%p\n",
 			(void*)(dump->addr), (void*)(dump->addr + dump->size) );
+#endif
 		
 		if ( have_prev_results ) {
 			/* Ensure we check only addresses that have been marked
 			 * as a result previously */
 			(void)proc_handle__aobscan_next( tscan, tscan->dump );
 			(void)memcpy(
-				dump->used, tscan->dump->used, DUMP_MAX_SIZE );
+				dump->_used, tscan->dump->_used, DUMP_MAX_SIZE );
 		}
 		else {
 			/* Ensure we check all addresses */
-			memset( dump->used, ~0, DUMP_MAX_SIZE );
+			memset( dump->_used, ~0, DUMP_MAX_SIZE );
 		}
 		
 		if ( !proc_handle__aobscan_test( tscan ) )
 			goto set_found;
 	}
+#if 0
 	fprintf( stderr, "Finished scan\n" );
+#endif
 	
 	tscan->ret = EXIT_SUCCESS;
 	tscan->done_upto = tscan->upto;
@@ -1404,7 +1485,7 @@ void* proc_handle_dumper( void * _tscan ) {
 	(void)proc_handle_aobscan( tscan );
 	tscan->scanning = 0;
 	
-	gasp_tpollo( tscan->main_pipes, SIGCONT, 0 );
+	gasp_tpollo( tscan->main_pipes, SIGCONT, -1 );
 	tscan->threadmade = 0;
 	return _tscan;
 }

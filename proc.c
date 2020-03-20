@@ -225,9 +225,9 @@ uintmax_t proc_mapped_next(
 	}
 	
 	do {
-		memset( mapped, 0, sizeof(proc_mapped_t) );
+		(void)memset( mapped, 0, sizeof(proc_mapped_t) );
 		do {
-			memset( line, 0, PAGE_LINE_SIZE );
+			(void)memset( line, 0, PAGE_LINE_SIZE );
 			errno = EXIT_SUCCESS;
 			if ( gasp_read( fd, line, PAGE_LINE_SIZE )
 				!= PAGE_LINE_SIZE )
@@ -292,32 +292,34 @@ uintmax_t proc_mapped_next(
 
 mode_t proc_mapped_addr(
 	int *err, proc_handle_t *handle,
-	uintmax_t addr, mode_t perm, int *fd, proc_mapped_t *Mapped
+	uintmax_t addr, mode_t perm, int *fd, proc_mapped_t *mapped
 )
 {
 	char path[256] = {0};
-	proc_mapped_t mapped = {0};
+	if ( !mapped ) {
+		if ( err ) *err = EDESTADDRREQ;
+		return 0;
+	}
 	
-	while ( proc_mapped_next( err, handle, mapped.foot, &mapped, 0 ) ) {
-		if ( mapped.foot < addr ) continue;
-#ifdef SIZEOF_LLONG
-		sprintf( path, "%s/map_files/%llx-%llx",
-			handle->procdir,
-			(long long)(mapped.head), (long long)(mapped.foot) );
-#else
-		sprintf( path, "%s/map_files/%lx-%lx",
-			handle->procdir,
-			(long)(mapped.head), (long)(mapped.foot) );
-#endif
+	(void)memset( mapped, 0, sizeof(proc_mapped_t) );
+	
+	while ( proc_mapped_next( err, handle, mapped->foot, mapped, 0 ) ) {
+		if ( mapped->foot < addr )
+			continue;
+		
+		sprintf( path, "%s/map_files/%jx-%jx",
+			handle->procdir, mapped->head, mapped->foot );
+			
 		if ( access( path, F_OK ) == 0 ) {
-			(void)file_change_perm( err, path, perm | mapped.perm );
-			if ( fd ) *fd = open( path, O_RDWR );
-			if ( Mapped ) *Mapped = mapped;
-			return mapped.perm;
+			if ( perm )
+				(void)file_change_perm( err, path, perm );
+			if ( fd )
+				*fd = open( path, O_RDWR );
+			return mapped->perm;
 		}
 	}
 	if ( err ) *err = ERANGE;
-	if ( Mapped ) memset( Mapped, 0, sizeof(proc_mapped_t) );
+	(void)memset( mapped, 0, sizeof(proc_mapped_t) );
 	return 0;
 }
 
@@ -785,8 +787,8 @@ void dump_files__shut_file( dump_file_t *dump_file ) {
 	if ( dump_file->fd > 0 )
 		close( dump_file->fd );
 	if ( dump_file->data )
-		memset( dump_file->data, 0, dump_file->size );
-	memset( dump_file, 0, sizeof(dump_file_t) );
+		(void)memset( dump_file->data, 0, dump_file->size );
+	(void)memset( dump_file, 0, sizeof(dump_file_t) );
 }
 
 int dump_files__open_file(
@@ -801,7 +803,7 @@ int dump_files__open_file(
 	size_t len;
 	
 	if ( !dump_file || !space || !ext ) return EDESTADDRREQ;
-	memset( dump_file, 0, sizeof(dump_file_t) );
+	(void)memset( dump_file, 0, sizeof(dump_file_t) );
 	
 	GASP_PATH = getenv("GASP_PATH");
 	len = strlen(GASP_PATH) + (2 * (sizeof(node_t) * CHAR_BIT));
@@ -882,10 +884,15 @@ int dump_files__dir( space_t *space, long inst, bool make ) {
 int dump_files_open( dump_t *dump, long inst, long scan ) {
 	int ret = EXIT_SUCCESS;
 	space_t space = {0};
-	if ( !dump ) return EDESTADDRREQ;
 	
-	/* Cleanse structure of random data */
-	memset( dump, 0, sizeof( dump_t ) );
+	if ( !dump )
+		return EDESTADDRREQ;
+	
+	/* Cleanse structure of left over data data */
+	if ( dump_files_test( *dump ) == EXIT_SUCCESS )
+		dump_files_shut( dump );
+	else
+		(void)memset( dump, 0, sizeof( dump_t ) );
 	
 	if ( (ret = dump_files__dir( &space, inst, 1 ))
 		!= EXIT_SUCCESS ) {
@@ -977,9 +984,9 @@ int dump_files_reset_offsets( dump_t *dump, bool read_info ) {
 	dump->size = 0;
 	dump->number = 0;
 	dump->region = 0;
-	memset( dump->_used, 0, DUMP_MAX_SIZE );
-	memset( dump->_data, 0, DUMP_MAX_SIZE );
-	memset( dump->mapped, 0, sizeof(proc_mapped_t) * 2 );
+	(void)memset( dump->_used, 0, DUMP_MAX_SIZE );
+	(void)memset( dump->_data, 0, DUMP_MAX_SIZE );
+	(void)memset( dump->mapped, 0, sizeof(proc_mapped_t) * 2 );
 	
 	if ( gasp_lseek( dump->info.fd, set_info, SEEK_SET ) != set_info ) {
 		ERRMSG( errno, "Couldn't reset info offset" );
@@ -1017,7 +1024,7 @@ void dump_files_shut( dump_t *dump ) {
 	dump_files__shut_file( &(dump->info) );
 	dump_files__shut_file( &(dump->used) );
 	dump_files__shut_file( &(dump->data) );
-	memset( dump, 0, sizeof( dump_t ) );
+	(void)memset( dump, 0, sizeof( dump_t ) );
 	dump->info.fd = dump->used.fd = dump->data.fd = -1;
 }
 
@@ -1147,7 +1154,7 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	 * a later scan can simply override the values,
 	 * we use ~0 now because it's bit scan friendly,
 	 * not that we're doing those yet */
-	(void)memset( used, ~0, DUMP_MAX_SIZE );
+	(void)memset( dump->_used, ~0, DUMP_MAX_SIZE );
 
 	while ( next_mapped( &ret, handle, *dump, &mapped )  )
 	{
@@ -1504,7 +1511,7 @@ void* proc_handle_aobscan( tscan_t *tscan ) {
 		}
 		else {
 			/* Ensure we check all addresses */
-			memset( dump->_used, ~0, DUMP_MAX_SIZE );
+			(void)memset( dump->_used, ~0, DUMP_MAX_SIZE );
 		}
 		
 		if ( !proc_handle__aobscan_test( tscan ) )
@@ -1595,7 +1602,7 @@ proc_notice_t* proc_locate_name(
 	}
 
 	if ( err ) *err = ret;
-	memset( nodes, 0, sizeof(nodes_t) );
+	(void)memset( nodes, 0, sizeof(nodes_t) );
 	for ( notice = proc_glance_init( &ret, &glance, underId )
 		; notice; notice = proc_notice_next( &ret, &glance )
 	)
@@ -1692,9 +1699,9 @@ proc_notice_t* proc_notice_info(
 	else
 		sprintf( dir, "/proc/%d", pid );
 	
-	memset( name->block, 0, name->given );
-	memset( cmdl->block, 0, cmdl->given );
-	memset( full->block, 0, full->given );
+	(void)memset( name->block, 0, name->given );
+	(void)memset( cmdl->block, 0, cmdl->given );
+	(void)memset( full->block, 0, full->given );
 	
 	notice->ownerId = -1;
 	notice->entryId = pid;

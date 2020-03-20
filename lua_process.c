@@ -302,8 +302,8 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	
 	if ( scan == tscan->done_scans ) {
 		
-		memmove( tscan->dump, dump, sizeof(dump_t) );
-		memset( dump, 0, sizeof(dump_t) );
+		(void)memmove( tscan->dump, dump, sizeof(dump_t) );
+		(void)memset( dump, 0, sizeof(dump_t) );
 		dump->info.fd = dump->used.fd = dump->data.fd = -1;
 		return EXIT_SUCCESS;
 	}
@@ -342,11 +342,19 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 int lua_proc_handle_term( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	tscan_t *tscan = &(handle->tscan);
+	
+	gasp_close_pipes( tscan->main_pipes );
+	gasp_close_pipes( tscan->scan_pipes );
+	tscan->pipesmade = 0;
+	
 	lua_proc_handle_undo( handle, 0 );
 	proc_handle_shut( handle->handle );
 	handle->handle = NULL;
-	dump_files_shut( handle->tscan.dump );
-	dump_files_shut( handle->tscan.dump + 1 );
+	
+	dump_files_shut( tscan->dump );
+	dump_files_shut( tscan->dump + 1 );
+	
 	free_nodes( uchar, NULL, &(handle->bytes) );
 	return 0;
 }
@@ -470,6 +478,38 @@ int lua_proc_handle_get_scan_list( lua_State *L ) {
 		L, (lua_proc_handle_t*)luaL_checkudata(L,1,PROC_HANDLE_CLASS) );
 }
 
+int lua_proc_handle__create_pipes( lua_proc_handle_t *handle ) {
+	tscan_t *tscan;
+	
+	if ( !handle ) {
+		ERRMSG( EDESTADDRREQ, "Was not provided a handle" );
+		return EDESTADDRREQ;
+	}
+	
+	tscan = &(handle->tscan);
+	
+	if ( tscan->pipesmade )
+		return EXIT_SUCCESS;
+	
+	if ( tscan->main_pipes[0] <= 0 ) {	
+		if ( pipe2( tscan->main_pipes, 0 ) == -1 ) {
+			ERRMSG( errno, "Couldn't open main thread pipes" );
+			return errno;
+		}
+	}
+	
+	if ( tscan->scan_pipes[0] <= 0 ) {
+		if ( pipe2( tscan->scan_pipes, 0 ) == -1 ) {
+			gasp_close_pipes( tscan->main_pipes );
+			ERRMSG( errno, "Couldn't open scan thread pipes" );
+			return errno;
+		}
+	}
+	
+	tscan->pipesmade = 1;
+	return EXIT_SUCCESS;
+}
+
 bool lua_proc_handle__can_scan(
 	lua_proc_handle_t *handle
 )
@@ -485,12 +525,44 @@ bool lua_proc_handle__can_scan(
 		ERRMSG( EDESTADDRREQ, "No process handle provided" );
 		return 0;
 	}
+	
 	if ( tscan->threadmade )
 	{
 		ERRMSG( EBUSY, "Scan thread currently busy" );
 		return 0;
 	}
+	
+	return (lua_proc_handle__create_pipes( handle ) == EXIT_SUCCESS);
+}
+
+int lua_proc_handle_killscan( lua_State *L ) {
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	lua_pushboolean( L,
+		lua_proc_handle__end_scan( &(handle->tscan) )
+	);
 	return 1;
+}
+
+int lua_proc_handle_percentage( lua_State *L ) {
+	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	tscan_t *tscan = &(handle->tscan);
+	uintmax_t zero = 0;
+	uintmax_t addr = tscan->done_upto;
+	uintmax_t upto = tscan->dumping ? ~zero : tscan->upto;
+	long double num = addr, dem = upto;
+	
+	fprintf( stderr, "prercentage() %p - %p, %p\n",
+		(void*)(tscan->from), (void*)(tscan->upto), (void*)addr );
+		
+	lua_pushboolean( L, tscan->threadmade );
+	lua_pushboolean( L, tscan->dumping );
+	lua_pushboolean( L, tscan->scanning );
+	lua_pushinteger( L, tscan->done_upto );
+	/* Must be valid number to prevent crashes due to not handling NAN */
+	lua_pushnumber( L, upto ? ((num / dem) * 100.0) : 0.0 );
+	return 5;
 }
 
 bool lua_proc_handle_prep_scan(
@@ -510,14 +582,13 @@ bool lua_proc_handle_prep_scan(
 	dump_t *dump;
 	space_t space = {0};
 	
-	if ( !handle ) return 0;
+	if ( !lua_proc_handle__can_scan( handle ) )
+		return 0;
 	
 	tscan = &(handle->tscan);
 	nodes = &(tscan->locations);
 	
-	if ( !lua_proc_handle__can_scan( handle )
-		|| more_nodes( uintmax_t, &ret, nodes, list_limit )
-	)
+	if ( !more_nodes( uintmax_t, &ret, nodes, list_limit ) )
 	{
 		if ( ret != EXIT_SUCCESS )
 			ERRMSG( ret, "Unable to allocate memory for ptr list" );
@@ -564,30 +635,10 @@ bool lua_proc_handle_prep_scan(
 	tscan->last_found = last_found;
 	tscan->zero = zero ? ~0 : 0;
 	
-	if ( tscan->scan_pipes[1] <= 0 ) {
-		tscan->main_pipes[0] = -1;
-		tscan->main_pipes[1] = -1;
-		tscan->scan_pipes[0] = -1;
-		tscan->scan_pipes[1] = -1;
-		
-		if ( pipe2( tscan->main_pipes, 0 ) == -1 ) {
-			ERRMSG( errno, "Couldn't open pipes" );
-			return 0;
-		}
-		
-		if ( pipe2( tscan->scan_pipes, 0 ) == -1 ) {
-			gasp_close_pipes( tscan->main_pipes );
-			ERRMSG( errno, "Couldn't open pipes" );
-			return 0;
-		}
-	}
-	
 	if ( (ret = dump_files_open( dump, tscan->id, scan ))
 		!= EXIT_SUCCESS
 	)
 	{
-		gasp_close_pipes( tscan->scan_pipes );
-		gasp_close_pipes( tscan->main_pipes );
 		ERRMSG( ret, "Couldn't open output file" );
 		return 0;
 	}
@@ -597,15 +648,12 @@ bool lua_proc_handle_prep_scan(
 			!= EXIT_SUCCESS
 		)
 		{
-			gasp_close_pipes( tscan->scan_pipes );
-			gasp_close_pipes( tscan->main_pipes );
 			dump_files_shut( dump );
 			ERRMSG( ret, "Couldn't open input file" );
 			return 0;
 		}
 	}
 	
-	tscan->pipesmade = 1;
 	return 1;
 }
 
@@ -625,44 +673,23 @@ int lua_proc_handle_dump( lua_State *L ) {
 	)
 	{
 		lua_pushboolean(L,0);
+		ERRMSG( EXIT_FAILURE, "Failed to prep scan" );
 		return 1;
 	}
 	
-	pthread_create(
-		&(tscan->thread), NULL, proc_handle_dumper, &(handle->tscan) );
-	lua_pushboolean(L, 1 );
-	return 1;
-}
-
-int lua_proc_handle_killscan( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
-		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushboolean( L,
-		lua_proc_handle__end_scan( &(handle->tscan) )
-	);
-	return 1;
-}
-
-int lua_proc_handle_percentage( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
-		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	tscan_t *tscan = &(handle->tscan);
-	uintmax_t zero = 0;
-	uintmax_t addr = tscan->done_upto;
-	uintmax_t upto = tscan->dumping ? ~zero : tscan->upto;
-	long double num = addr, dem = upto;
+	if ( pthread_create(
+			&(tscan->thread), NULL,
+			proc_handle_dumper, &(handle->tscan) ) != 0
+	)
+	{
+		lua_pushboolean( L, 1 );
+		ERRMSG( errno, "Couldn't create dump thread" );
+	}
 	
-	fprintf( stderr, "prercentage() %p - %p, %p\n",
-		(void*)(tscan->from), (void*)(tscan->upto), (void*)addr );
-		
-	lua_pushboolean( L, tscan->threadmade );
-	lua_pushboolean( L, tscan->dumping );
-	lua_pushboolean( L, tscan->scanning );
-	lua_pushinteger( L, tscan->done_upto );
-	/* Must be valid number to prevent crashes due to not handling NAN */
-	lua_pushnumber( L, upto ? ((num / dem) * 100.0) : 0.0 );
-	return 5;
+	lua_pushboolean( L, 1 );
+	return 1;
 }
+
 int lua_proc_handle_bytescan( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
@@ -708,8 +735,14 @@ int lua_proc_handle_bytescan( lua_State *L ) {
 		}
 	}
 	
-	pthread_create(
-		&(tscan->thread), NULL, proc_handle_dumper, &(handle->tscan) );
+	if ( pthread_create(
+			&(tscan->thread), NULL,
+			proc_handle_dumper, &(handle->tscan) ) != 0
+	)
+	{
+		lua_pushboolean( L, 1 );
+		ERRMSG( errno, "Couldn't create scan thread" );
+	}
 
 	lua_pushboolean( L, 1 );
 	return 1;
@@ -719,6 +752,7 @@ int lua_proc_handle_text( lua_State *L ) {
 	lua_pushstring( L, PROC_HANDLE_CLASS );
 	return 1;
 }
+
 int lua_proc_handle_grab( lua_State *L ) {
 	lua_proc_handle_t *handle =
 		(lua_proc_handle_t*)lua_newuserdata(L,sizeof(lua_proc_handle_t));
@@ -726,7 +760,7 @@ int lua_proc_handle_grab( lua_State *L ) {
 	dump_t *dump;
 	if ( !handle ) return 0;
 	
-	memset( handle, 0, sizeof(lua_proc_handle_t) );
+	(void)memset( handle, 0, sizeof(lua_proc_handle_t) );
 	
 	tscan = &(handle->tscan);
 	
@@ -740,6 +774,8 @@ int lua_proc_handle_grab( lua_State *L ) {
 	tscan->scan_pipes[1] = -1;
 	tscan->main_pipes[0] = -1;
 	tscan->main_pipes[1] = -1;
+	
+	(void)lua_proc_handle__create_pipes( handle );
 	
 	luaL_setmetatable(L,PROC_HANDLE_CLASS);
 	return 1;

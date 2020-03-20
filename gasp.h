@@ -199,8 +199,8 @@ typedef struct proc_handle {
 #define DUMP_MAX_SIZE (DUMP_BUF_SIZE * 2)
 typedef struct dump_file {
 	int fd;
-	long prv;
-	long pos;
+	gasp_off_t prv;
+	gasp_off_t pos;
 	size_t size;
 	uchar *data;
 } dump_file_t;
@@ -220,10 +220,14 @@ typedef struct dump {
 	uintmax_t done;
 	/* Which address to report */
 	uintmax_t addr;
-	/* Where to stop comparing from 0 */
+	/* Size of data read */
 	size_t size;
 	/* Where to start comparing from */
 	size_t base;
+	/* Where to stop comparing upto */
+	size_t last;
+	/* DUMP_BUF_SIZE + size */
+	size_t tail;
 	uchar _used[DUMP_MAX_SIZE], _data[DUMP_MAX_SIZE];
 } dump_t;
 
@@ -241,10 +245,14 @@ typedef struct tscan {
 	bool scanning;
 	bool threadmade;
 	bool pipesmade;
+	bool assignedID;
 	int main_pipes[2], scan_pipes[2], zero;
 	pthread_t thread;
 	int ret;
+	node_t id;
 	dump_t dump[2];
+	
+	nodes_t	locations;
 	
 	proc_handle_t *handle;
 	node_t done_scans, regions, found, last_found;

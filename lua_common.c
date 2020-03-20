@@ -327,6 +327,13 @@ int lua_str2bytes( lua_State *L ) {
 	return 2;
 }
 
+int lua_ptrlimit( lua_State *L ) {
+	uintmax_t limit = (uintmax_t)((void*)(~0));
+	limit >>= 1;
+	lua_pushinteger( L, limit );
+	return 1;
+}
+
 int lua_int2bytes( lua_State *L ) {
 	nodes_t nodes = {0};
 	uchar *array;
@@ -461,6 +468,7 @@ void lua_create_gasp(lua_State *L) {
 	luaL_Reg *reg;
 	lua_create_proc_classes(L);
 	lua_newtable(L);
+	push_branch_cfunc(L,"ptrlimit",lua_ptrlimit );
 	push_branch_cfunc(L,"locate_app",lua_proc_locate_name);
 	push_branch_cfunc(L,"new_glance",lua_proc_glance_grab);
 	push_branch_cfunc(L,"new_handle",lua_proc_handle_grab);

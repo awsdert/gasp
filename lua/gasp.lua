@@ -1,5 +1,8 @@
--- Used to catch semi-recoverable errors
+-- Used to recover where possible
 _G.forced_reboot = false
+function calc_percentage( num, dem )
+	return (((0.0 + num) / (0.0 + dem)) * 100.0)
+end
 function init()
 	local func, ok, err
 	

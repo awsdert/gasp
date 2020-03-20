@@ -1,11 +1,11 @@
 return function (ctx,now,prv)
 	local font = get_font()
 	local scan = GUI.scan or {}
-	local list, tmp, i, v
+	local list, tmp, i, v, p
 	GUI.keep_cheat = nil
 	scan.as_text = scan.as_text or ""
 	scan.from = scan.from or 0
-	scan.upto = scan.upto or 0x7FFFFFFF
+	scan.upto = scan.upto or gasp.ptrlimit()
 	scan.Type = scan.Type or "signed"
 	scan.limit = scan.limit or 100
 	scan.done = scan.done or { count = 0, from = 0, upto = scan.from }
@@ -13,6 +13,7 @@ return function (ctx,now,prv)
 	scan = rebuild_cheat(scan)
 	
 	done = scan.done
+	done.count = done.count or 0
 	GUI.draw_reboot(ctx)
 	GUI.draw_goback(ctx,now,prv)
 	
@@ -30,18 +31,19 @@ return function (ctx,now,prv)
 	nk.label( ctx, "Find:", nk.TEXT_LEFT )
 	scan = GUI.draw_edit_field(ctx,font,scan)
 	
-	if done.count == 0 and
-		GUI.cheat and GUI.cheat.app and GUI.cheat.app.regions then
-		if scan.regions then
-			list = scan.regions
-			tmp = scan.region_options
-		else
-			list = {}
-			tmp = {}
-			list[1] = { desc = "Default", from = 0, upto = 0x7FFFFFFF }
-			tmp[1] =
-				string.format( "%X - %X %s",
-				list[1].from, list[1].upto, list[1].desc )
+	if done.count == 0 then
+	
+		list = {}
+		tmp = {}
+		list[1] = {
+			desc = "Default",
+			from = 0,
+			upto = gasp.ptrlimit()
+		}
+		tmp[1] =
+			string.format( "%X - %X %s",
+			list[1].from, list[1].upto, list[1].desc )
+		if GUI.cheat and GUI.cheat.app and GUI.cheat.app.regions then
 			for i=1,#(GUI.cheat.app.regions),1 do
 				list[i+1] = GUI.cheat.app.regions[i]
 				tmp[i+1] =
@@ -49,6 +51,7 @@ return function (ctx,now,prv)
 					list[i+1].from, list[i+1].upto, list[i+1].desc )
 			end
 		end
+		
 		scan.regions = list
 		scan.region_options = tmp
 		scan.region = nk.combo(
@@ -59,6 +62,7 @@ return function (ctx,now,prv)
 				pad_height( font, tmp[1] ) * 2
 			}
 		)
+		
 		if nk.button( ctx, nil, "Use" ) then
 			scan.from = list[scan.region].from
 			scan.upto = list[scan.region].upto
@@ -145,40 +149,56 @@ return function (ctx,now,prv)
 	scan.done = done
 	GUI.scan = scan
 	
+	p = {
+		active = false,
+		dumping = false,
+		scanning = false,
+		addr = 0,
+		value = 0.0
+	} 
 	if GUI.handle then
-		scan.dumping = GUI.handle:dumping()
-		scan.scanning = GUI.handle:scanning()
+		p.active, p.dumping, p.scanning, p.addr, p.value =
+			GUI.handle:percentage_done()
 	end
 	
 	if done.count > 0 then
 	
 		nk.layout_row_dynamic( ctx, pad_height( font, "%" ), 1 )
 		
-		if scan.dumping == true then
+		if p.dumping == true then
+			tmp = "Thread is dumping, " .. p.value .. "% done"
+		elseif p.scanning == true then
+			tmp = "Scan thread is scanning, " .. p.value .. "% done"
+		else
+			tmp = "Thread is not running, " .. p.value .. "% done"
+		end
+		nk.label( ctx, tmp, nk.TEXT_LEFT )
+		
+		if p.dumping == true then
 			tmp = "Thread is dumping"
-		elseif scan.scanning == true then
+		elseif p.scanning == true then
 			tmp = "Scan thread is scanning"
 		else
 			tmp = "Thread is not running"
 		end
-		nk.label( ctx, tmp, nk.TEXT_LEFT )
 		
-		done.addr = GUI.handle:scan_done_upto()
-		nk.progress( ctx, done.addr, scan.upto, nk.FIXED )
+		print("" .. p.value)
+		p.value = math.floor(p.value)
+		print("" .. p.value)
+		nk.progress( ctx, p.value, 100, nk.FIXED )
 		
 		if scan.dumping == true then
-			tmp = string.format( "Dumping from 0x%X", done.addr )
+			tmp = string.format( "Dumping from 0x%X", p.addr )
 		else
-			tmp = string.format( "Scanned upto 0x%X", done.addr )
+			tmp = string.format( "Scanned upto 0x%X", p.addr )
 		end
 		nk.label( ctx, tmp, nk.TEXT_LEFT )
 		
 		list = {}
-		if GUI.handle:dumping() == false then
-			if done.addr < done.upto then
+		if GUI.handle:dumping() == false and not done.use then
+			if p.addr < done.upto then
 				list = done.list or {}
 			else
-				done.added = 0
 				done.addr, done.found, tmp =
 					GUI.handle:get_scan_list(done.count - 1,scan.limit)
 				for i = 1,done.found,1 do
@@ -194,9 +214,14 @@ return function (ctx,now,prv)
 					list[i].is_group = false
 					list[i].active = false
 				end
+				if done.upto == scan.upto then
+					done.use = true
+				end
 				done.upto = done.upto + done.increment
 				if done.upto > scan.upto then done.upto = scan.upto end
 			end
+		else
+			list = done.list or {}
 		end
 				
 		if #list > 0 then
@@ -205,7 +230,7 @@ return function (ctx,now,prv)
 			nk.label( ctx, done.desc, nk.TEXT_LEFT )
 		
 			done.list = list
-			done = GUI.draw_cheat( ctx, font, done )
+			done = GUI.draw_cheats( ctx, font, { list = list } )
 		end
 	end
 	scan.done = done

@@ -154,10 +154,11 @@ return function (ctx,now,prv)
 		dumping = false,
 		scanning = false,
 		addr = 0,
-		value = 0.0
+		value = 0.0,
+		found = 0
 	} 
 	if GUI.handle then
-		p.active, p.dumping, p.scanning, p.addr, p.value =
+		p.active, p.dumping, p.scanning, p.addr, p.value, p.found =
 			GUI.handle:percentage_done()
 	end
 	
@@ -170,22 +171,12 @@ return function (ctx,now,prv)
 		elseif p.scanning == true then
 			tmp = "Scan thread is scanning, " .. p.value .. "% done"
 		else
-			tmp = "Thread is not running, " .. p.value .. "% done"
-		end
-		nk.label( ctx, tmp, nk.TEXT_LEFT )
-		
-		if p.dumping == true then
-			tmp = "Thread is dumping"
-		elseif p.scanning == true then
-			tmp = "Scan thread is scanning"
-		else
 			tmp = "Thread is not running"
 		end
+		tmp =  tmp .. ", " .. p.found .. " found"
+		nk.label( ctx, tmp, nk.TEXT_LEFT )
 		
-		print("" .. p.value)
-		p.value = math.floor(p.value)
-		print("" .. p.value)
-		nk.progress( ctx, p.value, 100, nk.FIXED )
+		nk.progress( ctx, math.floor(p.value), 100, nk.FIXED )
 		
 		if scan.dumping == true then
 			tmp = string.format( "Dumping from 0x%X", p.addr )

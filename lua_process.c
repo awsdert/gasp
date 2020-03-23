@@ -29,7 +29,7 @@ int lua_proc_glance_term( lua_State *L ) {
 }
 
 int lua_proc_notice_next( lua_State *L ) {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
 	proc_notice_t *notice = proc_notice_next( &ret, glance );
 	return lua_proc_notice_info( L, notice );
@@ -286,7 +286,7 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 {
 	char const *GASP_PATH = getenv("GASP_PATH");
 	char *path;
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	node_t i;
 	space_t path_space = {0}, space = {0};
 	dump_t *dump;
@@ -319,7 +319,7 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	if ( !scan ) {
 		sprintf( path, "rm -r \"%s/scans/%lu\"",
 				GASP_PATH, (ulong)(tscan->id) );
-		if ( gasp_isdir( path, 0 ) == EXIT_SUCCESS ) {
+		if ( gasp_isdir( path, 0 ) == 0 ) {
 			fprintf( stderr, "%s\n", path );
 			system( path );
 		}
@@ -532,7 +532,7 @@ bool lua_proc_handle__can_scan(
 		return 0;
 	}
 	
-	return (lua_proc_handle__create_pipes( handle ) == EXIT_SUCCESS);
+	return (lua_proc_handle__create_pipes( handle ) == 0);
 }
 
 int lua_proc_handle_killscan( lua_State *L ) {
@@ -552,9 +552,6 @@ int lua_proc_handle_percentage( lua_State *L ) {
 	uintmax_t addr = tscan->done_upto;
 	uintmax_t upto = tscan->dumping ? ~zero : tscan->upto;
 	long double num = addr, dem = upto;
-	
-	fprintf( stderr, "prercentage() %p - %p, %p\n",
-		(void*)(tscan->from), (void*)(tscan->upto), (void*)addr );
 		
 	lua_pushboolean( L, tscan->threadmade );
 	lua_pushboolean( L, tscan->dumping );
@@ -562,7 +559,8 @@ int lua_proc_handle_percentage( lua_State *L ) {
 	lua_pushinteger( L, tscan->done_upto );
 	/* Must be valid number to prevent crashes due to not handling NAN */
 	lua_pushnumber( L, upto ? ((num / dem) * 100.0) : 0.0 );
-	return 5;
+	lua_pushinteger( L, tscan->locations.count );
+	return 6;
 }
 
 bool lua_proc_handle_prep_scan(
@@ -576,7 +574,7 @@ bool lua_proc_handle_prep_scan(
 	int zero
 )
 {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	tscan_t *tscan;
 	nodes_t *nodes;
 	dump_t *dump;
@@ -590,14 +588,14 @@ bool lua_proc_handle_prep_scan(
 	
 	if ( !more_nodes( uintmax_t, &ret, nodes, list_limit ) )
 	{
-		if ( ret != EXIT_SUCCESS )
+		if ( ret != 0 )
 			ERRMSG( ret, "Unable to allocate memory for ptr list" );
 		return 0;
 	}
 	
 	if ( !(tscan->assignedID) ) {
 		for ( tscan->id = 0;
-			ret == EXIT_SUCCESS && tscan->id < LONG_MAX;
+			ret == 0 && tscan->id < LONG_MAX;
 			tscan->id++
 		)
 		{
@@ -612,7 +610,7 @@ bool lua_proc_handle_prep_scan(
 		}
 	}
 	
-	if ( (ret = lua_proc_handle_undo( handle, scan )) != EXIT_SUCCESS )
+	if ( (ret = lua_proc_handle_undo( handle, scan )) != 0 )
 	{
 		ERRMSG( ret, "Couldn't rollback scan number" );
 		return 0;
@@ -636,16 +634,16 @@ bool lua_proc_handle_prep_scan(
 	tscan->zero = zero ? ~0 : 0;
 	
 	if ( (ret = dump_files_open( dump, tscan->id, scan ))
-		!= EXIT_SUCCESS
+		!= 0
 	)
 	{
 		ERRMSG( ret, "Couldn't open output file" );
 		return 0;
 	}
 	
-	if ( scan && dump_files_test(tscan->dump[0]) != EXIT_SUCCESS ) {
+	if ( scan && dump_files_test(tscan->dump[0]) != 0 ) {
 		if ( (ret = dump_files_open( tscan->dump, tscan->id, scan ))
-			!= EXIT_SUCCESS
+			!= 0
 		)
 		{
 			dump_files_shut( dump );

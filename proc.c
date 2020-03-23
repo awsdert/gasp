@@ -15,7 +15,7 @@ int proc_handle_cont( proc_handle_t *handle ) {
 int proc_handle_grab( proc_handle_t *handle ) {
 	int ret = 0;
 	if ( !(handle->attached) ) {
-		errno = EXIT_SUCCESS;
+		errno = 0;
 		if ( ptrace( PTRACE_ATTACH,
 			handle->notice.entryId, NULL, NULL ) != 0 )
 			return errno;
@@ -43,9 +43,9 @@ mode_t file_glance_perm( int *err, char const *path) {
 }
 
 mode_t file_change_perm( int *err, char const * path, mode_t set ) {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	mode_t was = file_glance_perm( &ret, path );
-	if ( !was && ret != EXIT_SUCCESS ) {
+	if ( !was && ret != 0 ) {
 		if ( err ) *err = ret;
 		return 0;
 	}
@@ -63,12 +63,12 @@ size_t file_glance_size( int *err, char const *path )
 	gasp_off_t size = 0, tmp = -1;
 	struct stat st;
 	
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	
 	if ( stat( path, &st ) == 0 && st.st_size > 0 )
 		return st.st_size;
 	
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	if ( (fd = open(path,O_RDONLY)) < 0 ) {
 		if ( err ) *err = errno;
 		switch ( errno ) {
@@ -203,7 +203,7 @@ uintmax_t proc_mapped_next(
 	int fd;
 	char line[PAGE_LINE_SIZE] = {0}, *pos, path[256] = {0};
 	
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	if ( !mapped ) {
 		if ( err ) *err = EDESTADDRREQ;
 		ERRMSG( EINVAL, "Need destination for page details" );
@@ -228,7 +228,7 @@ uintmax_t proc_mapped_next(
 		(void)memset( mapped, 0, sizeof(proc_mapped_t) );
 		do {
 			(void)memset( line, 0, PAGE_LINE_SIZE );
-			errno = EXIT_SUCCESS;
+			errno = 0;
 			if ( gasp_read( fd, line, PAGE_LINE_SIZE )
 				!= PAGE_LINE_SIZE )
 				goto done;
@@ -277,7 +277,7 @@ uintmax_t proc_mapped_next(
 	
 	failed:
 	close(fd);
-	//if ( errno == EOF ) errno = EXIT_SUCCESS;
+	//if ( errno == EOF ) errno = 0;
 	if ( err ) *err = errno;
 	ERRMSG( errno, "Failed to find page that finishes after address" );
 	fprintf( stderr, "Wanted: From address %p a page with %c%c%c%c\n",
@@ -327,7 +327,7 @@ int proc__rwvmem_test(
 	proc_handle_t *handle, void *mem, size_t size
 )
 {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	
 	if ( !handle || !mem || !size ) {
 		ret = EINVAL;
@@ -347,19 +347,19 @@ size_t proc__glance_peek(
 	uchar *m = mem;
 	size_t temp;
 	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
 	}
 
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	
 	for ( temp = 0; addr % sizeof(long); ++temp, --addr );
 	if ( temp ) {
 		dst = ptrace( PTRACE_PEEKDATA,
 			handle->notice.entryId, (void*)addr, NULL );
-		if ( errno != EXIT_SUCCESS )
+		if ( errno != 0 )
 			return 0;
 		temp = (sizeof(long) - (predone = temp));
 		memcpy( m, (&dst) + predone, temp );
@@ -370,7 +370,7 @@ size_t proc__glance_peek(
 	while ( done < size ) {
 		dst = ptrace( PTRACE_PEEKTEXT,
 			handle->notice.entryId, (void*)(addr + done), NULL );
-		if ( errno != EXIT_SUCCESS )
+		if ( errno != 0 )
 			return done + predone;
 		temp = size - done;
 		if ( temp > sizeof(long) ) temp = sizeof(long);
@@ -390,18 +390,18 @@ size_t proc__glance_vmem(
 	int ret;
 	uchar *m = mem;
 	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
 	}
 
-	errno = EXIT_SUCCESS;
+	errno = 0;
 #if 0
 	if ( addr % 0xFF ) {
 		predone = proc__glance_peek( &ret, handle, addr, mem,
 			0xFF - (addr % 0xFF) );
-		if ( ret != EXIT_SUCCESS ) {
+		if ( ret != 0 ) {
 			if ( err ) *err = ret;
 			ERRMSG( ret, "Couldn't read from VM" );
 			fprintf( stderr, "%p\n", (void*)addr );
@@ -442,7 +442,7 @@ uintmax_t proc__glance_file(
 	int ret, fd;
 	char path[64] = {0};
 	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
@@ -482,7 +482,7 @@ uintmax_t proc__glance_self(
 {
 	int ret;
 	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
@@ -491,7 +491,7 @@ uintmax_t proc__glance_self(
 	if ( handle->notice.self ) {
 		(void)memmove( mem, (void*)addr, size );
 		if ( err ) *err = errno;
-		if ( errno != EXIT_SUCCESS )
+		if ( errno != 0 )
 			ERRMSG( errno, "Couldn't override VM" );
 		return size;
 	}
@@ -508,7 +508,7 @@ uintmax_t proc__glance_seek(
 	uintmax_t done = 0;
 	int ret, fd;
 	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
@@ -527,11 +527,11 @@ uintmax_t proc__glance_seek(
 	}
 	
 	gasp_lseek( fd, addr, SEEK_SET );
-	if ( errno != EXIT_SUCCESS )
+	if ( errno != 0 )
 		goto failed;
 	
 	done = gasp_read( fd, mem, size );
-	if ( done <= 0 || errno != EXIT_SUCCESS )
+	if ( done <= 0 || errno != 0 )
 		goto failed;
 
 	if ( handle->memfd <= 0 )
@@ -555,13 +555,13 @@ size_t proc__change_poke(
 	uchar *m = mem;
 	size_t temp;
 	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
 	}
 
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	
 	while ( done < size ) {
 		dst = ptrace( PTRACE_PEEKDATA,
@@ -585,13 +585,13 @@ size_t proc__change_vmem(
 	uintmax_t done;
 	int ret;
 	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
 	}
 
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	
 	internal.iov_base = mem;
 	internal.iov_len = size;
@@ -624,7 +624,7 @@ uintmax_t proc__change_file(
 	int ret, fd;
 	
 	(void)fd;
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
@@ -652,16 +652,16 @@ size_t proc__change_self(
 {
 	int ret;
 	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
 	}
 	
 	if ( handle->notice.self ) {
-		errno = EXIT_SUCCESS;
+		errno = 0;
 		(void)memmove( (void*)addr, mem, size );
-		if ( errno != EXIT_SUCCESS ) {
+		if ( errno != 0 ) {
 			if ( err ) *err = errno;
 			ERRMSG( errno, "Couldn't override VM" );
 			return 0;
@@ -681,7 +681,7 @@ uintmax_t proc__change_seek(
 	uintmax_t done = 0;
 	int ret, fd;
 	
-	if ( (ret = proc__rwvmem_test(handle, mem,size)) != EXIT_SUCCESS )
+	if ( (ret = proc__rwvmem_test(handle, mem,size)) != 0 )
 	{
 		if ( err ) *err = ret;
 		return 0;
@@ -696,11 +696,11 @@ uintmax_t proc__change_seek(
 	}
 	
 	gasp_lseek( fd, addr, SEEK_SET );
-	if ( errno != EXIT_SUCCESS )
+	if ( errno != 0 )
 		goto failed;
 	
 	done = gasp_write( fd, mem, size );
-	if ( done <= 0 || errno != EXIT_SUCCESS )
+	if ( done <= 0 || errno != 0 )
 		goto failed;
 
 	close(fd);
@@ -733,7 +733,7 @@ int gasp_isdir( char const *path, bool make ) {
 	{
 		if ( errno == ENOTDIR || errno == ENOENT ) {
 			if ( make ) {
-				errno = EXIT_SUCCESS;
+				errno = 0;
 				(void)mkdir(path,0755);
 				return errno;
 			}
@@ -751,7 +751,7 @@ int gasp_rmdir( space_t *space, char const *path, bool recursive ) {
 	char *temp;
 	if ( ret == ENOENT )
 		return EXIT_SUCCESS;
-	if ( ret != EXIT_SUCCESS )
+	if ( ret != 0 )
 		return ret;
 	if ( !space )
 		return EDESTADDRREQ;
@@ -764,7 +764,7 @@ int gasp_rmdir( space_t *space, char const *path, bool recursive ) {
 
 int gasp_open( int *fd, char const *path, int perm )
 {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	int with = ((perm & 0600) == 0600) ? O_RDWR : 0;
 	if ( !fd ) return EDESTADDRREQ;
 	if ( !path ) return EINVAL;
@@ -797,7 +797,7 @@ int dump_files__open_file(
 	char const *ext
 )
 {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	char const *GASP_PATH;
 	char *path;
 	size_t len;
@@ -821,30 +821,30 @@ int dump_files__read_file(
 	if ( !dump_file || !dst || size < 1 || !done )
 		return EINVAL;
 
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	if ( (dump_file->prv = gasp_lseek( dump_file->fd, 0, SEEK_CUR ))
 		< 0
 	)
 	{
-		if ( errno == EXIT_SUCCESS ) errno = EIO;
+		if ( errno == 0 ) errno = EIO;
 		ERRMSG( errno, "Failed to glance at file offset" );
 		return errno;
 	}
 	
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	if ( (*done = gasp_read( dump_file->fd, dst, size )) < 0 )
 	{
-		if ( errno == EXIT_SUCCESS ) errno = EIO;
+		if ( errno == 0 ) errno = EIO;
 		ERRMSG( errno, "Failed to glance at file data" );
 		return errno;
 	}
 	
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	if ( (dump_file->prv = gasp_lseek( dump_file->fd, 0, SEEK_CUR ))
 		< 0
 	)
 	{
-		if ( errno == EXIT_SUCCESS ) errno = EIO;
+		if ( errno == 0 ) errno = EIO;
 		ERRMSG( errno, "Failed to glance at file offset" );
 		return errno;
 	}
@@ -852,7 +852,7 @@ int dump_files__read_file(
 }
 
 int dump_files__dir( space_t *space, long inst, bool make ) {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	char const *GASP_PATH;
 	char *path;
 	size_t len;
@@ -867,35 +867,35 @@ int dump_files__dir( space_t *space, long inst, bool make ) {
 	if ( !(path = more_space( &ret, space, len )) )
 		return ret;
 	
-	if ( (ret = gasp_isdir( GASP_PATH, make )) != EXIT_SUCCESS )
+	if ( (ret = gasp_isdir( GASP_PATH, make )) != 0 )
 		return ret;
 	
 	sprintf( path, "%s/scans", GASP_PATH );
-	if ( (ret = gasp_isdir( path, make )) != EXIT_SUCCESS )
+	if ( (ret = gasp_isdir( path, make )) != 0 )
 		return ret;
 	
 	sprintf( path, "%s/scans/%ld", GASP_PATH, inst );
-	if ( (ret = gasp_isdir( path, make )) != EXIT_SUCCESS )
+	if ( (ret = gasp_isdir( path, make )) != 0 )
 		return ret;
 	
 	return EXIT_SUCCESS;
 }
 
 int dump_files_open( dump_t *dump, long inst, long scan ) {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	space_t space = {0};
 	
 	if ( !dump )
 		return EDESTADDRREQ;
 	
 	/* Cleanse structure of left over data data */
-	if ( dump_files_test( *dump ) == EXIT_SUCCESS )
+	if ( dump_files_test( *dump ) == 0 )
 		dump_files_shut( dump );
 	else
 		(void)memset( dump, 0, sizeof( dump_t ) );
 	
 	if ( (ret = dump_files__dir( &space, inst, 1 ))
-		!= EXIT_SUCCESS ) {
+		!= 0 ) {
 		ERRMSG( ret, "Couldn't create needed directories" );
 		goto fail;
 	}
@@ -903,7 +903,7 @@ int dump_files_open( dump_t *dump, long inst, long scan ) {
 	if ( (ret =
 		dump_files__open_file(
 			&(dump->info), &space, inst, scan, ".info" ))
-		!= EXIT_SUCCESS )
+		!= 0 )
 	{
 		ERRMSG( ret,
 			"Couldn't create/open %/gasp/scans/#/*.info file"
@@ -917,7 +917,7 @@ int dump_files_open( dump_t *dump, long inst, long scan ) {
 	if ( (ret =
 		dump_files__open_file(
 			&(dump->used), &space, inst, scan, ".used" ))
-		!= EXIT_SUCCESS
+		!= 0
 	)
 	{
 		ERRMSG( ret,
@@ -932,7 +932,7 @@ int dump_files_open( dump_t *dump, long inst, long scan ) {
 	if ( (ret =
 		dump_files__open_file(
 			&(dump->data), &space, inst, scan, ".data" ))
-		!= EXIT_SUCCESS
+		!= 0
 	)
 	{
 		ERRMSG( ret,
@@ -1134,17 +1134,17 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 		return 0;
 	}
 	
-	if ( (ret = dump_files_test( *dump )) != EXIT_SUCCESS )
+	if ( (ret = dump_files_test( *dump )) != 0 )
 		goto done;
 	
 	if ( tscan->zero != 0 )
 		tscan->zero = ~0;
 	
 	/* No further need to change anything */
-	if ( (ret = dump_files_reset_offsets( dump, 0 )) != EXIT_SUCCESS )
+	if ( (ret = dump_files_reset_offsets( dump, 0 )) != 0 )
 		goto done;
 	
-	if ( (ret = dump_files_change_info( dump )) != EXIT_SUCCESS )
+	if ( (ret = dump_files_change_info( dump )) != 0 )
 		goto done;
 	
 	/* Initialise mapped count */
@@ -1240,9 +1240,9 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	return n;
 }
 
-bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
+int dump_files_glance_stored( dump_t *dump, size_t keep )
 {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	ssize_t expect = 0, size = 0;
 	uchar *data, *used;
 	proc_mapped_t *pmap, *nmap;
@@ -1264,10 +1264,8 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 	/* Swap info when changing region */
 	if ( dump->done == nmap->size )
 	{
-		if ( !(dump->region) ) {
-			if ( err ) *err = EXIT_SUCCESS;
-			return 0;
-		}
+		if ( !(dump->region) )
+			return EOF;
 		
 		dump->done = 0;
 		dump->addr = nmap->foot;
@@ -1276,7 +1274,7 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 	
 		if ( (ret = dump_files__read_file(
 			&(dump->info), nmap, sizeof(proc_mapped_t), &size))
-			!= EXIT_SUCCESS || size != sizeof(proc_mapped_t)
+			!= 0 || size != sizeof(proc_mapped_t)
 		)
 		{
 			fprintf( stderr,
@@ -1304,7 +1302,7 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 	
 	if ( (ret = dump_files__read_file(
 		&(dump->used), used + DUMP_BUF_SIZE, expect, &size))
-		!= EXIT_SUCCESS || size != expect
+		!= 0 || size != expect
 	)
 	{
 		fprintf( stderr,
@@ -1317,7 +1315,7 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 	
 	if ( (ret = dump_files__read_file(
 		&(dump->used), data + DUMP_BUF_SIZE, expect, &size))
-		!= EXIT_SUCCESS || size != expect
+		!= 0 || size != expect
 	)
 	{
 		fprintf( stderr,
@@ -1349,14 +1347,12 @@ bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep )
 	}
 	dump->done += size;
 	
-	return 1;
+	return 0;
 	
 	failure:
-	if ( err ) *err = ret;
-	if ( ret == ENOMEM ) {
+	if ( ret == ENOMEM )
 		fprintf( stderr, "Requested 0x%08jX bytes\n", size );
-	}
-	return 0;
+	return ret;
 }
 
 bool dump_files_change_stored( dump_t *dump )
@@ -1379,13 +1375,12 @@ bool dump_files_change_stored( dump_t *dump )
 
 int proc_handle__aobscan_next( tscan_t *tscan, dump_t *dump )
 {
-	int ret = EXIT_SUCCESS;
 	if ( !tscan )
 		return EDESTADDRREQ;
 	if ( gasp_thread_should_die(
 		tscan->main_pipes, tscan->scan_pipes ) )
-		return EXIT_FAILURE;
-	return dump_files_glance_stored( &ret, dump, tscan->bytes - 1 );
+		return ECANCELED;
+	return dump_files_glance_stored( dump, tscan->bytes - 1 );
 }
 
 bool proc_handle__aobscan_test( tscan_t *tscan )
@@ -1431,7 +1426,7 @@ bool proc_handle__aobscan_test( tscan_t *tscan )
 }
 
 void* proc_handle_aobscan( tscan_t *tscan ) {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	uintmax_t minus;
 	mode_t prot = 04;
 	bool have_prev_results = 0;
@@ -1454,7 +1449,7 @@ void* proc_handle_aobscan( tscan_t *tscan ) {
 		goto set_found;
 	}
 
-	if ( (ret = dump_files_test( *dump )) != EXIT_SUCCESS ) {
+	if ( (ret = dump_files_test( *dump )) != 0 ) {
 		ERRMSG( ret, "Invalid dump to scan" );
 		goto set_found;
 	}
@@ -1463,22 +1458,22 @@ void* proc_handle_aobscan( tscan_t *tscan ) {
 	
 	if ( (ret =
 		proc__rwvmem_test(tscan->handle, tscan->array, tscan->bytes ))
-		!= EXIT_SUCCESS
+		!= 0
 	)
 	{
 		fprintf( stderr, "Failed at proc__rwvmen_test()\n" );
 		return tscan;
 	}
 	
-	if ( (ret = dump_files_reset_offsets( dump, 1 )) != EXIT_SUCCESS ) {
+	if ( (ret = dump_files_reset_offsets( dump, 1 )) != 0 ) {
 		fprintf( stderr, "Failed at dump_files_reset_offsets()\n" );
 		goto set_found;
 	}
 	
-	if ( dump_files_test( tscan->dump[0] ) == EXIT_SUCCESS ) {
+	if ( dump_files_test( tscan->dump[0] ) == 0 ) {
 		
 		if ( (ret = dump_files_reset_offsets( tscan->dump, 1 ))
-			!= EXIT_SUCCESS
+			!= 0
 		)
 		{
 			fprintf( stderr, "Failed at 2nd dump_files_reset_offsets()\n" );
@@ -1488,10 +1483,9 @@ void* proc_handle_aobscan( tscan_t *tscan ) {
 		have_prev_results = 1;
 	}
 
-	while ( (ret = proc_handle__aobscan_next( tscan, dump ))
-		== EXIT_SUCCESS )
+	while ( (ret = proc_handle__aobscan_next( tscan, dump )) == 0 )
 	{
-#if 1
+#if 0
 		fprintf( stderr, "%p-%p\n",
 			(void*)(dump->addr), (void*)(dump->addr + dump->size) );
 #endif
@@ -1499,8 +1493,9 @@ void* proc_handle_aobscan( tscan_t *tscan ) {
 		if ( have_prev_results ) {
 			/* Ensure we check only addresses that have been marked
 			 * as a result previously */
-			if ( !dump_files_glance_stored(
-				&ret, tscan->dump, tscan->bytes - 1 )
+			if (
+				(ret = dump_files_glance_stored(
+					tscan->dump, tscan->bytes - 1 )) != 0
 			)
 			{
 				ERRMSG( ret, "Couldn't glance at previous results" );
@@ -1524,8 +1519,13 @@ void* proc_handle_aobscan( tscan_t *tscan ) {
 	tscan->last_found = tscan->found;
 	tscan->done_scans++;
 	
-	if ( ret != EXIT_SUCCESS )
+	switch ( ret ) {
+	case 0: case EOF: case ECANCELED:
+		ret = 0;
+		break;
+	default:
 		ERRMSG( ret, "Byte scan failed to run fully" );
+	}
 		
 	tscan->ret = ret;
 	return tscan;
@@ -1586,7 +1586,7 @@ proc_notice_t* proc_locate_name(
 	int *err, char const *name, nodes_t *nodes, int underId,
 		bool usecase )
 {
-	int ret = EXIT_SUCCESS;
+	int ret = 0;
 	node_t i = 0;
 	size_t size;
 	proc_glance_t glance;
@@ -1616,7 +1616,7 @@ proc_notice_t* proc_locate_name(
 			}
 		}
 		if ( (ret = add_node( nodes, &i, sizeof(proc_notice_t) ))
-			!= EXIT_SUCCESS )
+			!= 0 )
 			break;
 		
 		text = notice->name.block;
@@ -1645,7 +1645,7 @@ proc_notice_t* proc_locate_name(
 	proc_glance_term( &glance );
 	if ( nodes->count > 0 )
 		return nodes->space.block;
-	if ( ret == EXIT_SUCCESS ) ret = ENOENT;
+	if ( ret == 0 ) ret = ENOENT;
 	if ( err ) *err = ret;
 	return NULL;
 }
@@ -1842,7 +1842,7 @@ proc_notice_t*
 	}
 	
 
-	if ( err && *err != EXIT_SUCCESS ) {
+	if ( err && *err != 0 ) {
 		proc_glance_term( glance );
 		return NULL;
 	}
@@ -1878,7 +1878,7 @@ proc_notice_t*
 
 proc_notice_t*
 	proc_glance_init( int *err, proc_glance_t *glance, int underId ) {
-	int ret = errno = EXIT_SUCCESS;
+	int ret = errno = 0;
 	DIR *dir;
 	struct dirent *ent;
 	node_t i = 0;
@@ -1903,7 +1903,7 @@ proc_notice_t*
 				
 				if ( (ret = add_node(
 					&(glance->idNodes), &i, sizeof(int) ))
-					!= EXIT_SUCCESS )
+					!= 0 )
 					break;
 
 				sscanf( ent->d_name, "%d",
@@ -1915,7 +1915,7 @@ proc_notice_t*
 				return proc_notice_next( err, glance );
 		}
 	}
-	ret = ( errno != EXIT_SUCCESS ) ? errno : EXIT_FAILURE;
+	ret = ( errno != 0 ) ? errno : EXIT_FAILURE;
 	if ( err ) *err = ret;
 	ERRMSG( ret, "" );
 	return NULL;
@@ -1929,12 +1929,12 @@ uintmax_t proc_glance_data(
 	uintmax_t done;
 	int ret = proc__rwvmem_test( handle, mem, size );
 	
-	if ( ret != EXIT_SUCCESS ) {
+	if ( ret != 0 ) {
 		if ( err ) *err = ret;
 		return 0;
 	}
 	
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	if ( (ret = proc_handle_stop(handle)) != 0 ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't stop process" );
@@ -1986,12 +1986,12 @@ uintmax_t proc_change_data(
 	uintmax_t done;
 	int ret = proc__rwvmem_test(handle,mem,size);
 
-	if ( ret != EXIT_SUCCESS ) {
+	if ( ret != 0 ) {
 		if ( err ) *err = ret;
 		return 0;
 	}
 	
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	if ( (ret = proc_handle_stop(handle)) != 0 ) {
 		if ( err ) *err = ret;
 		ERRMSG( ret, "Couldn't stop process" );

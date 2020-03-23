@@ -254,7 +254,7 @@ int lua_path_exists( lua_State *L ) {
 int lua_path_isdir( lua_State *L ) {
 	char const *path = luaL_checkstring(L,1);
 	DIR *dir = opendir(path);
-	errno = EXIT_SUCCESS;
+	errno = 0;
 	if ( dir ) {
 		lua_pushinteger(L,1);
 		closedir(dir);

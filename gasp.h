@@ -350,8 +350,9 @@ bool gasp_tpollo( int ext_pipes[2], int sig, int msTimeout );
 /** @brief used to load the next dumpped region into memory, appends
  * to existing first then if not a boundary match (meaning
  * prev foot not equal to next head)
+ * @return 0 on success, code from errno.h on failure
 **/
-bool dump_files_glance_stored( int *err, dump_t *dump, size_t keep );
+int dump_files_glance_stored( dump_t *dump, size_t keep );
 /** @brief Deallocates any memory before deallocating the handle itself
  * @param handle The process handle to deallocate
 **/

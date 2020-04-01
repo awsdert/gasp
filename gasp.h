@@ -32,10 +32,10 @@
 
 #if VERBOSE
 #define REPORT(MSG) fprintf( stderr, #MSG "\n" );
-#define REPORTV(MSG,...) fprintf( stderr, #MSG "\n", __VA_ARGS__ );
+#define REPORTF(MSG,...) fprintf( stderr, #MSG "\n", __VA_ARGS__ );
 #else
 #define REPORT(MSG)
-#define REPORTV(MSG,...)
+#define REPORTF(MSG,...)
 #endif
 
 #define ERRMSG( ERR, MSG ) \

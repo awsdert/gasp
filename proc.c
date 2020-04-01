@@ -811,31 +811,36 @@ int gasp_open( int *fd, char const *path, int perm )
 	return ret;
 }
 
-void dump_files__shut_file( dump_file_t *dump_file ) {
-	void *data;
-	size_t size;
+void dump_files__init(
+	dump_file_t *dump_file, void *data, size_t size
+)
+{
 	
 	if ( !dump_file )
 		return;
-	
-	/* Preserve pointer and size */
-	data = dump_file->data;
-	size = dump_file->size;
 	
 	/* Clear buffer if exists */
 	if ( data )
 		(void)memset( data, 0, size );
 	
+	/* Clear whole object */
+	(void)memset( dump_file, 0, sizeof(dump_file_t) );
+	
+	/* Set pointer and size */
+	dump_file->data = data;
+	dump_file->size = size;
+}
+
+void dump_files__shut_file( dump_file_t *dump_file )
+{
+	if ( !dump_file )
+		return;
+	
 	/* Close file descriptor */
 	if ( dump_file->fd > 0 )
 		close( dump_file->fd );
 	
-	/* Clear whole object */
-	(void)memset( dump_file, 0, sizeof(dump_file_t) );
-	
-	/* Restore pointer and size */
-	dump_file->data = data;
-	dump_file->size = size;
+	dump_files__init( dump_file, dump_file->data, dump_file->size );
 }
 
 int dump_files__open_file(
@@ -850,7 +855,7 @@ int dump_files__open_file(
 	size_t len;
 	
 	if ( !dump_file || !space || !ext ) return EDESTADDRREQ;
-	(void)memset( dump_file, 0, sizeof(dump_file_t) );
+	dump_files__init( dump_file, dump_file->data, dump_file->size );
 	
 	GASP_PATH = getenv("GASP_PATH");
 	len = strlen(GASP_PATH) + (2 * (sizeof(node_t) * CHAR_BIT));
@@ -1117,7 +1122,7 @@ int dump_files_reset_offsets( dump_t *dump, bool read_info )
 	REPORT( "Setting space pointer (for smaller C code)" )
 	space = &(nodes->space);
 	
-	REPORT( "Clearing used address buffer" )
+	REPORTF( "Clearing used address buffer, %p", dump->used.data )
 	(void)memset( dump->used.data, 0, DUMP_LOC_NODE_SIZE );
 	REPORT( "Clearing data buffer" )
 	(void)memset( dump->data.data, 0, DUMP_LOC_NODE_SIZE );
@@ -1289,7 +1294,7 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	
 	SRC = nodes.space.block;
 	
-	REPORTV( "Started dump at %p", (void*)(dump->addr) )
+	REPORTF( "Started dump at %p", (void*)(dump->addr) )
 
 	dump->nodes.focus = ~0;
 	dump->nodes.count = 0;

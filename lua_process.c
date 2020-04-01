@@ -303,9 +303,7 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	if ( scan == tscan->done_scans ) {
 		
 		(void)memmove( tscan->dump, dump, sizeof(dump_t) );
-		(void)memset( dump, 0, sizeof(dump_t) );
-		dump->info.fd = dump->used.fd = dump->data.fd = -1;
-		return EXIT_SUCCESS;
+		return dump_files_init(dump);
 	}
 
 	dump_files_shut( dump );
@@ -327,12 +325,14 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 		tscan->assignedID = 0;
 		goto done;
 	}
+	
 	for ( i = tscan->done_scans - 1; i > scan; --i ) {
 		sprintf( path, "rm \"%s/scans/%lu/%lu*\"",
 				GASP_PATH, (ulong)(tscan->id), (ulong)i );
 		fprintf( stderr, "%s\n", path );
 		system( path );
 	}
+	
 	done:
 	tscan->done_scans = scan;
 	free_space( NULL, &space );
@@ -348,7 +348,7 @@ int lua_proc_handle_term( lua_State *L ) {
 	gasp_close_pipes( tscan->scan_pipes );
 	tscan->pipesmade = 0;
 	
-	lua_proc_handle_undo( handle, 0 );
+	(void)lua_proc_handle_undo( handle, 0 );
 	proc_handle_shut( handle->handle );
 	handle->handle = NULL;
 	
@@ -489,7 +489,7 @@ int lua_proc_handle__create_pipes( lua_proc_handle_t *handle ) {
 	tscan = &(handle->tscan);
 	
 	if ( tscan->pipesmade )
-		return EXIT_SUCCESS;
+		return 0;
 	
 	if ( tscan->main_pipes[0] <= 0 ) {	
 		if ( pipe2( tscan->main_pipes, 0 ) == -1 ) {
@@ -507,7 +507,7 @@ int lua_proc_handle__create_pipes( lua_proc_handle_t *handle ) {
 	}
 	
 	tscan->pipesmade = 1;
-	return EXIT_SUCCESS;
+	return 0;
 }
 
 bool lua_proc_handle__can_scan(
@@ -516,7 +516,8 @@ bool lua_proc_handle__can_scan(
 {
 	tscan_t *tscan;
 	
-	if ( !handle ) return 0;
+	if ( !handle )
+		return 0;
 	
 	tscan = &(handle->tscan);
 	
@@ -704,6 +705,7 @@ int lua_proc_handle_bytescan( lua_State *L ) {
 	{
 		cannot_scan:
 		lua_pushboolean( L, 0 );
+		REPORT( "Failed to verify scan is valid" )
 		return 1;
 	}
 	

@@ -137,7 +137,7 @@ gede: debug
 
 test-all: libs-all test
 test: $(deep_gasp_d_exe)
-	gede --args $(deep_gasp_d_exe)
+	./$(gasp_d_exe) $(ARGS)
 
 build-all: libs-all build
 build: $(gasp_exe) $(deep_gasp_exe)

@@ -27,6 +27,17 @@
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
+
+#define VERBOSE 1
+
+#if VERBOSE
+#define REPORT(MSG) fprintf( stderr, #MSG "\n" );
+#define REPORTV(MSG,...) fprintf( stderr, #MSG "\n", __VA_ARGS__ );
+#else
+#define REPORT(MSG)
+#define REPORTV(MSG,...)
+#endif
+
 #define ERRMSG( ERR, MSG ) \
 	fprintf( stderr, "%s:%d:%s() 0x%08X"\
 	"\nExternal Msg '%s'\nInternal Msg '%s'\n"\
@@ -91,6 +102,7 @@ int gasp_rmdir( space_t *space, char const *path, bool recursive );
 	
 typedef size_t node_t;
 typedef struct nodes {
+	node_t focus;
 	node_t count;
 	node_t total;
 	space_t space;
@@ -195,8 +207,14 @@ typedef struct proc_handle {
 #endif
 } proc_handle_t;
 
-#define DUMP_BUF_SIZE BUFSIZ
-#define DUMP_MAX_SIZE (DUMP_BUF_SIZE * 2)
+#define DUMP_LOC_NODE_USED	0
+#define DUMP_LOC_NODE_DATA	1
+#define DUMP_LOC_NODE_UPTO	2
+#define DUMP_LOC_NODE_HALF	0x2000
+#define DUMP_LOC_NODE_SIZE (DUMP_LOC_NODE_HALF * 2)
+#define DUMP_LOC_NODE(I) (DUMP_LOC_NODE_##I * DUMP_LOC_NODE_SIZE)
+#define DUMP_LOC_FULL_SIZE DUMP_LOC_NODE(UPTO)
+
 typedef struct dump_file {
 	int fd;
 	gasp_off_t prv;
@@ -204,18 +222,18 @@ typedef struct dump_file {
 	size_t size;
 	uchar *data;
 } dump_file_t;
+
 typedef struct dump {
 	/* Scan number */
 	node_t number;
-	/* Regions left */
-	node_t region;
+	
 	/* How many bytes are kept from previous part of region if
 	 * in same region or foot of last region matches head of current
 	 * region */
 	size_t kept;
 	dump_file_t info, used, data;
-	/* Iterate through memory by swapping pointers to the below */
-	proc_mapped_t mapped[2];
+	/* Mappings */
+	nodes_t nodes;
 	/* How much of nmap has been read */
 	uintmax_t done;
 	/* Which address to report */
@@ -226,11 +244,16 @@ typedef struct dump {
 	size_t base;
 	/* Where to stop comparing upto */
 	size_t last;
-	/* DUMP_BUF_SIZE + size */
+	/* DUMP_LOC_NODE_HALF + size */
 	size_t tail;
-	uchar _used[DUMP_MAX_SIZE], _data[DUMP_MAX_SIZE];
+	/* Various buffers */
+	uchar _[DUMP_LOC_FULL_SIZE], *__[DUMP_LOC_NODE_UPTO];
 } dump_t;
 
+/** @brief Wipes all to 0 then sets pointers and file descriptors
+ * @return 0 on success, errno.h code on failure
+**/
+int dump_files_init( dump_t *dump );
 int dump_files_open( dump_t *dump, long inst, long done );
 int dump_files_test( dump_t dump );
 void dump_files_shut( dump_t *dump );

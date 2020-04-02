@@ -214,9 +214,11 @@ int proc_mapped_list( proc_handle_t *handle, nodes_t *nodes )
 		ERRMSG( ret, "Must have somewhere to record mappings to" );
 		return ret;
 	}
-		
-	nodes->count = nodes->total = 0;
 	
+	REPORT( "Clearing count, total & focus" )
+	nodes->focus = nodes->count = nodes->total = 0;
+	
+	REPORT("Opening maps file")
 	(void)sprintf( path, "%s/maps", handle->procdir );
 	if ( (fd = open( path, O_RDONLY )) < 0 )
 	{
@@ -225,6 +227,7 @@ int proc_mapped_list( proc_handle_t *handle, nodes_t *nodes )
 		return ret;
 	}
 	
+	REPORT("Reading each line of the file for mappings")
 	for (
 		; gasp_read( fd, line, PAGE_LINE_SIZE ) == PAGE_LINE_SIZE
 		; (void)memset( line, 0, PAGE_LINE_SIZE )
@@ -238,10 +241,14 @@ int proc_mapped_list( proc_handle_t *handle, nodes_t *nodes )
 		/* Get position right after address range */
 		pos = strchr( line, ' ' );
 		
+		/* Clear so that only the range is used for file name */
+		*pos = 0;
+		
 		/* Move pointer to the permissions text */
 		++pos;
 		
 		sprintf( path, "%s/map_files/%s", handle->procdir, line );
+		REPORTF( "Checking permissions of '%s'", path )
 		m.perm = file_glance_perm( &ret, path );
 		
 		m.size = (m.foot) - (m.head);
@@ -255,15 +262,25 @@ int proc_mapped_list( proc_handle_t *handle, nodes_t *nodes )
 			m.prot |= (pos[3] == 's') ? 0 : 020;
 			
 		
+		REPORT( "Adding node for mapping" )
 		if ( nodes->count == nodes->total && !(mv = more_nodes(
 			proc_mapped_t, &ret, nodes, nodes->total + SCHAR_MAX ))
 		)
 		{
+			ERRMSG( ret, "Unable to add mapping" );
 			return ret;
 		}
 		
 		mv[nodes->count] = m;
 		nodes->count++;
+		
+		while ( line[0] != '\n' ) {
+			if ( gasp_read( fd, line, 1 ) != 1 )
+				break;
+		}
+		
+		if ( line[0] != '\n' )
+			break;
 	}
 	
 	ret = errno;
@@ -999,7 +1016,7 @@ int dump_files_init( dump_t *dump ) {
 	}
 	
 	REPORT("Setting named pointers to calculated pointers")
-	REPORT("Setting named pointer for info")
+	REPORTF("Setting named pointer for info, %p", (void*)space )
 	dump->info.data = space->block;
 	REPORT("Setting named pointer for used address")
 	dump->used.data = dump->__[DUMP_LOC_NODE_USED];
@@ -1232,7 +1249,7 @@ bool gasp_thread_should_die( int ext_pipes[2], int int_pipes[2] )
 
 node_t proc_handle_dump( tscan_t *tscan ) {
 	int ret = 0;
-	nodes_t nodes = {0};
+	nodes_t nodes = {0}, *mappings;
 	proc_mapped_t *src, *SRC, *dst, *DST;
 	proc_handle_t *handle;
 	uchar *used, *data;
@@ -1248,7 +1265,8 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	}
 	
 	REPORT( "Getting current dump set pointer" )
-	dump = &(tscan->dump[1]);
+	dump = tscan->dump + 1;
+	mappings = dump->nodes;
 	REPORT( "Getting current dump used addresses pointer" )
 	used = dump->used.data;
 	REPORT( "Getting current dump data pointer" )
@@ -1299,14 +1317,20 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	 REPORT( "Clearing dump data buffer" )
 	(void)memset( dump->used.data, ~0, DUMP_LOC_NODE_SIZE );
 	
-	if ( (ret = proc_mapped_list( handle, &nodes )) != 0 )
+	if ( tscan->done_scans )
+		goto dump_data;
+	
+	REPORTF("Retrieving mappings, mappings variable has value %p",
+		(void*)mappings)
+	if ( (ret = proc_mapped_list( handle, &nodes )) != 0 && ret != EOF )
 	{
 		ERRMSG( ret, "Failed to list mappings" );
 		return ret;
 	}
 	
+	REPORT("Allocating memory for mappings in range")
 	if ( !(DST = more_nodes(
-			proc_mapped_t, &ret, dump->nodes, nodes.count ))
+			proc_mapped_t, &ret, mappings, nodes.count ))
 	)
 	{
 		ERRMSG( ret, "Failed to allocate memory for mappings" );
@@ -1317,8 +1341,8 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	
 	REPORTF( "Started dump at %p", (void*)(dump->addr) )
 
-	dump->nodes->focus = 0;
-	dump->nodes->count = 0;
+	mappings->focus = 0;
+	mappings->count = 0;
 
 	for ( nodes.focus = 0; nodes.focus < nodes.count; nodes.focus++ )
 	{
@@ -1327,7 +1351,26 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 		
 		/* Not interested in out of range memory */
 		if ( src->foot <= tscan->from || src->head >= tscan->upto )
-			continue;
+			continue;		
+			
+		/* Get focused node, total is at least the same as source
+		 * so no need to check if can add since the main loop check
+		 * does that for us */
+		dst = DST + (dump->nodes->count);
+		
+		/* Add the mapping to the list */
+		memcpy( dst, src, sizeof(proc_mapped_t) );
+		dump->nodes->count++;
+	}
+	
+	dump_data:
+	
+	SRC = DST;
+	for ( mappings->focus = 0;
+		mappings->focus < mappings->count; mappings->focus++
+	)
+	{
+		src = SRC + mappings->focus;
 		
 		for (
 			bytes = 0;
@@ -1371,21 +1414,6 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 			
 			fsync( dump->used.fd );
 			fsync( dump->data.fd );
-		}
-		
-		if ( bytes ) {
-			
-			/* Make sure no more than applicable is read in future */
-			src->size = bytes;
-			
-			/* Get focused node, total is at least the same as source
-			 * so no need to check if can add since the main loop check
-			 * does that for us */
-			dst = DST + (dump->nodes->count);
-			
-			/* Add the mapping to the list */
-			memcpy( dst, src, sizeof(proc_mapped_t) );
-			dump->nodes->count++;
 		}
 	}
 	

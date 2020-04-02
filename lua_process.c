@@ -302,7 +302,7 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	REPORT("Shutting previous dump files if they're open")
 	dump_files_shut( tscan->dump );
 	
-	REPORT("Checking if using lastet scan")
+	REPORT("Checking if using latest scan")
 	if ( scan == tscan->done_scans ) {
 		REPORT("Moving dump file info to previous dump file info object")
 		(void)memmove( tscan->dump, dump, sizeof(dump_t) );
@@ -586,13 +586,15 @@ bool lua_proc_handle_prep_scan(
 	dump_t *dump;
 	space_t space = {0};
 	
-	
 	REPORT("Checking if can scan")
 	if ( !lua_proc_handle__can_scan( handle ) )
 		return 0;
 	
+	REPORT("Setting pointers to various objects needed for scanning");
 	tscan = &(handle->tscan);
 	nodes = &(tscan->locations);
+	dump = tscan->dump + 1;
+	tscan->dump->nodes = dump->nodes = &(tscan->mappings);
 	
 	REPORT("Requesting memory for address list")
 	if ( !more_nodes( uintmax_t, &ret, nodes, list_limit ) )
@@ -628,8 +630,6 @@ bool lua_proc_handle_prep_scan(
 	}
 	
 	REPORT("Preping all scan variables")
-	dump = tscan->dump + 1;
-	tscan->dump->nodes = dump->nodes = &(tscan->mappings);
 	
 	tscan->handle = handle->handle;
 	tscan->bytes = handle->bytes.count;

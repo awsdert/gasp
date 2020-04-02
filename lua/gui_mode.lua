@@ -96,10 +96,18 @@ function scandir(path)
 end
 
 function pad_width(font,text)
+	if font == nil or text == nil then
+		print(debug.traceback())
+	end
+	text = "" .. text
 	return math.ceil((font:width(font:height(),text)) * 1.2)
 end
 
 function pad_height(font,text)
+	if font == nil or text == nil then
+		print(debug.traceback())
+	end
+	text = "" .. text
 	return math.ceil((font:height(text)) * 1.2)
 end
 function add_tree_node(ctx,text,selected,id,isparent)
@@ -261,8 +269,9 @@ local function boot_window()
 end
 
 GUI.draw_reboot = function(ctx)
+	local text = "Reboot GUI"
 	nk.layout_row_dynamic( ctx, pad_height(get_font(),text), 2)
-	if nk.button( ctx,nil, "Reboot GUI" ) then
+	if nk.button( ctx, nil, text ) then
 		GUI.reboot = gasp.toggle_reboot_gui()
 	else
 		GUI.reboot = gasp.get_reboot_gui()

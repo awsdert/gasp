@@ -301,7 +301,6 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	dump_files_shut( tscan->dump );
 	
 	if ( scan == tscan->done_scans ) {
-		
 		(void)memmove( tscan->dump, dump, sizeof(dump_t) );
 		return dump_files_init(dump);
 	}
@@ -618,6 +617,7 @@ bool lua_proc_handle_prep_scan(
 	}
 	
 	dump = tscan->dump + 1;
+	tscan->dump->nodes = dump->nodes = &(tscan->mappings);
 	
 	tscan->handle = handle->handle;
 	tscan->bytes = handle->bytes.count;

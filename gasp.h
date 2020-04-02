@@ -233,7 +233,7 @@ typedef struct dump {
 	size_t kept;
 	dump_file_t info, used, data;
 	/* Mappings */
-	nodes_t nodes;
+	nodes_t *nodes;
 	/* How much of nmap has been read */
 	uintmax_t done;
 	/* Which address to report */
@@ -274,6 +274,7 @@ typedef struct tscan {
 	int ret;
 	node_t id;
 	dump_t dump[2];
+	nodes_t mappings;
 	
 	nodes_t	locations;
 	

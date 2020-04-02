@@ -362,6 +362,7 @@ end
 return function(ctx)
 	local font = get_font()
 	local text, file, dir, tmp, i, v
+	
 	GUI.draw_reboot(ctx)
 	GUI.draw_desc_field = draw_desc_field
 	GUI.draw_addr_field = draw_addr_field
@@ -371,6 +372,8 @@ return function(ctx)
 	GUI.draw_cheat = draw_cheat
 	GUI.draw_cheats = draw_cheats
 	GUI.draw_cheat_edit = draw_cheat_edit
+	
+	text = "UNDESCRIBED"
 	nk.layout_row_dynamic( ctx, pad_height(font,text), 1)
 	for i,v in pairs(GUI.draw) do
 		if i > 1 then
@@ -379,6 +382,7 @@ return function(ctx)
 			end
 		end
 	end
+	
 	--[[ Slider Example with Custom width
 	text = "Volume:"
 	nk.layout_row_begin(ctx, 'static', pad_height(font,text), 2)
@@ -388,6 +392,7 @@ return function(ctx)
 	GUI.cfg.volume = nk.slider(ctx, 0, GUI.cfg.volume, 1.0, 0.1)
 	nk.layout_row_end(ctx)
 	--]]
+	
 	if not GUI.handle then
 		if GUI.noticed then
 			text = "Selected:"
@@ -403,6 +408,7 @@ return function(ctx)
 			nk.label( ctx, "Nothing selected", nk.TEXT_LEFT )
 		end
 	end
+	
 	if hook_process() == true then
 		text = "Hooked:"
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
@@ -414,6 +420,7 @@ return function(ctx)
 			GUI.donothook = true
 		end
 	end
+	
 	v = draw_all_cheats( ctx, font, autoload() )
 	GUI.cheat = rebuild_cheat(v)
 	GUI.keep_cheat = rebuild_cheat(v)

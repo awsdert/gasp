@@ -3,13 +3,17 @@ return function(ctx,now,prv)
 	local path = cheatspath()
 	local dir = scandir(path)
 	local text
+	
 	GUI.draw_reboot(ctx)
 	GUI.draw_goback(ctx,now,prv)
+	
 	if dir and #dir > 0 then
+		text = "Cheat files in:"
 		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
-		nk.label(ctx, "Cheat files in:", nk.TEXT_LEFT)
+		nk.label(ctx, text, nk.TEXT_LEFT)
 		nk.label(ctx, path, nk.TEXT_LEFT)
 		nk.layout_row_dynamic( ctx, pad_height(font,path), 1 )
+		
 		for i,v in pairs(dir) do
 			if gasp.path_isfile(path .. '/' .. v) == 1 and
 				has_ext(v,".lua") then
@@ -25,6 +29,7 @@ return function(ctx,now,prv)
 			end
 		end
 	end
+	
 	if nk.button( ctx, nil, "Load" ) then
 		GUI.which = prv
 		autoload()

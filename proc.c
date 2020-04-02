@@ -973,11 +973,21 @@ int dump_files__dir( space_t *space, long inst, bool make ) {
 int dump_files_init( dump_t *dump ) {
 	uint i;
 	uchar *_;
+	nodes_t *nodes;
+	space_t *space;
 	
 	if ( !dump )
 		return EDESTADDRREQ;
 		
+	nodes = dump->nodes;
+	space = &(nodes->space);
+		
 	(void)memset( dump, 0, sizeof( dump_t ) );
+	
+	dump->nodes = nodes;
+	
+	if ( space->block )
+		memset( space->block, 0, space->given );
 	
 	_ = dump->_;
 	for ( i = 0; i < DUMP_LOC_NODE_UPTO; ++i ) {
@@ -986,11 +996,11 @@ int dump_files_init( dump_t *dump ) {
 	
 	dump->info.fd = dump->used.fd = dump->data.fd = -1;
 	
-	dump->info.data = dump->nodes.space.block;
+	dump->info.data = space->block;
 	dump->used.data = dump->__[DUMP_LOC_NODE_USED];
 	dump->data.data = dump->__[DUMP_LOC_NODE_DATA];
 	
-	dump->info.size = dump->nodes.space.given;
+	dump->info.size = space->given;
 	dump->used.size = DUMP_LOC_NODE_SIZE;
 	dump->data.size = DUMP_LOC_NODE_SIZE;
 	
@@ -1081,7 +1091,7 @@ int dump_files_change_info( dump_t *dump ) {
 	}
 	
 	size = sizeof(size_t);
-	nodes = &(dump->nodes);
+	nodes = dump->nodes;
 	if ( gasp_write( dump->info.fd, &(nodes->count), size ) != size ) {
 		ret = errno;
 		ERRMSG( ret, "Failed to write mappings count" );
@@ -1118,7 +1128,7 @@ int dump_files_reset_offsets( dump_t *dump, bool read_info )
 	dump->number = 0;
 	
 	REPORT( "Setting nodes pointer (for source memory info)" )
-	nodes = &(dump->nodes);
+	nodes = dump->nodes;
 	REPORT( "Setting space pointer (for smaller C code)" )
 	space = &(nodes->space);
 	
@@ -1285,7 +1295,7 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	}
 	
 	if ( !(DST = more_nodes(
-			proc_mapped_t, &ret, &(dump->nodes), nodes.count ))
+			proc_mapped_t, &ret, dump->nodes, nodes.count ))
 	)
 	{
 		ERRMSG( ret, "Failed to allocate memory for mappings" );
@@ -1296,8 +1306,8 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 	
 	REPORTF( "Started dump at %p", (void*)(dump->addr) )
 
-	dump->nodes.focus = ~0;
-	dump->nodes.count = 0;
+	dump->nodes->focus = 0;
+	dump->nodes->count = 0;
 
 	for ( nodes.focus = 0; nodes.focus < nodes.count; nodes.focus++ )
 	{
@@ -1360,11 +1370,11 @@ node_t proc_handle_dump( tscan_t *tscan ) {
 			/* Get focused node, total is at least the same as source
 			 * so no need to check if can add since the main loop check
 			 * does that for us */
-			dst = DST + (dump->nodes.count);
+			dst = DST + (dump->nodes->count);
 			
 			/* Add the mapping to the list */
 			memcpy( dst, src, sizeof(proc_mapped_t) );
-			dump->nodes.count++;
+			dump->nodes->count++;
 		}
 	}
 	
@@ -1405,7 +1415,7 @@ int dump_files__mappings( dump_t *dump, proc_mapped_t **ptrs ) {
 	if ( !dump )
 		return EINVAL;
 		
-	nodes = &(dump->nodes);
+	nodes = dump->nodes;
 	
 	vec = (proc_mapped_t*)(nodes->space.block);
 	
@@ -1445,7 +1455,7 @@ int dump_files_glance_stored( dump_t *dump, size_t keep )
 	used = dump->used.data;
 	data = dump->data.data;
 	
-	nodes = &(dump->nodes);
+	nodes = dump->nodes;
 	nmap = ptrs[PROC_MAPPED_PTR_NOW];
 	pmap = ptrs[PROC_MAPPED_PTR_PRV];
 	
@@ -1456,7 +1466,7 @@ int dump_files_glance_stored( dump_t *dump, size_t keep )
 	{
 		dump->done = 0;
 		dump->addr = nmap->foot;
-		dump->nodes.focus++;
+		nodes->focus++;
 		
 		if ( nodes->focus == nodes->total )
 			return EOF;
@@ -1659,7 +1669,7 @@ int proc_handle_aobscan( tscan_t *tscan ) {
 	}
 	
 	/* Make sure we start at the first recorded mapping */
-	dump->nodes.focus = 0;
+	dump->nodes->focus = 0;
 
 #if VERBOSE
 	fprintf( stderr, "Started scan at %p\n", (void*)(dump->addr) );

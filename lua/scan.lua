@@ -2,6 +2,10 @@ return function (ctx,now,prv)
 	local font = get_font()
 	local scan = GUI.scan or {}
 	local list, tmp, i, v, p
+	local function range2str(from,upto,desc)
+		return ((string.format( "%X - %X %s", from, upto, desc ))
+			or "(nil)")
+	end
 	GUI.keep_cheat = nil
 	scan.as_text = scan.as_text or ""
 	scan.from = scan.from or 0
@@ -33,39 +37,46 @@ return function (ctx,now,prv)
 	
 	if done.count == 0 then
 	
-		list = {}
-		tmp = {}
-		list[1] = {
-			desc = "Default",
-			from = 0,
-			upto = gasp.ptrlimit()
+		list = {
+			txt = {},
+			raw = {
+				from = 0, upto = gasp.ptrlimit(), desc = "Default"
+			}
 		}
-		tmp[1] =
-			string.format( "%X - %X %s",
-			list[1].from, list[1].upto, list[1].desc )
-		if GUI.cheat and GUI.cheat.app and GUI.cheat.app.regions then
-			for i=1,#(GUI.cheat.app.regions),1 do
-				list[i+1] = GUI.cheat.app.regions[i]
-				tmp[i+1] =
-					string.format( "%X - %X %s",
-					list[i+1].from, list[i+1].upto, list[i+1].desc )
+		
+		if GUI.cheat and GUI.cheat.app then
+			tmp = GUI.cheat.app.regions or {}
+			for i = 1,#tmp,1 do
+				v = tmp[i]
+				list.raw[i+1] = v
 			end
 		end
 		
-		scan.regions = list
-		scan.region_options = tmp
+		tmp = list.raw
+		for i = 1,#tmp,1 do
+			v = tmp[i]
+			list.txt[i] = range2str( v.from, v.upto, v.desc )
+		end
+		
+		if not scan.region or scan.region < 1 then
+			scan.region = 1
+		end
+		
+		tmp = list.txt
+		v = tmp[1]
 		scan.region = nk.combo(
-			ctx, tmp, scan.region or 1,
-			pad_height( font, tmp[1] ),
+			ctx, tmp, scan.region,
+			pad_height( font, v ),
 			{
-				pad_width( font, tmp[1] ) * 2,
-				pad_height( font, tmp[1] ) * 2
+				pad_width( font, v ) * 2,
+				pad_height( font, v ) * 2
 			}
 		)
 		
 		if nk.button( ctx, nil, "Use" ) then
-			scan.from = list[scan.region].from
-			scan.upto = list[scan.region].upto
+			v = list.raw[scan.region]
+			scan.from = v.from
+			scan.upto = v.upto
 		end
 	end
 	

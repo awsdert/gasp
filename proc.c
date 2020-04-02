@@ -978,28 +978,35 @@ int dump_files_init( dump_t *dump ) {
 	
 	if ( !dump )
 		return EDESTADDRREQ;
-		
+	
+	REPORT("Setting C code pointers")
 	nodes = dump->nodes;
 	space = &(nodes->space);
 		
+	REPORT("Clearing entire object")
 	(void)memset( dump, 0, sizeof( dump_t ) );
 	
+	REPORT("Forcing invalid files descriptors")
+	dump->info.fd = dump->used.fd = dump->data.fd = -1;
+	
+	REPORT("Restoring pointer to nodes_t object holding mapping info");
 	dump->nodes = nodes;
 	
-	if ( space->block )
-		memset( space->block, 0, space->given );
-	
+	REPORT("Calculating local buffer pointers")
 	_ = dump->_;
 	for ( i = 0; i < DUMP_LOC_NODE_UPTO; ++i ) {
 		dump->__[i] = _ + (i * DUMP_LOC_NODE_SIZE);
 	}
 	
-	dump->info.fd = dump->used.fd = dump->data.fd = -1;
-	
+	REPORT("Setting named pointers to calculated pointers")
+	REPORT("Setting named pointer for info")
 	dump->info.data = space->block;
+	REPORT("Setting named pointer for used address")
 	dump->used.data = dump->__[DUMP_LOC_NODE_USED];
+	REPORT("Setting named pointer for data")
 	dump->data.data = dump->__[DUMP_LOC_NODE_DATA];
 	
+	REPORT("Setting named sizes to correct sizes")
 	dump->info.size = space->given;
 	dump->used.size = DUMP_LOC_NODE_SIZE;
 	dump->data.size = DUMP_LOC_NODE_SIZE;
@@ -1160,9 +1167,13 @@ int dump_files_reset_offsets( dump_t *dump, bool read_info )
 void dump_files_shut( dump_t *dump ) {
 	if ( !dump )
 		return;
+	REPORT("Shutting info file")
 	dump_files__shut_file( &(dump->info) );
+	REPORT("Shutting used addresses file")
 	dump_files__shut_file( &(dump->used) );
+	REPORT("Shutting data file")
 	dump_files__shut_file( &(dump->data) );
+	REPORT("Clearing dump file object of data that can crash execution")
 	(void)dump_files_init( dump );
 }
 

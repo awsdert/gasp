@@ -295,16 +295,22 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	if ( !handle )
 		return EINVAL;
 	
+	REPORT("Setting pointers for quick C code")
 	tscan = &(handle->tscan);
 	dump = tscan->dump + 1;
-
+	
+	REPORT("Shutting previous dump files if they're open")
 	dump_files_shut( tscan->dump );
 	
+	REPORT("Checking if using lastet scan")
 	if ( scan == tscan->done_scans ) {
+		REPORT("Moving dump file info to previous dump file info object")
 		(void)memmove( tscan->dump, dump, sizeof(dump_t) );
+		REPORT("Clearing current dump file info object ready for new info")
 		return dump_files_init(dump);
 	}
 
+	REPORT("Shutting current dump file info")
 	dump_files_shut( dump );
 	
 	if ( !(path = more_space(
@@ -580,19 +586,23 @@ bool lua_proc_handle_prep_scan(
 	dump_t *dump;
 	space_t space = {0};
 	
+	
+	REPORT("Checking if can scan")
 	if ( !lua_proc_handle__can_scan( handle ) )
 		return 0;
 	
 	tscan = &(handle->tscan);
 	nodes = &(tscan->locations);
 	
+	REPORT("Requesting memory for address list")
 	if ( !more_nodes( uintmax_t, &ret, nodes, list_limit ) )
 	{
 		if ( ret != 0 )
-			ERRMSG( ret, "Unable to allocate memory for ptr list" );
+			ERRMSG( ret, "Unable to allocate memory for address list" );
 		return 0;
 	}
 	
+	REPORT("Checking for an assigned scan folder")
 	if ( !(tscan->assignedID) ) {
 		for ( tscan->id = 0;
 			ret == 0 && tscan->id < LONG_MAX;
@@ -610,12 +620,14 @@ bool lua_proc_handle_prep_scan(
 		}
 	}
 	
+	REPORT("Undoing later scans if using earlier dump")
 	if ( (ret = lua_proc_handle_undo( handle, scan )) != 0 )
 	{
 		ERRMSG( ret, "Couldn't rollback scan number" );
 		return 0;
 	}
 	
+	REPORT("Preping all scan variables")
 	dump = tscan->dump + 1;
 	tscan->dump->nodes = dump->nodes = &(tscan->mappings);
 	
@@ -634,6 +646,7 @@ bool lua_proc_handle_prep_scan(
 	tscan->last_found = last_found;
 	tscan->zero = zero ? ~0 : 0;
 	
+	REPORT("Opening files to dump memory to prior to scan")
 	if ( (ret = dump_files_open( dump, tscan->id, scan ))
 		!= 0
 	)
@@ -642,6 +655,7 @@ bool lua_proc_handle_prep_scan(
 		return 0;
 	}
 	
+	REPORT("Open previous scan dump files if not already open")
 	if ( scan && dump_files_test(tscan->dump[0]) != 0 ) {
 		if ( (ret = dump_files_open( tscan->dump, tscan->id, scan ))
 			!= 0
@@ -721,12 +735,14 @@ int lua_proc_handle_bytescan( lua_State *L ) {
 		= lua_extract_bytes( NULL, L, index, &(handle->bytes) )) )
 		goto cannot_scan;
 	
+	REPORT("Preparing various objects for scan thread")
 	if ( scan > tscan->done_scans ||
 		!lua_proc_handle_prep_scan(
 			handle, scan, tscan->last_found, limit,
 			from, upto, writable, ~0 )
 	) goto cannot_scan;
 	
+	REPORT("Clearing byte memory")
 	/* Decide how we will clear memory */
 	for ( a = 0; a < tscan->bytes; ++a ) {
 		if ( array[a] ) {
@@ -735,6 +751,7 @@ int lua_proc_handle_bytescan( lua_State *L ) {
 		}
 	}
 	
+	REPORT("Creating scan thread")
 	if ( pthread_create(
 			&(tscan->thread), NULL,
 			proc_handle_dumper, &(handle->tscan) ) != 0

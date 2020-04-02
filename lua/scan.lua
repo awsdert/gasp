@@ -1,7 +1,7 @@
 return function (ctx,now,prv)
 	local font = get_font()
 	local scan = GUI.scan or {}
-	local list, tmp, i, v, p
+	local list, tmp, i, v, x, p
 	local function range2str(from,upto,desc)
 		return ((string.format( "%X - %X %s", from, upto, desc ))
 			or "(nil)")
@@ -40,15 +40,20 @@ return function (ctx,now,prv)
 		list = {
 			txt = {},
 			raw = {
-				from = 0, upto = gasp.ptrlimit(), desc = "Default"
+				{
+					from = 0,
+					upto = gasp.ptrlimit(),
+					desc = "Default"
+				}
 			}
 		}
 		
 		if GUI.cheat and GUI.cheat.app then
 			tmp = GUI.cheat.app.regions or {}
+			x = #(list.raw)
 			for i = 1,#tmp,1 do
 				v = tmp[i]
-				list.raw[i+1] = v
+				list.raw[x+i] = v
 			end
 		end
 		

@@ -1,78 +1,76 @@
 #include "gasp.h"
-void* change_space( int *err, space_t *space, size_t want, int dir ) {
-	int ret = errno = EXIT_SUCCESS;
+int change_space( space_t *space, size_t want, int dir ) {
+	int ret = errno = 0;
 	uchar *block;
 	if ( !space ) {
-		if ( !want ) {
-			released:
-			if ( err ) *err = ret;
-			return NULL;
-		}
+		if ( !want )
+			return ret;
 		ret = EDESTADDRREQ;
-		if ( err ) *err = ret;
 		ERRMSG( ret, "Need somewhere to place allocated memory" );
-		return NULL;
+		return ret;
 	}
-	if ( want % 16 ) want += (16 - (want % 16));
-	if ( want == space->given ) {
-		if ( err ) *err = EXIT_SUCCESS;
-		return space->block;
-	}
+	
+	if ( want % 16 )	
+		want += (16 - (want % 16));
+	
+	if ( want == space->given )
+		return 0;
+	
 	/* Shrink */
 	if ( dir < 0 && want > space->given ) {
 		ret = ERANGE;
-		if ( err ) *err = ret;
 		ERRMSG( ret, "Tried to grow shrink-only memory" );
-		return NULL;
+		return ret;
 	}
+	
 	/* Expand */
-	if ( dir > 0 && want < space->given ) {
-		if ( err ) *err = EXIT_SUCCESS;
-		return space->block;
-	}
+	if ( dir > 0 && want < space->given )
+		return 0;
+	
 	/* Release */
 	if ( !want ) {
 		if ( space->block ) free( space->block );
 		space->block = NULL;
 		space->given = 0;
-		goto released;
+		return 0;
 	}
+	
 	if ( !(space->block) ) {
-		space->block = malloc( want );
-		if ( !(space->block) ) {
+		if ( !(space->block = malloc( want )) )
+		{
+			ret = errno;
 			space->given = 0;
-			goto failed;
+			return ret ? ret : ENOMEM;
 		}
-		if ( err ) *err = ret;
 		(void)memset( space->block, 0, want );
 		space->given = want;
-		return space->block;
+		return 0;
 	}
-	block = realloc( space->block, want );
-	if ( !block ) {
-		failed:
-		if ( errno == EXIT_SUCCESS ) errno = ENOMEM;
+	
+	if ( !(block = realloc( space->block, want )) ) {
 		ret = errno;
-		if ( err ) *err = errno;
-		return NULL;
+		return ret ? ret : ENOMEM;
 	}
+	
+	/* Do this 1st in case a thread tries to access it */
+	space->block = block;
+	space->given = want;
+	
 	if ( space->given < want )
 		(void)memset( block + space->given, 0, want - space->given );
-	if ( err ) *err = ret;
-	space->given = want;
-	return (space->block = block);
+	
+	return 0;
 }
 int change_kvpair(
 	kvpair_t *kvpair,
 	size_t want4full, size_t want4key, size_t want4val, int dir )
 {
-	int ret = EXIT_SUCCESS;
-	if ( !change_space( &ret, &(kvpair->full), want4full, dir )
-		&& ret != EXIT_SUCCESS )
-		return ret;
-	if ( !change_space( &ret, &(kvpair->key), want4key, dir )
-		&& ret != EXIT_SUCCESS )
-		return ret;
-	(void)change_space( &ret, &(kvpair->val), want4val, dir );
-	return ret;
+	int ret = 0;
+	
+	if (
+		(ret = change_space( &(kvpair->full), want4full, dir )) != 0
+		|| (ret = change_space( &(kvpair->key), want4key, dir )) != 0
+	) return ret;
+	
+	return change_space( &(kvpair->val), want4val, dir );
 }

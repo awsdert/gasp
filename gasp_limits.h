@@ -12,6 +12,7 @@
 #	include <float.h>
 #endif
 
+#define bitsof(T) (sizeof(T) * CHAR_BIT)
 #define TOVAL(M) (M##0)
 #define ISDEF TOVAL
 

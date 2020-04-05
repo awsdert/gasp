@@ -13,7 +13,10 @@ void lua_error_cb( lua_State *L, char const *text ) {
 }
 
 void* lua_extract_bytes(
-	int *err, lua_State *L, int index, nodes_t *dst ) {
+	int *err, lua_State *L, int index, nodes_t *dst
+)
+{
+	int ret = 0;
 	char const *text = luaL_checkstring(L,index-2);
 	char unexpected[64] = {0};
 	uintmax_t ival;
@@ -21,8 +24,11 @@ void* lua_extract_bytes(
 	uchar *array;
 	node_t i, leng, size = luaL_checkinteger(L,index-1);
 	size_t value = 0;
-	if ( !(array = more_nodes( uchar, err, dst, BUFSIZ )) )
+	
+	if ( (ret = more_nodes( uchar, dst, BUFSIZ )) != 0 )
 		return NULL;
+	array = dst->space.block;
+	
 	if ( strcmp(text,"signed") == 0 || strcmp(text,"unsigned") == 0 ) {
 		ival = luaL_checkinteger(L,index);
 		for ( i = 0; i < size; ++i, ival >>= CHAR_BIT )
@@ -45,8 +51,11 @@ void* lua_extract_bytes(
 	else if ( strcmp(text,"bytes") == 0 ) {
 		text = luaL_checkstring(L,index);
 		leng = strlen(text);
-		if ( !leng || !(array = more_nodes( uchar, err, dst, leng )) )
+		
+		if ( !leng || (ret = more_nodes( uchar, dst, leng )) != 0 )
 			goto fail;
+		array = dst->space.block;
+		
 		for ( i = 0; i < leng; ++i ) {
 			if ( text[i] == ' ' )
 				continue;
@@ -339,7 +348,7 @@ int lua_int2bytes( lua_State *L ) {
 	uchar *array;
 	node_t i;
 	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes )) ) {
-		free_nodes( uchar, NULL, &nodes );
+		free_nodes( &nodes );
 		lua_pushinteger( L, 0 );
 		lua_newtable(L);
 		return 2;
@@ -351,7 +360,7 @@ int lua_int2bytes( lua_State *L ) {
 		lua_pushinteger( L, array[i] );
 		lua_settable( L, -3 );
 	}
-	free_nodes( uchar, NULL, &nodes );
+	free_nodes( &nodes );
 	return 2;
 }
 
@@ -362,7 +371,7 @@ int lua_tointbytes( lua_State *L ) {
 	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes ))
 	) 
 	{
-		free_nodes( uchar, NULL, &nodes );
+		free_nodes( &nodes );
 		lua_pushinteger( L, 0 );
 		lua_newtable( L );
 		return 2;
@@ -374,7 +383,7 @@ int lua_tointbytes( lua_State *L ) {
 		lua_pushinteger( L, array[i] );
 		lua_settable(L,-3);
 	}
-	free_nodes( uchar, NULL, &nodes );
+	free_nodes( &nodes );
 	return 2;
 }
 
@@ -383,7 +392,7 @@ int lua_flipbytes( lua_State *L ) {
 	node_t i, j;
 	uchar * array;
 	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes )) ) {
-		free_nodes( uchar, NULL, &nodes );
+		free_nodes( &nodes );
 		lua_pushinteger( L, 0 );
 		lua_newtable(L);
 		return 2;
@@ -395,7 +404,7 @@ int lua_flipbytes( lua_State *L ) {
 		lua_pushinteger(L,array[j]);
 		lua_settable(L,-3);
 	}
-	free_nodes( uchar, NULL, &nodes );
+	free_nodes( &nodes );
 	return 2;
 }
 
@@ -404,19 +413,24 @@ int lua_totxtbytes( lua_State *L ) {
 	nodes_t nodes = {0}, text = {0};
 	uchar *array;
 	char *txt;
+	
 	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes ))
-		|| !(txt = more_nodes(
-		char, NULL, &text, nodes.count * CHAR_BIT )) ) {
-		free_nodes( uchar, NULL, &nodes );
+		|| more_nodes( char, &text, nodes.count * CHAR_BIT ) != 0
+	)
+	{
+		free_nodes( &nodes );
 		lua_pushstring(L,"");
 		return 1;
 	}
+	txt = nodes.space.block;
+	
 	sprintf( txt, "%02X", *array );
 	for ( i = 1; i < nodes.count; ++i )
 		sprintf( strchr(txt,'\0'), " %02X", array[i] );
+
 	lua_pushstring(L,txt);
-	free_nodes( uchar, NULL, &nodes );
-	free_nodes( uchar, NULL, &text );
+	free_nodes( &nodes );
+	free_nodes( &text );
 	return 1;
 }
 
@@ -426,7 +440,7 @@ int lua_bytes2int( lua_State *L ) {
 	uchar *array;
 	uintmax_t val = 0;
 	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes )) ) {
-		free_nodes( uchar, NULL, &nodes );
+		free_nodes( &nodes );
 		lua_pushinteger(L,0);
 		return 1;
 	}
@@ -435,7 +449,7 @@ int lua_bytes2int( lua_State *L ) {
 		val |= array[i];
 	}
 	lua_pushinteger(L,val);
-	free_nodes( uchar, NULL, &nodes );
+	free_nodes( &nodes );
 	return 1;
 }
 bool g_reboot_gui = false;
@@ -469,7 +483,7 @@ void lua_create_gasp(lua_State *L) {
 	lua_create_proc_classes(L);
 	lua_newtable(L);
 	push_branch_cfunc(L,"ptrlimit",lua_ptrlimit );
-	push_branch_cfunc(L,"locate_app",lua_proc_locate_name);
+	push_branch_cfunc(L,"locate_app",lua_process_find);
 	push_branch_cfunc(L,"new_glance",lua_proc_glance_grab);
 	push_branch_cfunc(L,"new_handle",lua_proc_handle_grab);
 	push_branch_cfunc(L,"get_endian",lua_get_endian);

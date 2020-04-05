@@ -1,25 +1,26 @@
 #include "gasp.h"
 #define PROC_GLANCE_CLASS "class_proc_glance"
 
-int lua_proc_notice_info( lua_State *L, proc_notice_t *notice )
+int lua_proc_process_info( lua_State *L, process_t *process )
 {
-	if ( !notice )
+	if ( !process )
 		return 0;
 	lua_createtable( L, 0, 5 );
-	push_branch_bool( L, "self", notice->self );
-	push_branch_int( L, "entryId", notice->entryId );
-	push_branch_int( L, "ownerId", notice->ownerId );
-	push_branch_str( L, "name", (char*)(notice->name.block) );
-	push_branch_str( L, "cmdl", (char*)(notice->cmdl.block) );
+	push_branch_bool( L, "self", process->self );
+	push_branch_int( L, "entryId", process->pid );
+	push_branch_int( L, "ownerId", process->parent );
+	push_branch_str( L, "path", process->path );
+	push_branch_str( L, "name", (char*)(process->name.space.block) );
+	push_branch_str( L, "cmdl", (char*)(process->cmdl.space.block) );
 	return 1;
 }
 
 int lua_proc_glance_init( lua_State *L ) {
 	int underId = luaL_optinteger(L,2,0);
 	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
-	proc_notice_t *notice;
-	notice = proc_glance_init( NULL, glance, underId );
-	return lua_proc_notice_info( L, notice );
+	if ( proc_glance_init( glance, underId ) != 0 )
+		return 0;
+	return lua_proc_process_info( L, &(glance->process) );
 }
 
 int lua_proc_glance_term( lua_State *L ) {
@@ -28,38 +29,38 @@ int lua_proc_glance_term( lua_State *L ) {
 	return 0;
 }
 
-int lua_proc_notice_next( lua_State *L ) {
-	int ret = 0;
+int lua_proc_process_next( lua_State *L ) {
 	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
-	proc_notice_t *notice = proc_notice_next( &ret, glance );
-	return lua_proc_notice_info( L, notice );
+	process_next( glance );
+	return lua_proc_process_info( L, &(glance->process) );
 }
 
-int lua_proc_locate_name( lua_State *L ) {
-	int ret = EXIT_SUCCESS, underId = luaL_optinteger(L,2,0);
+int lua_process_find( lua_State *L ) {
+	int ret, underId = luaL_optinteger(L,2,0);
 	char const *name = luaL_optstring(L,1,NULL);
 	nodes_t nodes = {0};
-	proc_notice_t *notice;
+	process_t *process;
 	node_t i;
 	
-	if ( !(notice = proc_locate_name( &ret, name, &nodes, underId, 0 )) ) {
-		lua_newtable(L);
-		return 1;
-	}
+	if ( (ret = process_find( name, &nodes, underId, 0 )) != 0 )
+		return 0;
+	
+	process = nodes.space.block;	
 	lua_createtable( L, nodes.count + 1, 0 );
 	for ( i = 0; i < nodes.count; ++i ) {
 		lua_pushinteger(L,i+1);
 		lua_createtable( L, 0, 5 );
-		push_branch_bool( L, "self", notice->self );
-		push_branch_int( L, "entryId", notice->entryId );
-		push_branch_int( L, "ownerId", notice->ownerId );
-		push_branch_str( L, "name", (char*)(notice->name.block) );
-		push_branch_str( L, "cmdl", (char*)(notice->cmdl.block) );
+		push_branch_bool( L, "self", process->self );
+		push_branch_int( L, "entryId", process->pid );
+		push_branch_int( L, "ownerId", process->parent );
+		push_branch_str( L, "path", process->path );
+		push_branch_str( L, "name", (char*)(process->name.space.block) );
+		push_branch_str( L, "cmdl", (char*)(process->cmdl.space.block) );
 		lua_settable(L,-3);
-		proc_notice_zero( notice );
-		++notice;
+		process_term( process );
+		++process;
 	}
-	free_nodes( proc_notice_t, &ret, &nodes );
+	free_nodes( &nodes );
 	return 1;
 }
 int lua_proc_glance_text( lua_State *L ) {
@@ -77,7 +78,7 @@ int lua_proc_glance_grab( lua_State *L ) {
 luaL_Reg lua_class_proc_glance_func_list[] = {
 	{ "new", lua_proc_glance_grab },
 	{ "init", lua_proc_glance_init },
-	{ "next", lua_proc_notice_next },
+	{ "next", lua_proc_process_next },
 	{ "term", lua_proc_glance_term },
 	{ "tostring", lua_proc_glance_text },
 {NULL}};
@@ -111,18 +112,18 @@ int lua_proc_glance_node( lua_State *L ) {
 	else return 0;
 	if ( i < 1 ) {
 		if ( i == 0 ) {
-			lua_pushinteger( L, glance->idNodes.count );
+			lua_pushinteger( L, glance->nodes.count );
 			return 1;
 		}
 		return 0;
 	}
 	num = i - 1;
-	if ( num >= glance->idNodes.count )
+	if ( num >= glance->nodes.count )
 		return 0;
-	tmp = glance->process;
-	glance->process = num;
-	i = lua_proc_notice_next(L);
-	glance->process = tmp;
+	tmp = glance->nodes.focus;
+	glance->nodes.focus = num;
+	i = lua_proc_process_next(L);
+	glance->nodes.focus = tmp;
 	return i;
 }
 
@@ -138,7 +139,7 @@ int lua_proc_glance_free( lua_State *L ) {
 
 int lua_proc_glance_leng( lua_State *L ) {
 	proc_glance_t *glance = luaL_checkudata(L,1,PROC_GLANCE_CLASS);
-	lua_pushinteger(L,glance->idNodes.count);
+	lua_pushinteger(L,glance->nodes.count);
 	return 1;
 }
 
@@ -179,9 +180,9 @@ void lua_proc_create_glance_class( lua_State *L ) {
 #define PROC_HANDLE_CLASS "class_proc_handle"
 
 typedef struct lua_proc_handle {
-	proc_handle_t *handle;
-	tscan_t tscan;
 	nodes_t bytes;
+	tscan_t tscan;
+	process_t process;
 } lua_proc_handle_t;
 
 bool lua_proc_handle__end_scan( tscan_t *tscan ) {
@@ -313,12 +314,15 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	REPORT("Shutting current dump file info")
 	dump_files_shut( dump );
 	
-	if ( !(path = more_space(
-		&ret, &path_space, strlen( GASP_PATH ) + UCHAR_MAX))
-	) {
+	if ( (ret = more_space(
+		&path_space, strlen( GASP_PATH ) + UCHAR_MAX)) != 0
+	)
+	{
 		ERRMSG( ret, "Couldn't allocate memory for scan path" );
 		return ret;
 	}
+	path = path_space.block;
+	
 	if ( !scan ) {
 		sprintf( path, "rm -r \"%s/scans/%lu\"",
 				GASP_PATH, (ulong)(tscan->id) );
@@ -340,7 +344,7 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	
 	done:
 	tscan->done_scans = scan;
-	free_space( NULL, &space );
+	free_space( &space );
 	return ret;
 }
 
@@ -354,29 +358,33 @@ int lua_proc_handle_term( lua_State *L ) {
 	tscan->pipesmade = 0;
 	
 	(void)lua_proc_handle_undo( handle, 0 );
-	proc_handle_shut( handle->handle );
-	handle->handle = NULL;
+	process_term( &(handle->process) );
 	
 	dump_files_shut( tscan->dump );
 	dump_files_shut( tscan->dump + 1 );
 	
-	free_nodes( uchar, NULL, &(handle->bytes) );
+	free_nodes( &(handle->bytes) );
 	return 0;
 }
 
 int lua_proc_handle_valid( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushboolean( L, handle->handle != NULL );
+	lua_pushboolean( L, handle->process.hooked );
 	return 1;
 }
 
 int lua_proc_handle_init( lua_State *L ) {
-	int pid = luaL_checkinteger(L,2), ret = EXIT_SUCCESS;
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	if ( handle->handle ) lua_proc_handle_term( L );
-	handle->handle = proc_handle_open( &ret, pid );
+	int pid = luaL_checkinteger(L,2),
+		opt = luaL_optinteger(L,3,PROCESS_O_RWX);
+		
+	if ( handle->process.path[0] )
+		lua_proc_handle_term( L );
+	
+	if ( pid > 0 )
+		process_info( &(handle->process), pid, 1, opt );
 	return lua_proc_handle_valid(L);
 }
 
@@ -384,9 +392,11 @@ int lua_proc_handle_glance_data( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	uintmax_t addr = luaL_checkinteger(L,2);
-	uintmax_t size = luaL_checkinteger(L,3);
+	ssize_t i, size = luaL_checkinteger(L,3);
 	uchar * array;
-	if ( !(handle->handle) || size < 1 ) {
+	int ret;
+	
+	if ( !(handle->process.hooked) || size < 1 ) {
 		lua_newtable(L);
 		return 1;
 	}
@@ -397,17 +407,19 @@ int lua_proc_handle_glance_data( lua_State *L ) {
 		return 1;
 	}
 	lua_proc_handle__set_rdwr(handle,1);
-	size = proc_glance_data( NULL, handle->handle, addr, array, size );
+	ret = proc_glance_data(
+		&(handle->process), addr, array, size, &size );
 	lua_proc_handle__set_rdwr(handle,0);
-	if ( size < 1 ) {
+	if ( ret != 0 || size < 1 )
+	{
 		free(array);
 		lua_newtable(L);
 		return 1;
 	}
 	lua_createtable( L, size, 0 );
-	for ( addr = 0; addr < size; ++addr ) {
-		lua_pushinteger(L,addr+1);
-		lua_pushinteger(L,array[addr]);
+	for ( i = 0; i < size; ++i ) {
+		lua_pushinteger(L,i+1);
+		lua_pushinteger(L,array[i]);
 		lua_settable(L,-3);
 	}
 	free(array);
@@ -416,11 +428,13 @@ int lua_proc_handle_glance_data( lua_State *L ) {
 int lua_proc_handle_change_data( lua_State *L ) {
 	lua_proc_handle_t *handle = (lua_proc_handle_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	uintmax_t addr = luaL_checkinteger(L,2), size;
+	uintmax_t addr = luaL_checkinteger(L,2);
 	uchar * array = NULL;
 	nodes_t *nodes;
+	ssize_t size;
+	int ret;
 	
-	if ( !(handle->handle) ) {
+	if ( !(handle->process.hooked) ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
@@ -432,10 +446,11 @@ int lua_proc_handle_change_data( lua_State *L ) {
 	}
 	
 	//lua_proc_handle__set_rdwr(handle,1);
-	size = proc_change_data( NULL, handle->handle, addr, array, nodes->count );
+	ret = proc_change_data(
+		&(handle->process), addr, array, nodes->count, &size );
 	//lua_proc_handle__set_rdwr(handle,0);
 
-	lua_pushinteger(L,(size > 0) ? size : 0);
+	lua_pushinteger(L,(ret == 0 && size > 0) ? size : 0);
 	return 1;
 }
 
@@ -526,11 +541,13 @@ bool lua_proc_handle__can_scan(
 	
 	tscan = &(handle->tscan);
 	
-	if ( !(handle->handle) )
+#ifdef _WIN32
+	if ( !(handle->process.handle) )
 	{
 		ERRMSG( EDESTADDRREQ, "No process handle provided" );
 		return 0;
 	}
+#endif
 	
 	if ( tscan->threadmade )
 	{
@@ -597,23 +614,24 @@ bool lua_proc_handle_prep_scan(
 	tscan->dump->nodes = dump->nodes = &(tscan->mappings);
 	
 	REPORT("Requesting memory for address list")
-	if ( !more_nodes( uintmax_t, &ret, nodes, list_limit ) )
+	if ( (ret = more_nodes( uintmax_t, nodes, list_limit )) != 0 )
 	{
 		if ( ret != 0 )
 			ERRMSG( ret, "Unable to allocate memory for address list" );
 		return 0;
 	}
+	(void)memset( nodes->space.block, 0, nodes->space.given );
 	
 	REPORT("Checking for an assigned scan folder")
 	if ( !(tscan->assignedID) ) {
 		for ( tscan->id = 0;
-			ret == 0 && tscan->id < LONG_MAX;
+			ret == 0 && tscan->id < INT_MAX;
 			tscan->id++
 		)
 		{
 			ret = dump_files__dir( &space, tscan->id, 0 );
 		}
-		free_space(NULL,&space);
+		free_space(&space);
 		if ( ret == ENOTDIR )
 			tscan->assignedID = 1;
 		else {
@@ -631,7 +649,7 @@ bool lua_proc_handle_prep_scan(
 	
 	REPORT("Preping all scan variables")
 	
-	tscan->handle = handle->handle;
+	tscan->process = &(handle->process);
 	tscan->bytes = handle->bytes.count;
 	tscan->array = tscan->bytes ? handle->bytes.space.block : NULL;
 	tscan->from = from;
@@ -647,9 +665,7 @@ bool lua_proc_handle_prep_scan(
 	tscan->zero = zero ? ~0 : 0;
 	
 	REPORT("Opening files to dump memory to prior to scan")
-	if ( (ret = dump_files_open( dump, tscan->id, scan ))
-		!= 0
-	)
+	if ( (ret = dump_files_open( dump, tscan->id, scan )) != 0 )
 	{
 		ERRMSG( ret, "Couldn't open output file" );
 		return 0;
@@ -657,8 +673,8 @@ bool lua_proc_handle_prep_scan(
 	
 	REPORT("Open previous scan dump files if not already open")
 	if ( scan && dump_files_test(tscan->dump[0]) != 0 ) {
-		if ( (ret = dump_files_open( tscan->dump, tscan->id, scan ))
-			!= 0
+		if ( (ret = dump_files_open(
+			tscan->dump, tscan->id, scan )) != 0
 		)
 		{
 			dump_files_shut( dump );
@@ -723,7 +739,7 @@ int lua_proc_handle_bytescan( lua_State *L ) {
 		return 1;
 	}
 	
-	if ( limit > LONG_MAX ) limit = 100;
+	if ( limit > INT_MAX ) limit = 100;
 	
 	tscan = &(handle->tscan);
 	
@@ -890,7 +906,7 @@ void lua_proc_create_handle_class( lua_State *L ) {
 int lua_proc_memory_term( lua_State *L ) {
 	space_t *space = (space_t*)
 		luaL_checkudata(L,1,DUMP_CLASS);
-	less_space( NULL, space, 0 );
+	free_space( space );
 	return 0;
 }
 
@@ -899,7 +915,7 @@ int lua_proc_memory_init( lua_State *L ) {
 	space_t *space = (space_t*)
 		luaL_checkudata(L,1,DUMP_CLASS);
 	if ( space ) lua_proc_memory_term( L );
-	lua_pushboolean( L, !!more_space( NULL, space, want ) );
+	lua_pushboolean( L, more_space( space, want ) == 0 );
 	return 1;
 }
 

@@ -1,32 +1,42 @@
 #include "gasp.h"
-void* change_nodes(
-	int *err, nodes_t *nodes, size_t Nsize, node_t want, int dir ) {
-	errno = EXIT_SUCCESS;
+int change_nodes(
+	nodes_t *nodes, size_t Nsize, node_t want, int dir
+)
+{
+	int ret = 0;
+	
 	if ( !nodes ) {
-		if ( err ) *err = EDESTADDRREQ;
-		return NULL;
+		ret = EDESTADDRREQ;
+		ERRMSG( ret, "Need location to fill pointer into" );
+		return ret;
 	}
+	
 	if ( !Nsize ) {
 		if ( !want ) {
-			free_space( err, &(nodes->space) );
-			nodes->total = nodes->count = 0;
-			return NULL;
+			free_space( &(nodes->space) );
+			nodes->total = nodes->count = nodes->focus = 0;
+			return 0;
 		}
-		if ( err ) *err = EINVAL;
-		return NULL;
+		return EINVAL;
 	}
-	if ( !change_space(err, &(nodes->space), want * Nsize, dir) )
-		return NULL;
+	
+	if ( (ret = change_space(
+		&(nodes->space), want * Nsize, dir)) != 0
+	) return ret;
+	
 	nodes->total = nodes->space.given / Nsize;
-	return nodes->space.block;
+	if ( nodes->focus >= nodes->total )
+		nodes->focus = 0;
+	return 0;
 }
 
 int add_node( nodes_t *nodes, node_t *node, size_t Nsize ) {
 	int ret = EXIT_SUCCESS;
 	if ( !nodes || !node ) return EDESTADDRREQ;
 	if ( nodes->count >= nodes->total ) {
-		if ( !change_nodes( &ret, nodes, Nsize, nodes->count + 100, 1 ) )
-			return ret;
+		if ( (ret = change_nodes(
+			nodes, Nsize, nodes->count + 100, 1 )) != 0
+		) return ret;
 	}
 	*node = nodes->count;
 	nodes->count++;

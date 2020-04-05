@@ -3,8 +3,8 @@ return function (ctx,now,prv)
 	local scan = GUI.scan or {}
 	local list, tmp, i, v, x, p
 	local function range2str(from,upto,desc)
-		return ((string.format( "%X - %X %s", from, upto, desc ))
-			or "(nil)")
+		local range = string.format( "%X - %X ", from, upto )
+		return (range .. ( desc or "(nil)" ))
 	end
 	GUI.keep_cheat = nil
 	scan.as_text = scan.as_text or ""

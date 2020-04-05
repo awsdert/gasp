@@ -30,14 +30,8 @@ gasp_objs=$(gasp_sources:%=%.o)
 gasp_d_objs=$(gasp_sources:%=%-d.o)
 init_gasp_objs:=gasp.c.o $(gasp_objs)
 init_gasp_d_objs:=gasp.c-d.o $(gasp_d_objs)
-test_gasp_d_objs:=test_gasp.c-d.o $(gasp_d_objs)
-deep_gasp_objs:=deep_gasp.c.o $(gasp_objs)
-deep_gasp_d_objs:=deep_gasp.c-d.o $(gasp_d_objs)
 gasp_exe:=gasp.$(exe_ext)
 gasp_d_exe:=gasp-d.$(exe_ext)
-test_gasp_exe:=test-$(gasp_d_exe)
-deep_gasp_exe:=deep-$(gasp_exe)
-deep_gasp_d_exe:=deep-$(gasp_d_exe)
 BASIC_TARGETS:=rebuild clean libs build debug test
 PHONY_TARGETS:=makefile default all run gede moon-libs
 PHONY_TARGETS+= $(BASIC_TARGETS)
@@ -136,29 +130,20 @@ gede: debug
 	gede --args ./$(gasp_d_exe) $(ARGS)
 
 test-all: libs-all test
-test: $(deep_gasp_d_exe)
-	./$(gasp_d_exe) $(ARGS)
+test: $(gasp_d_exe)
+	./$(gasp_d_exe) -D USE_GEDE $(ARGS)
 
 build-all: libs-all build
-build: $(gasp_exe) $(deep_gasp_exe)
+build: $(gasp_exe)
 
 debug-all: libs-all debug
-debug: $(gasp_d_exe) $(deep_gasp_d_exe) $(test_gasp_exe)
+debug: $(gasp_d_exe)
 
 $(gasp_exe): $(init_gasp_objs)
 	$(CC) $(BFLAGS) -o $@ $(init_gasp_objs) $(LIBS)
 
-$(deep_gasp_exe): $(deep_gasp_objs)
-	$(CC) $(BFLAGS) -o $@ $(deep_gasp_objs) $(LIBS)
-
 $(gasp_d_exe): $(init_gasp_d_objs)
 	$(CC) $(DFLAGS) $(BFLAGS) -o $@ $(init_gasp_d_objs) $(LIBS)
-
-$(deep_gasp_d_exe): $(deep_gasp_d_objs)
-	$(CC) $(DFLAGS) $(BFLAGS) -o $@ $(deep_gasp_d_objs) $(LIBS)
-
-$(test_gasp_exe): $(test_gasp_d_objs)
-	$(CC) $(DFLAGS) $(BFLAGS) -o $@ $(test_gasp_d_objs) $(LIBS)
 
 %.o: %
 	$(CC) $(CFLAGS) -o $@ -c $< $(LIBS)

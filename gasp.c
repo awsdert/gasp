@@ -175,7 +175,7 @@ int launch_deep_gasp(
 		*gede = " -D USE_GEDE";
 	char *cmdl, *key, *val;
 	node_t i;
-	size_t need = 0;
+	size_t need;
 	kvpair_t *kvpair, *kvpairs;
 	
 	if ( getenv(have) )
@@ -188,7 +188,8 @@ int launch_deep_gasp(
 
 	if ( !PWD ) PWD = CWD;
 	
-	need = strlen(sudo) + 1; /* For '\0' */
+	need = BUFSIZ;
+	need += strlen(sudo) + 1; /* For '\0' */
 	need += strlen(PWD) + 1; /* For '\0' */
 	need += strlen(gede) + 1; /* For '\0' */
 	need += strlen(launch) + 1; /* For '\0' */
@@ -238,7 +239,7 @@ int launch_test_gasp(
 		*PWD = getenv("PWD"), *CWD = getenv("CWD");
 	char *cmdl, *key, *val;
 	node_t i;
-	size_t need = 0;
+	size_t need;
 	kvpair_t *kvpair, *kvpairs;
 	
 	if ( !g_launch_dbg )
@@ -247,6 +248,7 @@ int launch_test_gasp(
 	
 	if ( !PWD ) PWD = CWD;
 	
+	need = BUFSIZ;
 	need += strlen(launch) + 1; /* For '\0' */
 	need += strlen(PWD) + 1; /* For '\0' */
 	need += strlen(gede) + 5; /* For " -D " '\0' */

@@ -83,13 +83,6 @@ int change_space( struct space *space, size_t want, int dir );
 #define more_space( space, want ) change_space( space, want, 1 )
 #define less_space( space, want ) change_space( space, want, -1 )
 #define free_space( space ) (void)change_space( space, 0, 0 )
-
-void gasp_close_pipes( int pipes[2] );
-int dump_files__dir( space_t *space, long inst, bool make );
-int gasp_open( int *fd, char const *path, int perm );
-int gasp_isdir( char const *path, bool make );
-#define gasp_mkdir( path ) gasp_isdir( path, 1 )
-int gasp_rmdir( space_t *space, char const *path, bool recursive );
 	
 typedef unsigned int node_t;
 typedef struct nodes {
@@ -155,6 +148,13 @@ int change_kvpair(
 **/
 int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng );
 
+void gasp_close_pipes( int pipes[2] );
+int dump_files__dir( space_t *space, long inst, bool make );
+int gasp_open( int *fd, char const *path, int perm );
+int gasp_isdir( char const *path, bool make );
+#define gasp_mkdir( path ) gasp_isdir( path, 1 )
+int gasp_rmdir( space_t *space, char const *path, bool recursive );
+
 /* We use concept of glance and notice here because it is possible
  * for a process to have died by the time we try to open it, similar
  * to the snapshot concept in win32 but this is tidier :) */
@@ -183,16 +183,16 @@ typedef struct process {
 #endif
 } process_t;
 
-typedef struct proc_glance {
+typedef struct pglance {
 	int underId;
 	nodes_t nodes;
 	process_t process;
-} proc_glance_t;
+} pglance_t;
 
-typedef struct proc_mapped {
+typedef struct mapped {
 	mode_t perm, prot;
 	uintmax_t head, foot, size;
-} proc_mapped_t;
+} mapped_t;
 
 #define DUMP_LOC_NODE_USED	0
 #define DUMP_LOC_NODE_DATA	1
@@ -312,18 +312,18 @@ int process_info( process_t *process, int pid, bool hook, int flags );
  * @note mainly for internal usage
 **/
 void process_term( process_t *process );
-int process_next( proc_glance_t *glance );
+int process_next( pglance_t *glance );
 /** @brief Iterates through each entry in /proc
  * @param glance Object to store allocations and data
  * @param underId ID of ancestor, < 0 here will produce 0 results
  * @return 0 on success, errno.h code on failure
 **/
-int proc_glance_init( proc_glance_t *glance, int underId );
+int pglance_init( pglance_t *glance, int underId );
 /** @brief Cleans up any left over allocations and data
  * @param glance The object to cleanup
  * @note Will ignore NULL pointers
 **/
-void proc_glance_term( proc_glance_t *glance );
+void pglance_term( pglance_t *glance );
 /** @brief Scans a glance for processes that contain the given name
  * @param name The name to look for
  * @param nodes Where to place all the noticed processes
@@ -375,7 +375,7 @@ node_t proc_handle_dump( tscan_t *tscan );
  * @param size Number of bytes to read into dst
  * @return Number of bytes read into dst
 **/
-int proc_glance_data(
+int pglance_data(
 	process_t *process,
 	uintmax_t addr, void *dst, ssize_t size, ssize_t *done );
 /** @brief Writes what was in memory at the time of the write/pwrite call
@@ -397,7 +397,7 @@ void lua_create_proc_classes( lua_State *L );
 void* lua_extract_bytes(
 	int *err, lua_State *L, int index, nodes_t *dst );
 int lua_process_find( lua_State *L );
-int lua_proc_glance_grab( lua_State *L );
+int lua_pglance_grab( lua_State *L );
 int lua_proc_handle_grab( lua_State *L );
 int lua_panic_cb( lua_State *L );
 int lua_proc_load_glance( lua_State *L );

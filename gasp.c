@@ -268,7 +268,8 @@ int launch_test_gasp(
 	cmdl = CMDL->block;
 	sprintf( cmdl, "gede --args %s/%s %s", PWD, launch, defines );
 
-	for ( i = 0; i < ARGS->count; ++i ) {
+	for ( i = 0; i < ARGS->count; ++i )
+	{
 		kvpair = kvpairs + i;
 		key = kvpair->key.block;
 		val = kvpair->val.block;
@@ -289,15 +290,23 @@ int launch_test_gasp(
 	return system( cmdl );
 }
 
+typedef enum PATH_ID {
+	PATH_ID_GENERAL = 0,
+	PATH_ID_GASP,
+	PATH_ID_LUA,
+	PATH_ID_LUA_C,
+	PATH_ID_COUNT
+} PATH_ID_t;
+
 int launch_lua() {
-	int ret = 0;
-	nodes_t nodes = {0};
-	int scope, conf;
-	char const *ptrace_scope = "/proc/sys/kernel/yama/ptrace_scope",
+	int ret = 0, scope, conf;
+	char const
+		*ptrace_scope = "/proc/sys/kernel/yama/ptrace_scope",
 		*ptrace_conf = "/etc/sysctl.d/10-ptrace.conf";
-	char *HOME = NULL, *path = NULL, *PWD = NULL, 
-		*LUA_PATH = NULL, *LUA_CPATH = NULL, *GASP_PATH = NULL;
-	size_t leng = BUFSIZ;
+	text_t PATHS[PATH_ID_COUNT] = {{0}};
+	char *paths[PATH_ID_COUNT] = {NULL}, *HOME = NULL, *PWD = NULL;
+	size_t leng;
+	node_t i;
 #if 0
 	lua_CFunction old_lua_panic_cb;
 #endif
@@ -306,55 +315,65 @@ int launch_lua() {
 	scope = set_scope( ptrace_scope, 0 );
 	conf = set_scope( ptrace_conf, 0 );
 	
-	leng += BUFSIZ;
 	if ( !(HOME = getenv("HOME")) || !(PWD = getenv("PWD")) ) {
 		ret = errno;
 		ERRMSG( ret, "Couldn't get $(HOME) and/or $(PWD)" );
 		return ret;
 	}
-	leng = strlen(HOME) + 100;
-	GASP_PATH = calloc( leng, 1 );
-	sprintf( GASP_PATH, "%s/gasp", HOME );
-	leng += strlen(PWD) + 20;
-	LUA_PATH = calloc( leng, 1 );
-	LUA_CPATH = calloc( leng, 1 );
-	sprintf(LUA_PATH,"%s/lua/?.lua;%s/?.lua",PWD,GASP_PATH);
-	sprintf(LUA_CPATH,"%s/?.so",PWD);
-	setenv("GASP_PATH",GASP_PATH,0);
-	setenv("LUA_PATH",LUA_PATH,0);
-	setenv("LUA_CPATH",LUA_CPATH,0);
+	
+	leng = strlen(PWD) + BUFSIZ + strlen(HOME);
+	for ( i = 0; i < PATH_ID_COUNT; ++i )
+	{
+		if ( (ret = more_nodes( char, PATHS + i, leng )) != 0 )
+		{
+			ERRMSG( ret, "Unable to allocate memory for local path" );
+			goto fail;
+		}
+		paths[i] = PATHS[i].space.block;
+	}
+	
+	if ( !(paths[PATH_ID_GASP] == getenv("GASP_PATH")) )
+	{
+		paths[PATH_ID_GASP] = PATHS[PATH_ID_GASP].space.block;
+		sprintf( paths[PATH_ID_GASP], "%s/gasp", HOME );
+		setenv( "GASP_PATH", paths[PATH_ID_GASP], 0 );
+	}
+	
+	sprintf( paths[PATH_ID_LUA],
+		"%s/lua/?.lua;%s/?.lua", PWD, paths[PATH_ID_GASP] );
+	setenv("LUA_PATH",paths[PATH_ID_LUA],0);
+	
+	sprintf( paths[PATH_ID_LUA_C], "%s/?.so", PWD );
+	setenv("LUA_CPATH",paths[PATH_ID_LUA_C],0);
+	
+	/* Initialise lua */
+	errno = 0;
 	if ( !(L = luaL_newstate()) ) {
 		ret = errno;
 		ERRMSG( ret, "Couldn't create lua instance" );
-		goto cleanup;
+		goto fail;
 	}
-#if 0
-	old_lua_panic_cb =
-#endif
 	lua_atpanic(L,lua_panic_cb);
-	luaL_openlibs(L);
+	
 	/* Just a hack for slipups upstream */
 	(void)luaL_dostring(L,"loadlib = package.loadlib");
+	
+	/* Load in extras */
+	luaL_openlibs(L);
 	lua_create_gasp(L);
-	path = calloc( leng, 1 );
-	sprintf( path, "%s/lua/gasp.lua", PWD );
+	
+	/* Run lua */
+	sprintf( paths[PATH_ID_GENERAL], "%s/lua/gasp.lua", PWD );
 	do {
 		g_reboot_gui = false;
-		if ( luaL_dofile(L, path ) )
+		if ( luaL_dofile(L, paths[PATH_ID_GENERAL] ) )
 			printf("Failed:\n%s\n", lua_tostring(L,-1));
 	}
 	while ( g_reboot_gui );
-	sprintf( path, "%s/scans", GASP_PATH );
-	if ( access( path, F_OK ) == 0 ) {
-		sprintf( path, "rm -r \"%s/scans\"", GASP_PATH );
-		system( path );
-	}
-	free(path);
-	path = NULL;
+	
 	lua_close(L);
-	free(LUA_CPATH);
-	free(LUA_PATH);
-	cleanup:
+	
+	fail:
 #if 0
 	set_scope( ptrace_scope, scope );
 	set_scope( ptrace_conf, conf );
@@ -362,9 +381,11 @@ int launch_lua() {
 	(void)scope;
 	(void)conf;
 #endif
-	free_nodes( &nodes );
-	if ( path )
-		free( path );
+	for ( i = 0; i < PATH_ID_COUNT; ++i )
+	{
+		free_nodes( PATHS + i );
+		paths[i] = PATHS[i].space.block;
+	}
 	return ret;
 }
 
@@ -389,7 +410,7 @@ int main( int argc, char *argv[] ) {
 	// [Defines] [Process] [CheatFiles]
 	
 	if ( gasp_make_defenv_opt( &defines,
-		"PWD", "CWD", "HOME", "HAS_ROOT_PERM", "USE_GEDE",
+		"PWD", "CWD", "HOME", "HAS_ROOT_PERM", "USE_GEDE", "GASP_PATH",
 		"DISPLAY", "XDG_CURRENT_DESKTOP", "GDMSESSION",
 		NULL ) != 0
 	)

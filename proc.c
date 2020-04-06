@@ -127,10 +127,10 @@ void* process__wait4exit( void *data ) {
 
 #define PAGE_LINE_SIZE ((sizeof(void*) * 4) + 7)
 
-int proc_mapped_list( process_t *process, nodes_t *nodes )
+int mapped_list( process_t *process, nodes_t *nodes )
 {
 	int ret = 0, fd = -1;
-	proc_mapped_t m = {0}, *mv = NULL;
+	mapped_t m = {0}, *mv = NULL;
 	ssize_t size = 0;
 	char *line, *pos, path[SCHAR_MAX] = {0};
 	space_t space = {0};
@@ -143,7 +143,7 @@ int proc_mapped_list( process_t *process, nodes_t *nodes )
 	}
 	
 	nodes->focus = nodes->count = 0;
-	nodes->total = nodes->space.given / sizeof(proc_mapped_t);
+	nodes->total = nodes->space.given / sizeof(mapped_t);
 	
 	if ( !process )
 	{
@@ -158,7 +158,7 @@ int proc_mapped_list( process_t *process, nodes_t *nodes )
 	if ( (ret = more_space( &space, size + 1 )) != 0 )
 		return ret;
 	
-	if ( (ret = more_nodes( proc_mapped_t, nodes, 50 )) != 0 )
+	if ( (ret = more_nodes( mapped_t, nodes, 50 )) != 0 )
 		return ret;
 	
 	if ( (fd = open( path, O_RDONLY )) < 0 )
@@ -178,7 +178,7 @@ int proc_mapped_list( process_t *process, nodes_t *nodes )
 	
 	for ( line = space.block; *line; ++line )
 	{
-		(void)memset( &m, 0, sizeof(proc_mapped_t) );
+		(void)memset( &m, 0, sizeof(mapped_t) );
 		
 		/* Read address range */
 		sscanf( line, "%jx-%jx", &(m.head), &(m.foot) );
@@ -206,7 +206,7 @@ int proc_mapped_list( process_t *process, nodes_t *nodes )
 		if ( (ret = file_glance_perm( path, &(m.perm) )) != 0 )
 			return ret;
 			
-		if ( (ret = add_node( nodes, &n, sizeof(proc_mapped_t))) != 0 )
+		if ( (ret = add_node( nodes, &n, sizeof(mapped_t))) != 0 )
 			return ret;
 		mv = nodes->space.block;
 		mv[n] = m;
@@ -221,14 +221,14 @@ int proc_mapped_list( process_t *process, nodes_t *nodes )
 	return 0;
 }
 
-int proc_mapped_next(
-	process_t *process, mode_t prot, proc_mapped_t *mapped
+int mapped_next(
+	process_t *process, mode_t prot, mapped_t *mapped
 )
 {
 	int ret = 0;
 	nodes_t nodes = {0};
 	node_t n;
-	proc_mapped_t *m, *mv;
+	mapped_t *m, *mv;
 	
 	if ( !mapped ) {
 		ret = EDESTADDRREQ;
@@ -236,7 +236,7 @@ int proc_mapped_next(
 		return ret;
 	}
 	
-	if ( (ret = proc_mapped_list( process, &nodes )) != 0 )
+	if ( (ret = mapped_list( process, &nodes )) != 0 )
 		return ret;
 	
 	mv = nodes.space.block;
@@ -246,13 +246,13 @@ int proc_mapped_next(
 		if ( mapped->foot <= m->foot || (m->prot & prot) != prot )
 			continue;
 		
-		(void)memcpy( mapped, m, sizeof(proc_mapped_t) );
+		(void)memcpy( mapped, m, sizeof(mapped_t) );
 		break;
 	}
 	
 	if ( n == nodes.count )
 	{
-		(void)memset( mapped, 0, sizeof(proc_mapped_t) );
+		(void)memset( mapped, 0, sizeof(mapped_t) );
 		ret = ERANGE;
 	}
 	
@@ -261,14 +261,14 @@ int proc_mapped_next(
 	return ret;
 }
 
-int proc_mapped_addr(
-	process_t *process, proc_mapped_t *mapped, uintmax_t addr
+int mapped_addr(
+	process_t *process, mapped_t *mapped, uintmax_t addr
 )
 {
 	int ret = 0;
 	nodes_t nodes = {0};
 	node_t n;
-	proc_mapped_t *m, *mv;
+	mapped_t *m, *mv;
 	
 	if ( !mapped ) {
 		ret = EDESTADDRREQ;
@@ -276,7 +276,7 @@ int proc_mapped_addr(
 		return ret;
 	}
 	
-	if ( (ret = proc_mapped_list( process, &nodes )) != 0 )
+	if ( (ret = mapped_list( process, &nodes )) != 0 )
 		return ret;
 	
 	mv = nodes.space.block;
@@ -286,13 +286,13 @@ int proc_mapped_addr(
 		if ( addr < m->head || addr > m->foot )
 			continue;
 		
-		(void)memcpy( mapped, m, sizeof(proc_mapped_t) );
+		(void)memcpy( mapped, m, sizeof(mapped_t) );
 		break;
 	}
 	
 	if ( n == nodes.count )
 	{
-		(void)memset( mapped, 0, sizeof(proc_mapped_t) );
+		(void)memset( mapped, 0, sizeof(mapped_t) );
 		ret = ERANGE;
 	}
 	
@@ -1136,7 +1136,7 @@ node_t proc_handle_dump( tscan_t *tscan )
 {
 	int ret = 0;
 	nodes_t nodes = {0}, *mappings;
-	proc_mapped_t *src, *SRC, *dst, *DST;
+	mapped_t *src, *SRC, *dst, *DST;
 	process_t *process;
 	uchar *used, *data;
 	dump_t *dump;
@@ -1181,12 +1181,12 @@ node_t proc_handle_dump( tscan_t *tscan )
 	if ( tscan->done_scans )
 		goto dump_data;
 	
-	if ( (ret = proc_mapped_list( process, &nodes )) != 0
+	if ( (ret = mapped_list( process, &nodes )) != 0
 		&& ret != EOF
 	) return ret;
 	
 	if ( (ret = more_nodes(
-			proc_mapped_t, mappings, nodes.count )) != 0
+			mapped_t, mappings, nodes.count )) != 0
 	) return ret;
 	
 	DST = mappings->space.block;
@@ -1210,7 +1210,7 @@ node_t proc_handle_dump( tscan_t *tscan )
 		dst = DST + (dump->nodes->count);
 		
 		/* Add the mapping to the list */
-		memcpy( dst, src, sizeof(proc_mapped_t) );
+		memcpy( dst, src, sizeof(mapped_t) );
 		dump->nodes->count++;
 	}
 	
@@ -1245,7 +1245,7 @@ node_t proc_handle_dump( tscan_t *tscan )
 			/* Prevent unread memory from corrupting locations found */
 			(void)memset( data, tscan->zero, i );
 			
-			if ( (ret = proc_glance_data(
+			if ( (ret = pglance_data(
 				process, src->head, data, i, &size )) <= 0
 			) break;
 			
@@ -1286,9 +1286,9 @@ enum {
 	PROC_MAPPED_PTR_COUNT
 };
 
-int dump_files__mappings( dump_t *dump, proc_mapped_t **ptrs ) {
+int dump_files__mappings( dump_t *dump, mapped_t **ptrs ) {
 	nodes_t *nodes;
-	proc_mapped_t *vec, *now;
+	mapped_t *vec, *now;
 	
 	if ( !ptrs )
 		return EINVAL;
@@ -1300,7 +1300,7 @@ int dump_files__mappings( dump_t *dump, proc_mapped_t **ptrs ) {
 		
 	nodes = dump->nodes;
 	
-	vec = (proc_mapped_t*)(nodes->space.block);
+	vec = (mapped_t*)(nodes->space.block);
 	
 	if ( !vec )
 		return ENODATA;
@@ -1324,10 +1324,10 @@ int dump_files_glance_stored( dump_t *dump, size_t keep )
 	int ret = 0;
 	ssize_t expect = 0, size = 0;
 	uchar *data, *used;
-	proc_mapped_t *pmap, *nmap, *ptrs[PROC_MAPPED_PTR_COUNT] = {NULL};
+	mapped_t *pmap, *nmap, *ptrs[PROC_MAPPED_PTR_COUNT] = {NULL};
 	nodes_t *nodes;
 	
-	if ( (ret = dump_files__mappings( dump, (proc_mapped_t**)(&ptrs) )) != 0 )
+	if ( (ret = dump_files__mappings( dump, (mapped_t**)(&ptrs) )) != 0 )
 	{
 		if ( ret == EINVAL )
 			return EDESTADDRREQ;
@@ -1706,7 +1706,7 @@ int process_find(
 {
 	int ret = 0;
 	node_t i = 0;
-	proc_glance_t glance = {0};
+	pglance_t glance = {0};
 	process_t *process, *processes, *ent;
 	char *text;
 	char const * (*instr)( char const *src, char const *txt )
@@ -1721,7 +1721,7 @@ int process_find(
 	(void)memset( nodes, 0, sizeof(nodes_t) );
 	
 	process = &(glance.process);
-	for ( ret = proc_glance_init( &glance, underId )
+	for ( ret = pglance_init( &glance, underId )
 		; ret == 0; ret = process_next( &glance )
 	)
 	{	
@@ -1757,7 +1757,7 @@ int process_find(
 		}
 	}
 	
-	proc_glance_term( &glance );
+	pglance_term( &glance );
 	if ( nodes->count > 0 )
 		return 0;
 	if ( ret == 0 ) ret = ENOENT;
@@ -1795,11 +1795,11 @@ void process_term( process_t *process ) {
 	(void)process__init(process);
 }
 
-void proc_glance_term( proc_glance_t *glance ) {
+void pglance_term( pglance_t *glance ) {
 	if ( !glance ) return;
 	free_nodes( &(glance->nodes) );
 	process_term( &(glance->process) );
-	(void)memset( glance, 0, sizeof(proc_glance_t) );
+	(void)memset( glance, 0, sizeof(pglance_t) );
 }
 
 void process_data_state_puts( process_t *process ) {
@@ -1973,7 +1973,7 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 	return ret;
 }
 
-int	process_next( proc_glance_t *glance )
+int	process_next( pglance_t *glance )
 {
 	int ret = 0;
 	process_t *process;
@@ -2004,11 +2004,11 @@ int	process_next( proc_glance_t *glance )
 			return ret;
 	}
 	
-	proc_glance_term( glance );
+	pglance_term( glance );
 	return ENODATA;
 }
 
-int	proc_glance_init( proc_glance_t *glance, int underId )
+int	pglance_init( pglance_t *glance, int underId )
 {
 	int ret = errno = 0;
 	DIR *dir;
@@ -2022,7 +2022,7 @@ int	proc_glance_init( proc_glance_t *glance, int underId )
 		return ret;
 	}
 	
-	(void)memset( glance, 0, sizeof(proc_glance_t) );
+	(void)memset( glance, 0, sizeof(pglance_t) );
 	
 	glance->underId = underId;
 	if ( (ret = more_nodes( int, &(glance->nodes), 2000 )) == 0 ) {
@@ -2055,7 +2055,7 @@ int	proc_glance_init( proc_glance_t *glance, int underId )
 	return ret;
 }
 
-int proc_glance_data(
+int pglance_data(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )

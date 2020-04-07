@@ -124,6 +124,11 @@ typedef struct kvpair {
 	space_t full, key, val;
 } kvpair_t;
 
+typedef struct option {
+	char *opt, *key, *val;
+	space_t space;
+} option_t;
+
 /** @brief Passes to change_space() and error checks
  * @param kvpair Desitination of memory that is allocated
  * @param want4full Bytes to give kvpair->full
@@ -390,7 +395,6 @@ int proc_change_data(
 	process_t *process,
 	uintmax_t addr, void *src, ssize_t size, ssize_t *done );
 
-extern bool g_launch_dbg;
 extern bool g_reboot_gui;
 void lua_create_gasp(lua_State *L);
 void lua_create_proc_classes( lua_State *L );

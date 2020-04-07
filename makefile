@@ -130,8 +130,8 @@ gede: debug
 	gede --args ./$(gasp_d_exe) $(ARGS)
 
 test-all: libs-all test
-test: $(gasp_d_exe)
-	./$(gasp_d_exe) -D USE_GEDE $(ARGS)
+test: $(gasp_exe) $(gasp_d_exe)
+	./$(gasp_exe) --gede
 
 build-all: libs-all build
 build: $(gasp_exe)

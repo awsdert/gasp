@@ -1,5 +1,14 @@
 #include "gasp.h"
 
+typedef enum TEXT_ID {
+	TEXT_ID_SHARED = 0,
+	TEXT_ID_CMD_LINE,
+	TEXT_ID_GASP_PATH,
+	TEXT_ID_LUA_PATH,
+	TEXT_ID_LUA_CPATH,
+	TEXT_ID_COUNT
+} TEXT_ID_t;
+
 int set_scope( char const *path, int set ) {
 	FILE *file = NULL;
 	int get = 0;
@@ -135,51 +144,160 @@ int launchf( char const *app, char *args, ... ) {
 }
 #endif
 
-int gasp_make_defenv_opt( nodes_t *nodes, ... ) {
+int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 	int ret = 0;
-	char const *key;
-	char const *val;
-	char *pos;
+	option_t *options, *option;
+	char const *key, *val;
+	node_t i;
 	va_list v;
 	size_t need;
 	
-	nodes->count = 0;
-	va_start( v, nodes );
+	va_start( v, ARGS );
+	options = ARGS->space.block;
 	while ( (key = va_arg( v, char const *)) )
 	{
+		REPORTF("Checking for key '%s'", key)
+		
 		if ( !(val = getenv(key)) )
 			continue;
-
-		need = nodes->count;
-		need += strlen(key);
-		need += strlen(val);
-		if ( (ret = more_nodes( char, nodes, need + 10 )) != 0 )
-			break;
-		pos = nodes->space.block;
+		REPORTF("Value is '%s'", val)
 		
-		sprintf( strchr( pos, '\0' ), " -D %s=\"%s\"", key, val );
-		nodes->count += strlen(pos);
+		REPORTF("Checking if '%s' is already defined", key)
+		for ( i = 0; i < ARGS->count; ++i )
+		{
+			option = options + i;
+			REPORTF("Comparing option '%s' to '-D'", option->opt)
+			if ( strcmp( option->opt, "-D" ) != 0 )
+				continue;
+				
+			REPORTF("Comparing key '%s' to '%s'", option->key,key)
+			if ( strcmp( option->key, key ) == 0 )
+				break;
+		}
+		
+		if ( i < ARGS->count )
+		{
+			REPORTF( "Already defined as '%s'", option->val );
+			continue;
+		}
+		
+		REPORTF("Adding node for option -D %s=\"%s\"", key, val)
+		if ( (ret = more_nodes(
+			option_t, ARGS, ARGS->count + 10 )) != 0
+		) break;
+		options = ARGS->space.block;
+		option = options + i;
+		
+		need = strlen("-D") + 2;
+		need += strlen(key) + 2;
+		need += strlen(val) + 2;
+		
+		REPORT("Allocating memory for option strings")
+		if ( (ret = more_space( &(option->space), need )) != 0 )
+			break;
+		option->opt = option->space.block;
+		ARGS->count++;
+		
+		REPORTF("Filling option '-D %s=\"%s\"'", key, val );
+		strcpy( option->opt, "-D" );
+		option->key = strchr( option->opt, '\0' );
+		strcpy( option->key, key );
+		option->val = strchr( option->key, '\0' );
+		strcpy( option->val, val );
 	}
 	va_end(v);
 	
 	return ret;
 }
 
-int launch_deep_gasp(
-	nodes_t *ARGS, space_t *CMDL, char const *defines
-)
+_Bool find_option( nodes_t *ARGS, char const *opt )
+{
+	node_t i;
+	option_t *option, *options = ARGS->space.block;
+	
+	REPORTF( "Looking for option '%s'", opt )
+	for ( i = 0; i < ARGS->count; ++i )
+	{
+		option = options + i;
+		opt = option->opt;
+		if ( strcmp( option->opt, opt ) == 0 )
+			return 1;
+	}
+	
+	return 0;
+}
+
+int append_options( text_t *TEXTV, nodes_t *ARGS )
+{	
+	int ret = 0;
+	node_t i;
+	text_t
+		/* Repurpose for */
+		*TEXT = TEXTV + TEXT_ID_SHARED,
+		*CMDL = TEXTV + TEXT_ID_CMD_LINE;
+	size_t need = CMDL->space.given, want = 0;
+	char *cmdl = CMDL->space.block, *opt, *key, *val, *text;
+	option_t *option, *options = ARGS->space.block;
+	
+	REPORTF( "Iterating through option sizes, %u", ARGS->count )
+	for ( i = 0; i < ARGS->count; ++i )
+	{
+		option = options + i;
+		REPORTF( "Grabbing option '%s' size", option->opt )
+		need += option->space.given;
+		if ( option->space.given > want )
+			want = option->space.given;
+	}
+	
+	REPORT( "Increasing TEXT size")
+	if ( (ret = more_nodes( char, TEXT, want + 1 )) != 0 )
+		return ret;
+	text = TEXT->space.block;
+	
+	REPORT( "Increasing CMDL size")
+	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
+		return ret;
+	cmdl = CMDL->space.block;
+
+	REPORT("Iterating through option values")
+	for ( i = 0; i < ARGS->count; ++i )
+	{
+		option = options + i;
+		opt = option->opt;
+		key = option->key;
+		val = option->val;
+		
+		REPORTF( "Filling TEXT with '%s'", opt )
+		sprintf( text, " %s", opt );
+		
+		REPORTF( "Appending to TEXT '%s'", key )
+		if ( key && *key )
+			sprintf( strchr( text, '\0'), " %s", key );
+		
+		REPORTF( "Appending to TEXT '%s'", val )
+		if ( val && *val )
+			sprintf( strchr( text, '\0'), "=\"%s\"", val );
+		
+		REPORTF( "1: %s\n2: %s", cmdl, text )
+		if ( !strstr( cmdl, text ) )
+			sprintf( strchr( cmdl, '\0'), " %s", text );
+	}
+	
+	return 0;
+}
+
+int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
 {
 	int ret = 0;
-	char const *launch, *sudo = "pkexec", *have = "HAS_ROOT_PERM",
-		*PWD = getenv("PWD"), *CWD = getenv("CWD"),
-		*gede = " -D USE_GEDE";
-	char *cmdl, *key, *val;
-	node_t i;
+	char const *launch, *sudo = "pkexec", *root = "--inrootmode",
+		*PWD = getenv("PWD"), *CWD = getenv("CWD");
+	char *cmdl;
+	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
 	size_t need;
-	kvpair_t *kvpair, *kvpairs;
 	
-	if ( getenv(have) )
+	if ( find_option( ARGS, root ) )
 		return EALREADY;
+	
 #ifdef _DEBUG
 	launch = "gasp-d.elf";
 #else
@@ -191,61 +309,43 @@ int launch_deep_gasp(
 	need = BUFSIZ;
 	need += strlen(sudo) + 1; /* For '\0' */
 	need += strlen(PWD) + 1; /* For '\0' */
-	need += strlen(gede) + 1; /* For '\0' */
 	need += strlen(launch) + 1; /* For '\0' */
-	need += strlen(have) + 5; /* For " -D " '\0' */
+	need += strlen(root) + 2; /* For ' ' and '\0' */
 	
-	kvpairs = ARGS->space.block;
-	for ( i = 0; i < ARGS->count; ++i )
-	{
-		kvpair = kvpairs + i;
-		key = kvpair->key.block;
-		val = kvpair->val.block;
-		need += strlen( key ) + strlen( val ) + 3;
-	}
-	
-	if ( (ret = more_space( CMDL, need )) != 0 )
+	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
 		return ret;
+	cmdl = CMDL->space.block;
 	
-	cmdl = CMDL->block;
-	sprintf( cmdl, "%s %s/%s", sudo, PWD, launch );
-	if ( g_launch_dbg )
-		sprintf( strchr( cmdl,'\0' ), "%s", gede );
-	sprintf( strchr( cmdl,'\0' ), " -D %s %s", have, defines );
-
-	for ( i = 0; i < ARGS->count; ++i ) {
-		kvpair = kvpairs + i;
-		key = kvpair->key.block;
-		val = kvpair->val.block;
-		if ( key[0] == '-' && key[1] == 'D' && strstr( cmdl, val ) )
-			continue;
+	sprintf( cmdl, "%s %s/%s %s", sudo, PWD, launch, root );
 		
-		if ( val && *val )
-			sprintf( strchr( cmdl, '\0'), " %s %s", key, val );
-		else
-			sprintf( strchr( cmdl, '\0'), " %s", key );
-	}
+	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
+		return ret;
+	cmdl = CMDL->space.block;
 	
+	errno = 0;
 	fprintf( stderr, "%s\n", cmdl );
-	return system( cmdl );
+	ret = system( cmdl );
+	if ( errno != 0 )
+		return errno;
+	return ret;
 }
 
-int launch_test_gasp(
-	nodes_t *ARGS, space_t *CMDL, char const *defines
-)
+int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 {
 	int ret = 0;
-	char const *launch, *gede = "USE_GEDE",
+	char const *launch, *gede = " --gede",
 		*PWD = getenv("PWD"), *CWD = getenv("CWD");
-	char *cmdl, *key, *val;
+	char *cmdl, *pos;
 	node_t i;
+	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
 	size_t need;
-	kvpair_t *kvpair, *kvpairs;
 	
-	if ( !g_launch_dbg )
+	if ( !find_option( ARGS, gede ) )
 		return EINVAL;
-	launch = "gasp-d.elf";
 	
+	launch = "gasp-d.elf";
+		
+	REPORT("Checking PWD")
 	if ( !PWD ) PWD = CWD;
 	
 	need = BUFSIZ;
@@ -253,58 +353,37 @@ int launch_test_gasp(
 	need += strlen(PWD) + 1; /* For '\0' */
 	need += strlen(gede) + 5; /* For " -D " '\0' */
 	
-	kvpairs = ARGS->space.block;
-	for ( i = 0; i < ARGS->count; ++i )
-	{
-		kvpair = kvpairs + i;
-		key = kvpair->key.block;
-		val = kvpair->val.block;
-		need += strlen( key ) + strlen( val ) + 3;
-	}
-	
-	if ( (ret = more_space( CMDL, need )) != 0 )
+	REPORT("Allocating memory for command line string")
+	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
 		return ret;
+	cmdl = CMDL->space.block;
 	
-	cmdl = CMDL->block;
-	sprintf( cmdl, "gede --args %s/%s %s", PWD, launch, defines );
+	REPORTF( "Filling commmand line string, %p", cmdl )
+	sprintf( cmdl, "gede --args %s/%s", PWD, launch );
 
-	for ( i = 0; i < ARGS->count; ++i )
-	{
-		kvpair = kvpairs + i;
-		key = kvpair->key.block;
-		val = kvpair->val.block;
-		if ( key[0] == '-' && key[1] == 'D' && strstr( cmdl, val ) )
-			continue;
-		
-		if ( val && *val )
-			sprintf( strchr( cmdl, '\0'), " %s %s", key, val );
-		else
-			sprintf( strchr( cmdl, '\0'), " %s", key );
-	}
+	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
+		return ret;
+	cmdl = CMDL->space.block;
 	
 	/* Prevent infinite loop */
-	key = strstr( cmdl, " -D USE_GEDE" );
-	for ( i = 0; i < 12; ++i ) key[i] = ' ';
+	REPORTF( "Stripping '%s' from arguments", gede )
+	pos = strstr( cmdl, gede );
+	for ( i = 0; i < strlen(gede); ++i ) pos[i] = ' ';
 	
+	errno = 0;
 	fprintf( stderr, "%s\n", cmdl );
-	return system( cmdl );
+	ret = system( cmdl );
+	if ( errno != 0 )
+		return errno;
+	return ret;
 }
 
-typedef enum PATH_ID {
-	PATH_ID_GENERAL = 0,
-	PATH_ID_GASP,
-	PATH_ID_LUA,
-	PATH_ID_LUA_C,
-	PATH_ID_COUNT
-} PATH_ID_t;
-
-int launch_lua() {
+int launch_lua( text_t *TEXTV ) {
 	int ret = 0, scope, conf;
 	char const
 		*ptrace_scope = "/proc/sys/kernel/yama/ptrace_scope",
 		*ptrace_conf = "/etc/sysctl.d/10-ptrace.conf";
-	text_t PATHS[PATH_ID_COUNT] = {{0}};
-	char *paths[PATH_ID_COUNT] = {NULL}, *HOME = NULL, *PWD = NULL;
+	char *paths[TEXT_ID_COUNT] = {NULL}, *HOME = NULL, *PWD = NULL;
 	size_t leng;
 	node_t i;
 #if 0
@@ -322,29 +401,29 @@ int launch_lua() {
 	}
 	
 	leng = strlen(PWD) + BUFSIZ + strlen(HOME);
-	for ( i = 0; i < PATH_ID_COUNT; ++i )
+	for ( i = 0; i < TEXT_ID_COUNT; ++i )
 	{
-		if ( (ret = more_nodes( char, PATHS + i, leng )) != 0 )
+		if ( (ret = more_nodes( char, TEXTV + i, leng )) != 0 )
 		{
 			ERRMSG( ret, "Unable to allocate memory for local path" );
 			goto fail;
 		}
-		paths[i] = PATHS[i].space.block;
+		paths[i] = TEXTV[i].space.block;
 	}
 	
-	if ( !(paths[PATH_ID_GASP] == getenv("GASP_PATH")) )
+	if ( !(paths[TEXT_ID_GASP_PATH] == getenv("GASP_PATH")) )
 	{
-		paths[PATH_ID_GASP] = PATHS[PATH_ID_GASP].space.block;
-		sprintf( paths[PATH_ID_GASP], "%s/gasp", HOME );
-		setenv( "GASP_PATH", paths[PATH_ID_GASP], 0 );
+		paths[TEXT_ID_GASP_PATH] = TEXTV[TEXT_ID_GASP_PATH].space.block;
+		sprintf( paths[TEXT_ID_GASP_PATH], "%s/gasp", HOME );
+		setenv( "GASP_PATH", paths[TEXT_ID_GASP_PATH], 0 );
 	}
 	
-	sprintf( paths[PATH_ID_LUA],
-		"%s/lua/?.lua;%s/?.lua", PWD, paths[PATH_ID_GASP] );
-	setenv("LUA_PATH",paths[PATH_ID_LUA],0);
+	sprintf( paths[TEXT_ID_LUA_PATH],
+		"%s/lua/?.lua;%s/?.lua", PWD, paths[TEXT_ID_GASP_PATH] );
+	setenv("LUA_PATH",paths[TEXT_ID_LUA_PATH],0);
 	
-	sprintf( paths[PATH_ID_LUA_C], "%s/?.so", PWD );
-	setenv("LUA_CPATH",paths[PATH_ID_LUA_C],0);
+	sprintf( paths[TEXT_ID_LUA_CPATH], "%s/?.so", PWD );
+	setenv("LUA_CPATH",paths[TEXT_ID_LUA_CPATH],0);
 	
 	/* Initialise lua */
 	errno = 0;
@@ -363,10 +442,10 @@ int launch_lua() {
 	lua_create_gasp(L);
 	
 	/* Run lua */
-	sprintf( paths[PATH_ID_GENERAL], "%s/lua/gasp.lua", PWD );
+	sprintf( paths[TEXT_ID_SHARED], "%s/lua/gasp.lua", PWD );
 	do {
 		g_reboot_gui = false;
-		if ( luaL_dofile(L, paths[PATH_ID_GENERAL] ) )
+		if ( luaL_dofile(L, paths[TEXT_ID_SHARED] ) )
 			printf("Failed:\n%s\n", lua_tostring(L,-1));
 	}
 	while ( g_reboot_gui );
@@ -381,66 +460,81 @@ int launch_lua() {
 	(void)scope;
 	(void)conf;
 #endif
-	for ( i = 0; i < PATH_ID_COUNT; ++i )
-	{
-		free_nodes( PATHS + i );
-		paths[i] = PATHS[i].space.block;
-	}
 	return ret;
 }
 
 int main( int argc, char *argv[] ) {
 	int ret = EXIT_SUCCESS;
-	int arg;
-	nodes_t defines = {0};
-	space_t PATH = {0};
-	nodes_t nodes = {0}, ARGS = {0};
-	kvpair_t *args = NULL;
+	text_t TEXTV[TEXT_ID_COUNT] = {{0}};
+	nodes_t ARGS = {0};
+	option_t *options, *option;
 	size_t leng = BUFSIZ;
+	node_t i;
+	
+	/* Allocate all memory need for start up */
+	for ( i = 0; i < TEXT_ID_COUNT; ++i )
+	{
+		if ( (ret = more_nodes( char, TEXTV + i, leng )) != 0 )
+		{
+			ERRMSG( ret, "Unable to allocate memory for shared text" );
+			goto fail;
+		}
+	}
 	
 	// Identify environment overrides, files to load and other things
 	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != 0 )
 	{
 		ERRMSG( ret, "Couldn't get argument pairs" );
-		goto cleanup;
+		goto fail;
 	}
 	
 	// TODO: Implement ini file based options
 	// Current Groups I've thought of:
 	// [Defines] [Process] [CheatFiles]
 	
-	if ( gasp_make_defenv_opt( &defines,
-		"PWD", "CWD", "HOME", "HAS_ROOT_PERM", "USE_GEDE", "GASP_PATH",
+	REPORT("Adding environment variables as defines to options"
+		" if they're not already defined" )
+	if ( (ret = gasp_make_defenv_opt( &ARGS,
+		"PWD", "CWD", "HOME", "GASP_PATH",
 		"DISPLAY", "XDG_CURRENT_DESKTOP", "GDMSESSION",
-		NULL ) != 0
+		NULL )) != 0
 	)
 	{
 		ERRMSG( ret, "Couldn't get environment variables" );
-		goto cleanup;
+		goto fail;
 	}
 	
-	if ( (ret = launch_deep_gasp(
-		&ARGS, &PATH, defines.space.block )) == EALREADY
-	)
+	REPORT("Checking if should launch self as child")
+	if ( (ret = launch_sudo_gasp( TEXTV, &ARGS )) == EALREADY )
 	{
-		if ( (ret = launch_test_gasp(
-			&ARGS, &PATH, defines.space.block )) == EINVAL
-		) ret = launch_lua();
+		REPORT("Checking if should launch self as child of debugger")
+		if ( (ret = launch_test_gasp( TEXTV, &ARGS )) == EINVAL )
+		{
+			/* Don't need this so give back memory */
+			free_nodes( TEXTV + TEXT_ID_CMD_LINE );
+			/* Open user interface */
+			REPORT("Launching UI")
+			ret = launch_lua( TEXTV );
+		}
 	}
 	
-	cleanup:
-	free_space( &PATH );
-	if ( ret != 0 )
-		ERRMSG( ret, "Test failed" );
-	if ( args ) {
-		for ( arg = 1; arg < argc; ++arg ) {
-			free_space( &(args[arg].key) );
-			free_space( &(args[arg].val) );
+	fail:
+	options = ARGS.space.block;
+	if ( options )
+	{
+		for ( i = 0; i < ARGS.count; ++i ) {
+			option = options + i;
+			free_space( &(option->space) );
 		}
 	}
 	free_nodes( &ARGS );
-	free_nodes( &nodes );
-	free_nodes( &defines );
+	
+	for ( i = 0; i < TEXT_ID_COUNT; ++i )
+		free_nodes( TEXTV + i );
+	
+	if ( ret != 0 )
+		ERRMSG( ret, "Test failed" );
+	
 	return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

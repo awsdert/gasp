@@ -125,8 +125,6 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 				return EINVAL;
 			val[leng-1] = 0;
 			(void)memmove( val, val + 1, leng - 1 );
-		default:
-			continue;
 		} 
 		
 		(void)setenv( option->key, option->val, 1 );

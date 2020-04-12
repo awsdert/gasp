@@ -152,15 +152,36 @@ int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 	va_list v;
 	
 	va_start( v, ARGS );
-	options = ARGS->space.block;
 	while ( (key = va_arg( v, char const *)) )
 	{
 		if ( !(val = getenv(key)) )
-			continue;
+		{
+			if ( strcmp( key, "PWD" ) == 0 )
+				val = getenv("CWD");
+			else if ( strcmp( key, "CWD" ) == 0 )
+				val = getenv("PWD");
+			if ( !val )
+				continue;
+		}
 		
+		REPORTF( "Cycling through %u arguments", ARGS->count )
+		options = ARGS->space.block;
 		for ( i = 0; i < ARGS->count; ++i )
 		{
 			option = options + i;
+			
+			if ( !(option->opt) || !(option->key) || !(option->val) )
+			{
+				if ( option->opt )
+					EOUTF( "opt = '%s'", option->opt );
+				if ( option->key )
+					EOUTF( "key = '%s'", option->key );
+				if ( option->val )
+					EOUTF( "val = '%s'", option->val );
+				ret = EINVAL;
+				ERRMSG( ret, "Corrupt option" );
+				return ret;
+			}
 			
 			if ( strcmp( option->opt, "-D" ) != 0 )
 				continue;
@@ -228,6 +249,7 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 	char *cmdl = CMDL->space.block, *opt, *key, *val, *text;
 	option_t *option, *options = ARGS->space.block;
 	
+	REPORT( "Collecting needed sizes" )
 	for ( i = 0; i < ARGS->count; ++i )
 	{
 		option = options + i;
@@ -236,15 +258,18 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 			want = option->space.given;
 	}
 	
+	REPORT( "Allocating temporary space for any define" )
 	want += 10;
 	if ( (ret = more_nodes( char, TEXT, want )) != 0 )
 		return ret;
 	text = TEXT->space.block;
 	
+	REPORTF("Allocating space for shell line, text = %p", text)
 	if ( (ret = more_nodes( char, CMDL, need * 2 )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 
+	REPORTF( "Iterating options, cmdl = %p", cmdl )
 	for ( i = 0; i < ARGS->count; ++i )
 	{
 		option = options + i;
@@ -255,15 +280,13 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 		(void)memset( text, 0, want ); 
 		sprintf( text, "%s", opt );
 		
-		if ( key && *key )
-			sprintf( strchr( text, 0 ), " %s", key );
-		
-		if ( val && *val )
-			sprintf( strchr( text, 0 ), "=\"%s\"", val );
+		if ( strcmp( opt, "-D" ) == 0 )
+			sprintf( strchr( text, 0 ), " %s=\"%s\"", key, val );
 		
 		if ( !strstr( cmdl, text ) )
 			sprintf( strchr( cmdl, 0 ), " %s", text );
 	}
+	REPORT("Done appending options")
 	
 	return 0;
 }
@@ -383,9 +406,14 @@ int launch_lua( text_t *TEXTV ) {
 	scope = set_scope( ptrace_scope, 0 );
 	conf = set_scope( ptrace_conf, 0 );
 	
-	if ( !(HOME = getenv("HOME")) || !(PWD = getenv("PWD")) ) {
-		ret = errno;
+	if ( !(PWD = getenv("PWD")) ) PWD = getenv("CWD");
+	
+	if ( !(HOME = getenv("HOME")) || !PWD )
+	{
+		ret = ENODATA;
 		ERRMSG( ret, "Couldn't get $(HOME) and/or $(PWD)" );
+		EOUTF( "PWD = %p, '%s'", PWD, PWD ? PWD : "(null)" );
+		EOUTF( "HOME = %p, '%s'", HOME, HOME ? HOME : "(null)" );
 		return ret;
 	}
 	
@@ -483,8 +511,9 @@ int main( int argc, char *argv[] ) {
 	// Current Groups I've thought of:
 	// [Defines] [Process] [CheatFiles]
 	
-	REPORT("Adding environment variables as defines to options"
-		" if they're not already defined" )
+	REPORTF("%s %s",
+		"Adding environment variables as defines to options",
+		"if they're not already defined" )
 	if ( (ret = gasp_make_defenv_opt( &ARGS,
 		"PWD", "CWD", "HOME", "GASP_PATH",
 		"DISPLAY", "XDG_CURRENT_DESKTOP", "GDMSESSION",

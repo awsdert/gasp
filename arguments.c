@@ -30,8 +30,6 @@ int append_to_option(
 		}
 	}
 	
-	//REPORTF("Allocating to append string '%s'",txt)
-	
 	if ( (ret = more_space( &(option->space), need )) != 0 )
 		return ret;
 		
@@ -39,7 +37,6 @@ int append_to_option(
 	opt = option->opt = option->space.block;
 	if ( setopt )
 	{
-		REPORT("Was 'opt'")
 		(void)memset( opt, 0, need );
 		(void)memcpy( opt, txt, leng + 1 );
 	}
@@ -48,7 +45,6 @@ int append_to_option(
 	key = option->key = strchr( option->opt, 0 ) + 1;
 	if ( setkey )
 	{
-		REPORT("Was 'key'")
 		(void)memset( key, 0, need );
 		(void)memcpy( key, txt, leng );
 	}
@@ -58,7 +54,6 @@ int append_to_option(
 	val = option->val = strchr( option->key, 0 ) + 1;
 	if ( setval )
 	{
-		REPORT("Was 'val'")
 		(void)memset( val, 0, need );
 		(void)memcpy( val, txt, leng );
 	}
@@ -72,6 +67,7 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 	char *opt, *key, *val, c = 0, *tmp;
 	int begin, i, ret = 0;
 	size_t leng = 1;
+	
 	if ( _leng ) *_leng = 1;
 	
 	if ( (ret = more_nodes( option_t, ARGS, argc )) != 0 ) {
@@ -85,11 +81,11 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 #else
 	begin = 0;
 #endif
-	ARGS->count = argc - begin;
 	REPORTF( "Iterating given arguments, %d", argc)
 	for ( i = begin; i < argc; ++i )
 	{
-		option = options + (i - begin);
+		option = options + ARGS->count;
+		ARGS->count++;
 		opt = argv[i];
 		leng = strlen(opt);
 	
@@ -97,7 +93,6 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		if ( (ret = append_to_option( option, "opt", opt )) != 0 )
 			return ret;
 		
-		REPORTF( "Comparing '%s' to '-D'", opt )
 		if ( !strstr(opt,"-D") )
 			continue;
 		
@@ -105,7 +100,6 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		tmp = strstr( key, "=" );
 		if ( tmp ) *tmp = 0;
 		
-		//REPORTF( "Appending key '%s'", key )
 		if ( (ret = append_to_option( option, "key", key )) != 0 )
 			return ret;
 	
@@ -119,7 +113,6 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		else
 			val = argv[++i];
 		
-		REPORTF( "Appending val '%s'", val )
 		if ( (ret = append_to_option( option, "val", val )) != 0 )
 			return ret;
 		

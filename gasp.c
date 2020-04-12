@@ -150,27 +150,21 @@ int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 	char const *key, *val;
 	node_t i;
 	va_list v;
-	size_t need;
 	
 	va_start( v, ARGS );
 	options = ARGS->space.block;
 	while ( (key = va_arg( v, char const *)) )
 	{
-		REPORTF("Checking for key '%s'", key)
-		
 		if ( !(val = getenv(key)) )
 			continue;
-		REPORTF("Value is '%s'", val)
 		
-		REPORTF("Checking if '%s' is already defined", key)
 		for ( i = 0; i < ARGS->count; ++i )
 		{
 			option = options + i;
-			REPORTF("Comparing option '%s' to '-D'", option->opt)
+			
 			if ( strcmp( option->opt, "-D" ) != 0 )
 				continue;
 				
-			REPORTF("Comparing key '%s' to '%s'", option->key,key)
 			if ( strcmp( option->key, key ) == 0 )
 				break;
 		}
@@ -183,27 +177,23 @@ int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 		
 		REPORTF("Adding node for option -D %s=\"%s\"", key, val)
 		if ( (ret = more_nodes(
-			option_t, ARGS, ARGS->count + 10 )) != 0
+			option_t, ARGS, ARGS->count + 1 )) != 0
 		) break;
 		options = ARGS->space.block;
 		option = options + i;
 		
-		need = strlen("-D") + 2;
-		need += strlen(key) + 2;
-		need += strlen(val) + 2;
+		if ( (ret = append_to_option( option, "opt", "-D" )) != 0 )
+			return ret;
 		
-		REPORT("Allocating memory for option strings")
-		if ( (ret = more_space( &(option->space), need )) != 0 )
-			break;
-		option->opt = option->space.block;
+		if ( (ret = append_to_option( option, "key", key )) != 0 )
+			return ret;
+		
+		if ( (ret = append_to_option( option, "val", val )) != 0 )
+			return ret;
+		
 		ARGS->count++;
-		
-		REPORTF("Filling option '-D %s=\"%s\"'", key, val );
-		strcpy( option->opt, "-D" );
-		option->key = strchr( option->opt, '\0' );
-		strcpy( option->key, key );
-		option->val = strchr( option->key, '\0' );
-		strcpy( option->val, val );
+		REPORTF( "Added %s %s='%s'",
+			option->opt, option->key, option->val )
 	}
 	va_end(v);
 	
@@ -219,7 +209,6 @@ _Bool find_option( nodes_t *ARGS, char const *opt )
 	for ( i = 0; i < ARGS->count; ++i )
 	{
 		option = options + i;
-		opt = option->opt;
 		if ( strcmp( option->opt, opt ) == 0 )
 			return 1;
 	}
@@ -239,27 +228,23 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 	char *cmdl = CMDL->space.block, *opt, *key, *val, *text;
 	option_t *option, *options = ARGS->space.block;
 	
-	REPORTF( "Iterating through option sizes, %u", ARGS->count )
 	for ( i = 0; i < ARGS->count; ++i )
 	{
 		option = options + i;
-		REPORTF( "Grabbing option '%s' size", option->opt )
 		need += option->space.given;
 		if ( option->space.given > want )
 			want = option->space.given;
 	}
 	
-	REPORT( "Increasing TEXT size")
-	if ( (ret = more_nodes( char, TEXT, want + 1 )) != 0 )
+	want += 10;
+	if ( (ret = more_nodes( char, TEXT, want )) != 0 )
 		return ret;
 	text = TEXT->space.block;
 	
-	REPORT( "Increasing CMDL size")
-	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
+	if ( (ret = more_nodes( char, CMDL, need * 2 )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 
-	REPORT("Iterating through option values")
 	for ( i = 0; i < ARGS->count; ++i )
 	{
 		option = options + i;
@@ -267,20 +252,17 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 		key = option->key;
 		val = option->val;
 		
-		REPORTF( "Filling TEXT with '%s'", opt )
-		sprintf( text, " %s", opt );
+		(void)memset( text, 0, want ); 
+		sprintf( text, "%s", opt );
 		
-		REPORTF( "Appending to TEXT '%s'", key )
 		if ( key && *key )
-			sprintf( strchr( text, '\0'), " %s", key );
+			sprintf( strchr( text, 0 ), " %s", key );
 		
-		REPORTF( "Appending to TEXT '%s'", val )
 		if ( val && *val )
-			sprintf( strchr( text, '\0'), "=\"%s\"", val );
+			sprintf( strchr( text, 0 ), "=\"%s\"", val );
 		
-		REPORTF( "1: %s\n2: %s", cmdl, text )
 		if ( !strstr( cmdl, text ) )
-			sprintf( strchr( cmdl, '\0'), " %s", text );
+			sprintf( strchr( cmdl, 0 ), " %s", text );
 	}
 	
 	return 0;
@@ -312,18 +294,22 @@ int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
 	need += strlen(launch) + 1; /* For '\0' */
 	need += strlen(root) + 2; /* For ' ' and '\0' */
 	
+	REPORT("Allocating memory needed for CMDL")
 	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 	
 	sprintf( cmdl, "%s %s/%s %s", sudo, PWD, launch, root );
-		
+	
+	REPORT( "Appending options to cmdl string" )
 	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 	
+	REPORTF("Printing cmdl string, cmdl = %p", cmdl)
 	errno = 0;
-	fprintf( stderr, "%s\n", cmdl );
+	fprintf( stdout, "%s\n", cmdl );
+	REPORT("Executing cmdl string")
 	ret = system( cmdl );
 	if ( errno != 0 )
 		return errno;
@@ -333,10 +319,9 @@ int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
 int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 {
 	int ret = 0;
-	char const *launch, *gede = " --gede",
+	char const *launch, *gede = "--gede",
 		*PWD = getenv("PWD"), *CWD = getenv("CWD");
-	char *cmdl, *pos;
-	node_t i;
+	char *cmdl, *pos, *nxt;
 	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
 	size_t need;
 	
@@ -359,19 +344,23 @@ int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 	cmdl = CMDL->space.block;
 	
 	REPORTF( "Filling commmand line string, %p", cmdl )
-	sprintf( cmdl, "gede --args %s/%s", PWD, launch );
+	sprintf( cmdl, "gede --args ./%s", launch );
 
 	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 	
 	/* Prevent infinite loop */
-	REPORTF( "Stripping '%s' from arguments", gede )
 	pos = strstr( cmdl, gede );
-	for ( i = 0; i < strlen(gede); ++i ) pos[i] = ' ';
+	REPORTF( "Stripping '%s' from arguments which are:", gede )
+	fprintf( stderr, "%s\n", cmdl );
+	if ( pos )
+	{
+		nxt = pos + strlen( gede );
+		(void)memmove( pos, nxt, strlen(nxt) + 1 );
+	}
 	
 	errno = 0;
-	fprintf( stderr, "%s\n", cmdl );
 	ret = system( cmdl );
 	if ( errno != 0 )
 		return errno;
@@ -471,6 +460,7 @@ int main( int argc, char *argv[] ) {
 	size_t leng = BUFSIZ;
 	node_t i;
 	
+	REPORT( "Allocating default memory for strings" )
 	/* Allocate all memory need for start up */
 	for ( i = 0; i < TEXT_ID_COUNT; ++i )
 	{
@@ -481,6 +471,7 @@ int main( int argc, char *argv[] ) {
 		}
 	}
 	
+	REPORT( "Checking given options" )
 	// Identify environment overrides, files to load and other things
 	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != 0 )
 	{

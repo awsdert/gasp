@@ -29,10 +29,14 @@
 #include <lualib.h>
 
 #define VERBOSE 1
+#define COUT( TXT ) fprintf( stdout, "%s:%u:" TXT "\n", __FILE__, __LINE__ )
+#define COUTF( F, ... ) fprintf( stdout, "%s:%u:" F "\n", __FILE__, __LINE__, __VA_ARGS__ )
+#define EOUT( TXT ) fprintf( stderr, "%s:%u:" TXT "\n", __FILE__, __LINE__ )
+#define EOUTF( F, ... ) fprintf( stderr, "%s:%u:" F "\n", __FILE__, __LINE__, __VA_ARGS__ )
 
 #if VERBOSE
-#define REPORT(MSG) fprintf( stderr, #MSG "\n" );
-#define REPORTF(MSG,...) fprintf( stderr, #MSG "\n", __VA_ARGS__ );
+#define REPORT(MSG) COUT( " Info: " #MSG );
+#define REPORTF(MSG,...) COUTF( " Info: " #MSG, __VA_ARGS__ );
 #else
 #define REPORT(MSG)
 #define REPORTF(MSG,...)
@@ -128,6 +132,10 @@ typedef struct option {
 	char *opt, *key, *val;
 	space_t space;
 } option_t;
+
+int append_to_option(
+	option_t *option, char const *set, char const *txt
+);
 
 /** @brief Passes to change_space() and error checks
  * @param kvpair Desitination of memory that is allocated

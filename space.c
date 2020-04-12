@@ -1,17 +1,16 @@
 #include "gasp.h"
 int change_space( space_t *space, size_t want, int dir ) {
-	int ret = errno = 0;
+	int ret = 0;
 	uchar *block;
+	/* Known variables, size, prev_size, old_top, top */
+	size_t padding = (sizeof(size_t) * 2) + (sizeof(void*) * 2);
 	if ( !space ) {
 		if ( !want )
-			return ret;
+			return 0;
 		ret = EDESTADDRREQ;
 		ERRMSG( ret, "Need somewhere to place allocated memory" );
 		return ret;
 	}
-	
-	if ( want % 16 )	
-		want += (16 - (want % 16));
 	
 	if ( want == space->given )
 		return 0;
@@ -28,36 +27,52 @@ int change_space( space_t *space, size_t want, int dir ) {
 		return 0;
 	
 	/* Release */
-	if ( !want ) {
-		if ( space->block ) free( space->block );
+	if ( !want )
+	{
+		if ( space->block )
+			free( space->block );
 		space->block = NULL;
 		space->given = 0;
 		return 0;
 	}
+
+	/* Align end of memory correctly */
+	want = (((want / sizeof(int)) + 1) * sizeof(int));
 	
-	if ( !(space->block) ) {
-		if ( !(space->block = malloc( want )) )
+	/* Prevent overwrites caused by poorly written realloc/malloc */
+	want += padding;
+	
+	if ( !(space->block) )
+	{
+		space->block = NULL;
+		space->given = 0;
+		errno = 0;
+		if ( !(block = malloc( want )) )
 		{
 			ret = errno;
-			space->given = 0;
 			return ret ? ret : ENOMEM;
 		}
-		(void)memset( space->block, 0, want );
-		space->given = want;
-		return 0;
+		goto done;
 	}
 	
-	if ( !(block = realloc( space->block, want )) ) {
+	errno = 0;
+	if ( !(block = realloc( (space->block), want + padding )) ) {
 		ret = errno;
 		return ret ? ret : ENOMEM;
 	}
 	
+	done:
 	/* Do this 1st in case a thread tries to access it */
 	space->block = block;
-	space->given = want;
+	
+	/* Avoid overwriting system variables */
+	want -= padding;
 	
 	if ( space->given < want )
 		(void)memset( block + space->given, 0, want - space->given );
+	
+	/* Now it is safe to overwrite size */
+	space->given = want;
 	
 	return 0;
 }

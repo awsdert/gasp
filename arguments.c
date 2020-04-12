@@ -1,30 +1,77 @@
 #include "gasp.h"
 bool g_launch_dbg = 0;
-int append_to_option( option_t *option, char const *txt )
+int append_to_option(
+	option_t *option, char const *set, char const *txt
+)
 {
 	int ret = 0;
+	_Bool
+		setopt = ( strcmp(set, "opt") == 0 ),
+		setkey = ( strcmp(set, "key") == 0 ),
+		setval = ( strcmp(set, "val") == 0 );
+	char
+		*opt = option->opt,
+		*key = option->key,
+		*val = option->val;
 	size_t
 		leng = strlen(txt),
-		need = option->space.given + leng + 1;
-	char *text;
+		need = leng + 1;
+	
+	if ( setval || setkey )
+	{
+		if ( !opt )
+			return EINVAL;
+		need += strlen(opt) + 1;
+		if ( setval )
+		{
+			if ( !key )
+				return EINVAL;
+			need += strlen(key) + 1;
+		}
+	}
+	
+	//REPORTF("Allocating to append string '%s'",txt)
 	
 	if ( (ret = more_space( &(option->space), need )) != 0 )
 		return ret;
-	option->opt = option->space.block;
-	text = strchr( option->opt, 0 ) + 1;
+		
+	need = option->space.given;
+	opt = option->opt = option->space.block;
+	if ( setopt )
+	{
+		REPORT("Was 'opt'")
+		(void)memset( opt, 0, need );
+		(void)memcpy( opt, txt, leng + 1 );
+	}
 	
-	REPORTF( "Copying '%s' into option block", txt )
-	errno = 0;
-	(void)memcpy( text, txt, leng );
-	ret = errno;
+	need -= (strlen( opt ) + 1);
+	key = option->key = strchr( option->opt, 0 ) + 1;
+	if ( setkey )
+	{
+		REPORT("Was 'key'")
+		(void)memset( key, 0, need );
+		(void)memcpy( key, txt, leng );
+	}
+	*(--key) = 0;
+	
+	need -= (strlen( key ) + 1);
+	val = option->val = strchr( option->key, 0 ) + 1;
+	if ( setval )
+	{
+		REPORT("Was 'val'")
+		(void)memset( val, 0, need );
+		(void)memcpy( val, txt, leng );
+	}
+	*(--val) = 0;
+	
 	return ret;
 }
 
 int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 	option_t *options, *option;
-	char *opt, *key, *val, c = 0;
+	char *opt, *key, *val, c = 0, *tmp;
 	int begin, i, ret = 0;
-	size_t leng = 1, need = 0;
+	size_t leng = 1;
 	if ( _leng ) *_leng = 1;
 	
 	if ( (ret = more_nodes( option_t, ARGS, argc )) != 0 ) {
@@ -45,87 +92,51 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		option = options + (i - begin);
 		opt = argv[i];
 		leng = strlen(opt);
-		need = leng + 5;
-		
-		if ( (ret = more_space( &(option->space), need )) != 0 )
-		{
-			ERRMSG( ret, "Not enough memory for duplicating arguments");
+	
+		REPORTF( "Duplicating '%s'", opt )
+		if ( (ret = append_to_option( option, "opt", opt )) != 0 )
 			return ret;
-		}
-		option->opt = option->space.block;
-		option->key = NULL;
-		option->val = NULL;
 		
-		REPORTF( "Copying '%s' into option block", opt )
-		memcpy( option->opt, opt, leng );
-		opt = option->opt;
-		
-		REPORTF("%s, opt = %p, leng = %zu",
-			"Checking if option is a define", opt, leng)
+		REPORTF( "Comparing '%s' to '-D'", opt )
 		if ( !strstr(opt,"-D") )
 			continue;
 		
-		if ( leng > 2 )
-		{
-			REPORT("Splitting key from option string")
-			key = opt + 2;
-			memmove( key + 1, key, strlen(key) );
-			*key = 0;
-			option->key = ++key;
-		}
-		else
-		{
-			REPORT("Appending key to option memory seperated by nil")
-			key = argv[++i];
-			if ( (ret = append_to_option( option, key )) != 0 )
-				return ret;
-			opt = option->opt;
-			key = option->key = strchr( opt, 0 ) + 1;
-		}
+		key = opt[2] ? opt + 2 : argv[++i];
+		tmp = strstr( key, "=" );
+		if ( tmp ) *tmp = 0;
 		
-		val = strstr( key, "=" );
-		if ( val )
+		//REPORTF( "Appending key '%s'", key )
+		if ( (ret = append_to_option( option, "key", key )) != 0 )
+			return ret;
+	
+		if ( tmp )
 		{
-			REPORT("Splitting val from key string")
-			*val = 0;
-			option->val = ++val;
+			*tmp = '=';
+			val = tmp + 1;
 		}
+		else if ( i == (argc - begin) || argv[i+1][0] == '-' )
+			val = "1";
 		else
-		{
-			REPORT("Appending val to option memory seperated by nil")
-			if ( i == (argc - 1) || argv[i+1][0] == '-' )
-			{
-				setenv( key, "1", 1 );
-				continue;
-			}
-			
 			val = argv[++i];
-			if ( (ret = append_to_option( option, key )) != 0 )
-				return ret;
-			opt = option->opt;
-			key = option->key = strchr( opt, 0 ) + 1;
-			val = option->val = strchr( key, 0 ) + 1;
-		}
 		
-		switch ( (c = *val) ) {
+		REPORTF( "Appending val '%s'", val )
+		if ( (ret = append_to_option( option, "val", val )) != 0 )
+			return ret;
+		
+		val = option->val;
+		switch ( (c = *val) )
+		{
 		case '"': case '\'':
-			++val;
 			leng = strlen(val);
 			if ( val[leng-1] != c )
-				break;
+				return EINVAL;
 			val[leng-1] = 0;
+			(void)memmove( val, val + 1, leng - 1 );
 		default:
 			continue;
 		} 
 		
-		for ( ++i; i < argc; ++i )
-		{
-			leng = strlen(argv[i]);
-			need += leng;
-			if ( (ret = more_space( &(option->space), need)) != 0 )
-				return ret;
-			memcpy( strchr( val, 0 ), argv[i], leng );
-		}
+		(void)setenv( option->key, option->val, 1 );
 	}
 	
 	REPORT("Done with given arguments")

@@ -35,8 +35,8 @@
 #define EOUTF( F, ... ) fprintf( stderr, "%s:%u:" F "\n", __FILE__, __LINE__, __VA_ARGS__ )
 
 #if VERBOSE
-#define REPORT(MSG) COUT( " Info: " #MSG );
-#define REPORTF(MSG,...) COUTF( " Info: " #MSG, __VA_ARGS__ );
+#define REPORT(MSG) EOUT( " Info: " #MSG );
+#define REPORTF(MSG,...) EOUTF( " Info: " #MSG, __VA_ARGS__ );
 #else
 #define REPORT(MSG)
 #define REPORTF(MSG,...)
@@ -135,6 +135,10 @@ typedef struct option {
 
 int append_to_option(
 	option_t *option, char const *set, char const *txt
+);
+
+int add_define(
+	nodes_t *ARGS, char const *key, node_t *pos, bool replace
 );
 
 /** @brief Passes to change_space() and error checks

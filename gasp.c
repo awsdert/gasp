@@ -44,7 +44,8 @@ int set_scope( char const *path, int set ) {
 		fprintf( stderr, "%s:1:0: Attempting to restore %d"
 				", manually restore if fail!\n", path, set );
 	}
-	fprintf( stderr, "%s\n", cmdl );
+	
+	fprintf( stdout, "%s\n", cmdl );
 	system(cmdl);
 	return get;
 }
@@ -164,7 +165,6 @@ int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 				continue;
 		}
 		
-		REPORTF( "Cycling through %u arguments", ARGS->count )
 		options = ARGS->space.block;
 		for ( i = 0; i < ARGS->count; ++i )
 		{
@@ -191,12 +191,8 @@ int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 		}
 		
 		if ( i < ARGS->count )
-		{
-			REPORTF( "Already defined as '%s'", option->val );
 			continue;
-		}
 		
-		REPORTF("Adding node for option -D %s=\"%s\"", key, val)
 		if ( (ret = more_nodes(
 			option_t, ARGS, ARGS->count + 1 )) != 0
 		) break;
@@ -213,28 +209,48 @@ int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 			return ret;
 		
 		ARGS->count++;
-		REPORTF( "Added %s %s='%s'",
-			option->opt, option->key, option->val )
 	}
 	va_end(v);
 	
 	return ret;
 }
 
-_Bool find_option( nodes_t *ARGS, char const *opt )
+int find_option( nodes_t *ARGS, char const *opt, node_t *pos )
 {
+	int ret = 0;
 	node_t i;
 	option_t *option, *options = ARGS->space.block;
+	text_t TEXT = {0};
+	char *txt, *key;
+	size_t size = strlen(opt) + 1;
 	
-	REPORTF( "Looking for option '%s'", opt )
+	if ( (ret = more_nodes( char, &TEXT, size )) != 0 )
+		goto done;
+		
+	txt = TEXT.space.block;
+	(void)memcpy( txt, opt, size );
+	key = strchr( (opt = txt), ' ' );
+	if ( key )
+		*(key++) = 0;
+	
 	for ( i = 0; i < ARGS->count; ++i )
 	{
 		option = options + i;
 		if ( strcmp( option->opt, opt ) == 0 )
-			return 1;
+		{
+			if ( !key || strcmp( option->key, key ) == 0 )
+			{
+				ret = EEXIST;
+				goto done;
+			}
+		}
 	}
 	
-	return 0;
+	i = ~0;
+	done:
+	free_nodes( &TEXT );
+	if ( pos ) *pos = i;
+	return ret;
 }
 
 int append_options( text_t *TEXTV, nodes_t *ARGS )
@@ -249,7 +265,6 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 	char *cmdl = CMDL->space.block, *opt, *key, *val, *text;
 	option_t *option, *options = ARGS->space.block;
 	
-	REPORT( "Collecting needed sizes" )
 	for ( i = 0; i < ARGS->count; ++i )
 	{
 		option = options + i;
@@ -258,18 +273,15 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 			want = option->space.given;
 	}
 	
-	REPORT( "Allocating temporary space for any define" )
 	want += 10;
 	if ( (ret = more_nodes( char, TEXT, want )) != 0 )
 		return ret;
 	text = TEXT->space.block;
 	
-	REPORTF("Allocating space for shell line, text = %p", text)
 	if ( (ret = more_nodes( char, CMDL, need * 2 )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 
-	REPORTF( "Iterating options, cmdl = %p", cmdl )
 	for ( i = 0; i < ARGS->count; ++i )
 	{
 		option = options + i;
@@ -286,7 +298,6 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 		if ( !strstr( cmdl, text ) )
 			sprintf( strchr( cmdl, 0 ), " %s", text );
 	}
-	REPORT("Done appending options")
 	
 	return 0;
 }
@@ -300,8 +311,8 @@ int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
 	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
 	size_t need;
 	
-	if ( find_option( ARGS, root ) )
-		return EALREADY;
+	if ( (ret = find_option( ARGS, root, NULL )) != 0 )
+		return ret;
 	
 #ifdef _DEBUG
 	launch = "gasp-d.elf";
@@ -317,22 +328,19 @@ int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
 	need += strlen(launch) + 1; /* For '\0' */
 	need += strlen(root) + 2; /* For ' ' and '\0' */
 	
-	REPORT("Allocating memory needed for CMDL")
 	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 	
 	sprintf( cmdl, "%s %s/%s %s", sudo, PWD, launch, root );
 	
-	REPORT( "Appending options to cmdl string" )
 	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 	
-	REPORTF("Printing cmdl string, cmdl = %p", cmdl)
 	errno = 0;
 	fprintf( stdout, "%s\n", cmdl );
-	REPORT("Executing cmdl string")
+	
 	ret = system( cmdl );
 	if ( errno != 0 )
 		return errno;
@@ -348,12 +356,11 @@ int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
 	size_t need;
 	
-	if ( !find_option( ARGS, gede ) )
-		return EINVAL;
+	if ( (ret = find_option( ARGS, gede, NULL )) != EEXIST )
+		return ret;
 	
 	launch = "gasp-d.elf";
 		
-	REPORT("Checking PWD")
 	if ( !PWD ) PWD = CWD;
 	
 	need = BUFSIZ;
@@ -361,12 +368,10 @@ int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 	need += strlen(PWD) + 1; /* For '\0' */
 	need += strlen(gede) + 5; /* For " -D " '\0' */
 	
-	REPORT("Allocating memory for command line string")
 	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 	
-	REPORTF( "Filling commmand line string, %p", cmdl )
 	sprintf( cmdl, "gede --args ./%s", launch );
 
 	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
@@ -375,7 +380,7 @@ int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 	
 	/* Prevent infinite loop */
 	pos = strstr( cmdl, gede );
-	REPORTF( "Stripping '%s' from arguments which are:", gede )
+	
 	fprintf( stderr, "%s\n", cmdl );
 	if ( pos )
 	{
@@ -428,20 +433,6 @@ int launch_lua( text_t *TEXTV ) {
 		paths[i] = TEXTV[i].space.block;
 	}
 	
-	if ( !(paths[TEXT_ID_GASP_PATH] == getenv("GASP_PATH")) )
-	{
-		paths[TEXT_ID_GASP_PATH] = TEXTV[TEXT_ID_GASP_PATH].space.block;
-		sprintf( paths[TEXT_ID_GASP_PATH], "%s/gasp", HOME );
-		setenv( "GASP_PATH", paths[TEXT_ID_GASP_PATH], 0 );
-	}
-	
-	sprintf( paths[TEXT_ID_LUA_PATH],
-		"%s/lua/?.lua;%s/?.lua", PWD, paths[TEXT_ID_GASP_PATH] );
-	setenv("LUA_PATH",paths[TEXT_ID_LUA_PATH],0);
-	
-	sprintf( paths[TEXT_ID_LUA_CPATH], "%s/?.so", PWD );
-	setenv("LUA_CPATH",paths[TEXT_ID_LUA_CPATH],0);
-	
 	/* Initialise lua */
 	errno = 0;
 	if ( !(L = luaL_newstate()) ) {
@@ -452,14 +443,19 @@ int launch_lua( text_t *TEXTV ) {
 	lua_atpanic(L,lua_panic_cb);
 	
 	/* Just a hack for slipups upstream */
-	(void)luaL_dostring(L,"loadlib = package.loadlib");
+	(void)luaL_dostring(L,
+		"if not loadlib then\n"
+			"loadlib = package.loadlib\n"
+		"end"
+	);
 	
 	/* Load in extras */
 	luaL_openlibs(L);
 	lua_create_gasp(L);
 	
 	/* Run lua */
-	sprintf( paths[TEXT_ID_SHARED], "%s/lua/gasp.lua", PWD );
+	sprintf( paths[TEXT_ID_SHARED],
+		"%s/lua/gasp.lua", getenv("GASP_PATH") );
 	do {
 		g_reboot_gui = false;
 		if ( luaL_dofile(L, paths[TEXT_ID_SHARED] ) )
@@ -482,13 +478,14 @@ int launch_lua( text_t *TEXTV ) {
 
 int main( int argc, char *argv[] ) {
 	int ret = EXIT_SUCCESS;
-	text_t TEXTV[TEXT_ID_COUNT] = {{0}};
+	text_t TEXTV[TEXT_ID_COUNT] = {{0}}, *TEXT;
 	nodes_t ARGS = {0};
 	option_t *options, *option;
 	size_t leng = BUFSIZ;
-	node_t i;
+	node_t i, pos;
+	char const *PWD, *HOME;
+	char *text;
 	
-	REPORT( "Allocating default memory for strings" )
 	/* Allocate all memory need for start up */
 	for ( i = 0; i < TEXT_ID_COUNT; ++i )
 	{
@@ -499,7 +496,6 @@ int main( int argc, char *argv[] ) {
 		}
 	}
 	
-	REPORT( "Checking given options" )
 	// Identify environment overrides, files to load and other things
 	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != 0 )
 	{
@@ -511,11 +507,8 @@ int main( int argc, char *argv[] ) {
 	// Current Groups I've thought of:
 	// [Defines] [Process] [CheatFiles]
 	
-	REPORTF("%s %s",
-		"Adding environment variables as defines to options",
-		"if they're not already defined" )
 	if ( (ret = gasp_make_defenv_opt( &ARGS,
-		"PWD", "CWD", "HOME", "GASP_PATH",
+		"PWD", "CWD", "HOME", "GASP_PATH", "LUA_PATH", "LUA_CPATH",
 		"DISPLAY", "XDG_CURRENT_DESKTOP", "GDMSESSION",
 		NULL )) != 0
 	)
@@ -524,16 +517,83 @@ int main( int argc, char *argv[] ) {
 		goto fail;
 	}
 	
-	REPORT("Checking if should launch self as child")
-	if ( (ret = launch_sudo_gasp( TEXTV, &ARGS )) == EALREADY )
+	PWD = getenv( "PWD" );
+	HOME = getenv( "HOME" );
+	TEXT = TEXTV + TEXT_ID_SHARED;
+	leng += strlen( HOME ) + strlen(PWD);
+	if ( (ret = more_nodes( char, TEXT, leng )) != 0 )
+		goto fail;
+	text = TEXT->space.block;
+	
+	(void)memset( text, 0, TEXT->space.given );
+	(void)sprintf( text, "%s/OTG", PWD );
+	if ( (gasp_isdir( text, 0 )) != 0 )
 	{
-		REPORT("Checking if should launch self as child of debugger")
-		if ( (ret = launch_test_gasp( TEXTV, &ARGS )) == EINVAL )
+		(void)memset( text, 0, TEXT->space.given );
+		(void)sprintf( text, "%s/.config", HOME );
+		if ( (gasp_isdir( text, 1 )) != 0 )
+			goto fail;
+
+		(void)memset( text, 0, TEXT->space.given );
+		(void)sprintf( text, "%s/.config/gasp", HOME );
+		if ( (gasp_isdir( text, 1 )) != 0 )
+			goto fail;
+	}
+	
+	if ( (ret = add_define( &ARGS, "GASP_PATH", &pos, 0 )) != EEXIST )
+	{
+		if ( ret != 0 )
+			goto fail;
+		
+		options = ARGS.space.block;
+		option = options + pos;
+			
+		if ( (ret = append_to_option( option, "val", text )) != 0 )
+			goto fail;
+			
+		setenv( "GASP_PATH", option->val, 1 );
+	}
+	
+	(void)memset( text, 0, TEXT->space.given );
+	(void)sprintf( text, "%s/?.so", PWD );
+	if ( (ret = add_define( &ARGS, "LUA_CPATH", &pos, 0 )) != EEXIST )
+	{
+		if ( ret != 0 )
+			goto fail;
+		
+		options = ARGS.space.block;
+		option = options + pos;
+			
+		if ( (ret = append_to_option( option, "val", text )) != 0 )
+			goto fail;
+			
+		setenv( "LUA_CPATH", option->val, 1 );
+	}
+	
+	(void)memset( text, 0, TEXT->space.given );
+	(void)sprintf( text,
+		"%s/?.lua;%s/lua/?.lua", PWD, getenv("GASP_PATH") );
+	if ( (ret = add_define( &ARGS, "LUA_PATH", &pos, 0 )) != EEXIST )
+	{
+		if ( ret != 0 )
+			goto fail;
+		
+		options = ARGS.space.block;
+		option = options + pos;
+			
+		if ( (ret = append_to_option( option, "val", text )) != 0 )
+			goto fail;
+			
+		setenv( "LUA_PATH", option->val, 1 );
+	}
+	
+	if ( (ret = launch_sudo_gasp( TEXTV, &ARGS )) == EEXIST )
+	{
+		if ( (ret = launch_test_gasp( TEXTV, &ARGS )) == 0 )
 		{
 			/* Don't need this so give back memory */
 			free_nodes( TEXTV + TEXT_ID_CMD_LINE );
 			/* Open user interface */
-			REPORT("Launching UI")
 			ret = launch_lua( TEXTV );
 		}
 	}

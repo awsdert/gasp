@@ -155,8 +155,7 @@ function autoload()
 	if v then return rebuild_cheat(v) end
 	if GUI.cheatfile then
 		tmp = cheatspath() .. "/" .. GUI.cheatfile
-		func = loadfile(tmp)
-		ok, err, v = pcall( func )
+		func, ok, err, v = Require( tmp )
 		if not ok then
 			print( tostring(err) )
 			v = nil
@@ -289,21 +288,18 @@ GUI.use_ui = function(ctx,name,now)
 		if v.name == name then
 			GUI.previous = now
 			GUI.which = i
-			
 		end
 	end
 	
 end
 	
 GUI.add_ui = function( name, desc, file )
-	local path = (os.getenv("PWD") or os.getenv("CWD") or ".") .. "/lua"
-	local tmp = dofile( path .. "/" .. file )
-	if not tmp then
-		print( debug.traceback() )
-		tmp = GUI.draw_fallback
+	local path = scriptspath()
+	local func, ok, err, v = Require( path .. "/" .. file )
+	if not ok then
+		func = GUI.draw_fallback
 	end
-	GUI.draw[#(GUI.draw) + 1] = { name = name, desc = desc, func = tmp }
-	
+	GUI.draw[#(GUI.draw) + 1] = { name = name, desc = desc, func = func() }
 end
 
 GUI.draw_goback = function(ctx,now,prv,func)

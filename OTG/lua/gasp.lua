@@ -1,18 +1,40 @@
+loadlib = package.loadlib
+function trace()
+	return print(debug.traceback())
+end
+debug.sethook(trace,"*")
+
 -- Used to recover where possible
 _G.forced_reboot = false
 function calc_percentage( num, dem )
 	return (((0.0 + num) / (0.0 + dem)) * 100.0)
 end
+
+function Require(path)
+	if not path then
+		print(debug.traceback())
+		return nil
+	end
+	local func, err = loadfile(path)
+	if not func then
+		print(debug.traceback())
+		print(err)
+		print("Tried to load '" .. path .. "'")
+		return nil
+	end
+	return func, pcall( func )
+end
+
 function init()
-	local func, ok, err
+	local func, ok, err, v, tmp
 	
 	_G.asked4_reboot = true
 	while _G.asked4_reboot == true do
 		_G.asked4_reboot = false
 		-- For a different interface just change the file below
-		func = loadfile( scriptspath() .. "/gui_mode.lua" )
+		tmp = scriptspath() .. "/gui_mode.lua"
 		-- Prevent lua from exiting gasp without good reason
-		ok, err = pcall( func )
+		func, ok, err, v = Require( tmp )
 		if not ok then
 			print( err )
 			-- Avoid fully restarting gasp
@@ -30,11 +52,6 @@ function init()
 	end
 end
 
-function trace()
-	return print(debug.traceback())
-end
-debug.sethook(trace,"*")
-
 function tointeger(val)
 	return math.floor(tonumber(val) or 0)
 end
@@ -44,8 +61,12 @@ function toboolean(val)
 	return true
 end
 
+function app_data()
+	return (os.getenv("GASP_PATH") or ".")
+end
+
 function scriptspath()
-	return (os.getenv("PWD") or os.getenv("CWD") or ".") .. '/lua'
+	return app_data() .. '/lua'
 end
 
 function mkdir(path)
@@ -62,11 +83,10 @@ function mkdir(path)
 end
 
 function cheatspath()
-	local path = scriptspath()
+	local path = app_data()
 	if gasp.path_isdir( path .. '/cheats' ) then
 		return path .. '/cheats'
 	end
-	path = os.getenv("GASP_PATH")
 	mkdir(path)
 	path = path .. '/cheats'
 	mkdir(path)

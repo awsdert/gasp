@@ -61,6 +61,51 @@ int append_to_option(
 	
 	return ret;
 }
+int add_define(
+	nodes_t *ARGS, char const *key, node_t *pos, bool replace
+)
+{
+	int ret = 0;
+	option_t *options, *option;
+	node_t i;
+	
+	if ( pos ) *pos = ~0;
+	
+	if ( !ARGS )
+		return EDESTADDRREQ;
+	
+	if ( !replace )
+	{
+		options = ARGS->space.block;
+		for ( i = 0; i < ARGS->count; ++i )
+		{
+			option = options + i;
+			if ( strcmp( option->opt, "-D" ) != 0 )
+				continue;
+			
+			if ( strcmp( option->key, key ) == 0 )
+				return EEXIST;
+		}
+	}
+	i = ARGS->count;
+	if ( (ret = more_nodes( option_t, ARGS, ARGS->count + 1 )) != 0 )
+		return ret;
+	options = ARGS->space.block;
+	option = options + i;
+	
+	if ( (ret = append_to_option( option, "opt", "-D" )) != 0 )
+		return ret;
+	
+	if ( (ret = append_to_option( option, "key", key )) != 0 )
+		return ret;
+	
+	if ( (ret = append_to_option( option, "val", "1" )) != 0 )
+		return ret;
+		
+	ARGS->count++;
+	if ( pos ) *pos = i;
+	return 0;
+}
 
 int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 	option_t *options, *option;
@@ -81,15 +126,14 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 #else
 	begin = 0;
 #endif
-	REPORTF( "Iterating given arguments, %d", argc)
+	
 	for ( i = begin; i < argc; ++i )
 	{
 		option = options + ARGS->count;
 		ARGS->count++;
 		opt = argv[i];
 		leng = strlen(opt);
-	
-		REPORTF( "Duplicating '%s'", opt )
+		
 		if ( (ret = append_to_option( option, "opt", opt )) != 0 )
 			return ret;
 		
@@ -130,7 +174,6 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		(void)setenv( option->key, option->val, 1 );
 	}
 	
-	REPORT("Done with given arguments")
 	if ( _leng ) *_leng = leng;
 	return ret;
 }

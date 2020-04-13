@@ -847,25 +847,41 @@ int dump_files__dir( space_t *space, long inst, bool make ) {
 	char *path;
 	size_t len;
 	
+	REPORT( "Checking destination pointer" )
 	if ( !space )
 		return EDESTADDRREQ;
+	
+	REPORT( "Checking GASP_PATH" )
 	GASP_PATH = getenv("GASP_PATH");
 	if ( !GASP_PATH )
-		return EINVAL;
+	{
+		ret = EINVAL;
+		ERRMSG( ret, "GASP_PATH environment variable is undefined!" );
+		return ret;
+	}
+	
 	len = strlen(GASP_PATH) + (2 * (sizeof(node_t) * CHAR_BIT));
 	
-	if ( !(ret = more_space( space, len )) != 0 )
+	REPORTF( "%s, GASP_PATH = '%s'",
+		"Allocating memory to verify directory exists", GASP_PATH )
+	if ( (ret = more_space( space, len )) != 0 )
+	{
+		ERRMSG( ret, "Couldn't allocate space for path variable" );
 		return ret;
+	}
 	path = space->block;
 	
+	REPORTF( "Checking for directory '%s'", GASP_PATH )
 	if ( (ret = gasp_isdir( GASP_PATH, make )) != 0 )
 		return ret;
 	
 	sprintf( path, "%s/scans", GASP_PATH );
+	REPORTF( "Checking for directory '%s'", path )
 	if ( (ret = gasp_isdir( path, make )) != 0 )
 		return ret;
 	
 	sprintf( path, "%s/scans/%ld", GASP_PATH, inst );
+	REPORTF( "Checking for directory '%s'", path )
 	if ( (ret = gasp_isdir( path, make )) != 0 )
 		return ret;
 	
@@ -1534,16 +1550,15 @@ int proc_handle_aobscan( tscan_t *tscan ) {
 		goto set_found;
 	}
 	
-	if ( (ret = dump_files_reset_offsets( dump, 1 )) != 0 ) {
+	if ( (ret = dump_files_reset_offsets( dump, 1 )) != 0 
+	{
 		fprintf( stderr, "Failed at dump_files_reset_offsets()\n" );
 		goto set_found;
 	}
 	
 	if ( dump_files_test( *prev ) == 0 ) {
 		
-		if ( (ret = dump_files_reset_offsets( prev, 1 ))
-			!= 0
-		)
+		if ( (ret = dump_files_reset_offsets( prev, 1 )) != 0 )
 		{
 			fprintf( stderr, "Failed at 2nd dump_files_reset_offsets()\n" );
 			goto set_found;
@@ -1721,17 +1736,14 @@ int process_find(
 	(void)memset( nodes, 0, sizeof(nodes_t) );
 	
 	process = &(glance.process);
-	REPORT("Starting loop")
 	for ( ret = pglance_init( &glance, underId )
 		; ret == 0; ret = process_next( &glance )
 	)
 	{	
 		if ( name && *name ) {
 			text = process->name.space.block;
-			REPORTF( "Searching for '%s' in '%s'", name, text )
 			if ( !instr( text, name ) ) {
 				text = process->cmdl.space.block;
-				REPORTF( "Searching for '%s' in '%s'", name, text )
 				if ( !instr( text, name ) )
 					continue;
 			}
@@ -1759,7 +1771,6 @@ int process_find(
 			break;
 		}
 	}
-	REPORT("Loop ended")
 	
 	pglance_term( &glance );
 	if ( nodes->count > 0 )

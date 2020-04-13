@@ -42,13 +42,11 @@ int lua_process_find( lua_State *L ) {
 	process_t *process;
 	node_t i;
 	
-	REPORTF( "Searching for process '%s'", name )
 	if ( (ret = process_find( name, &nodes, underId, 0 )) != 0 )
 		return 0;
 	
 	process = nodes.space.block;	
 	lua_createtable( L, nodes.count + 1, 0 );
-	REPORTF( "Found %u results", nodes.count )
 	for ( i = 0; i < nodes.count; ++i, ++process ) {
 		lua_pushinteger(L,i+1);
 		lua_createtable( L, 0, 5 );
@@ -185,6 +183,13 @@ typedef struct lua_process {
 	tscan_t tscan;
 	process_t process;
 } lua_process_t;
+
+int lua_process__valid( lua_process_t *lua_process )
+{
+	if ( !lua_process )
+		return EINVAL;
+	return (lua_process->process.parent > -1) ? 0 : ENOENT;
+}
 
 bool lua_process__end_scan( tscan_t *tscan ) {
 	int ret = SIGSTOP;
@@ -373,7 +378,7 @@ int lua_process_term( lua_State *L ) {
 int lua_process_valid( lua_State *L ) {
 	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushboolean( L, lua_process->process.hooked );
+	lua_pushboolean( L, lua_process__valid( lua_process ) == 0 );
 	return 1;
 }
 
@@ -399,7 +404,7 @@ int lua_process_glance_data( lua_State *L ) {
 	uchar * array;
 	int ret;
 	
-	if ( !(lua_process->process.hooked) || size < 1 ) {
+	if ( lua_process__valid( lua_process ) == 0 || size < 1 ) {
 		lua_newtable(L);
 		return 1;
 	}
@@ -437,7 +442,7 @@ int lua_process_change_data( lua_State *L ) {
 	ssize_t size;
 	int ret;
 	
-	if ( !(lua_process->process.hooked) ) {
+	if ( lua_process__valid( lua_process ) == 0 ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
@@ -533,32 +538,38 @@ int lua_process__create_pipes( lua_process_t *lua_process ) {
 	return 0;
 }
 
-bool lua_process__can_scan(
+int lua_process__can_scan(
 	lua_process_t *lua_process
 )
 {
+	int ret = 0;
 	tscan_t *tscan;
 	
 	if ( !lua_process )
-		return 0;
+		return EDESTADDRREQ;
 	
 	tscan = &(lua_process->tscan);
 	
 #ifdef _WIN32
+	REPORT( "Checking WIN32 Process handle" )
 	if ( !(lua_process->process.handle) )
 	{
-		ERRMSG( EDESTADDRREQ, "No process handle provided" );
-		return 0;
+		ret = EINVAL;
+		ERRMSG( ret, "No process handle provided" );
+		return ret;
 	}
 #endif
-	
+
+	REPORT("Checking if scan thread is running")
 	if ( tscan->threadmade )
 	{
-		ERRMSG( EBUSY, "Scan thread currently busy" );
-		return 0;
+		ret = EBUSY;
+		ERRMSG( ret, "Scan thread currently busy" );
+		return ret;
 	}
 	
-	return (lua_process__create_pipes( lua_process ) == 0);
+	REPORT("Creating pipes")
+	return lua_process__create_pipes( lua_process );
 }
 
 int lua_process_killscan( lua_State *L ) {
@@ -607,7 +618,7 @@ bool lua_process_prep_scan(
 	space_t space = {0};
 	
 	REPORT("Checking if can scan")
-	if ( !lua_process__can_scan( lua_process ) )
+	if ( lua_process__can_scan( lua_process ) != 0 )
 		return 0;
 	
 	REPORT("Setting pointers to various objects needed for scanning");
@@ -626,13 +637,12 @@ bool lua_process_prep_scan(
 	(void)memset( nodes->space.block, 0, nodes->space.given );
 	
 	REPORT("Checking for an assigned scan folder")
-	if ( !(tscan->assignedID) ) {
-		for ( tscan->id = 0;
-			ret == 0 && tscan->id < INT_MAX;
-			tscan->id++
-		)
+	if ( !(tscan->assignedID) )
+	{
+		for ( tscan->id = 0; tscan->id < INT_MAX; tscan->id++ )
 		{
-			ret = dump_files__dir( &space, tscan->id, 0 );
+			if ( (ret = dump_files__dir( &space, tscan->id, 0 )) != 0 )
+				break;
 		}
 		free_space(&space);
 		if ( ret == ENOTDIR )
@@ -734,7 +744,7 @@ int lua_process_bytescan( lua_State *L ) {
 	node_t limit = luaL_optinteger(L,index+4,100), scan;
 	
 	REPORT("Checking for conflicts at launch of scan")
-	if ( !lua_process__can_scan( lua_process ) )
+	if ( lua_process__can_scan( lua_process ) != 0 )
 	{
 		cannot_scan:
 		lua_pushboolean( L, 0 );

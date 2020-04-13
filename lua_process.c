@@ -42,12 +42,14 @@ int lua_process_find( lua_State *L ) {
 	process_t *process;
 	node_t i;
 	
+	REPORTF( "Searching for process '%s'", name )
 	if ( (ret = process_find( name, &nodes, underId, 0 )) != 0 )
 		return 0;
 	
 	process = nodes.space.block;	
 	lua_createtable( L, nodes.count + 1, 0 );
-	for ( i = 0; i < nodes.count; ++i ) {
+	REPORTF( "Found %u results", nodes.count )
+	for ( i = 0; i < nodes.count; ++i, ++process ) {
 		lua_pushinteger(L,i+1);
 		lua_createtable( L, 0, 5 );
 		push_branch_bool( L, "self", process->self );
@@ -58,7 +60,6 @@ int lua_process_find( lua_State *L ) {
 		push_branch_str( L, "cmdl", (char*)(process->cmdl.space.block) );
 		lua_settable(L,-3);
 		process_term( process );
-		++process;
 	}
 	free_nodes( &nodes );
 	return 1;
@@ -179,13 +180,13 @@ void lua_proc_create_glance_class( lua_State *L ) {
 
 #define PROC_HANDLE_CLASS "class_proc_handle"
 
-typedef struct lua_proc_handle {
+typedef struct lua_process {
 	nodes_t bytes;
 	tscan_t tscan;
 	process_t process;
-} lua_proc_handle_t;
+} lua_process_t;
 
-bool lua_proc_handle__end_scan( tscan_t *tscan ) {
+bool lua_process__end_scan( tscan_t *tscan ) {
 	int ret = SIGSTOP;
 	_Bool success = 1;
 	if ( tscan->threadmade ) {
@@ -196,15 +197,17 @@ bool lua_proc_handle__end_scan( tscan_t *tscan ) {
 	return success;
 }
 
-bool lua_proc_handle__set_rdwr(
-	lua_proc_handle_t *handle, bool want2rdwr
+bool lua_process__set_rdwr(
+	lua_process_t *lua_process, bool want2rdwr
 )
 {
 	int ret = want2rdwr ? SIGSTOP : SIGCONT;
 	tscan_t *tscan;
 	
-	if ( !handle ) return 0;
-	tscan = &(handle->tscan);
+	if ( !lua_process )
+		return 0;
+	
+	tscan = &(lua_process->tscan);
 	tscan->wants2rdwr = want2rdwr;
 	if ( tscan->threadmade &&
 		gasp_tpollo( tscan->scan_pipes, ret, -1 )
@@ -216,15 +219,15 @@ bool lua_proc_handle__set_rdwr(
 	return 1;
 }
 
-int lua_proc_handle__ret_empty_list( lua_State *L, node_t done, node_t found ) {
+int lua_process__ret_empty_list( lua_State *L, node_t done, node_t found ) {
 	lua_pushinteger(L,done);
 	lua_pushinteger(L,found);
 	lua_newtable( L );
 	return 3;
 }
 
-int lua_proc_handle__get_scan_list(
-	lua_State *L, lua_proc_handle_t *handle
+int lua_process__get_scan_list(
+	lua_State *L, lua_process_t *lua_process
 )
 {
 	node_t i, count = 0;
@@ -235,15 +238,15 @@ int lua_proc_handle__get_scan_list(
 	if ( !L )
 		return 0;
 
-	if ( !handle )
-		return lua_proc_handle__ret_empty_list(L,0,0);
+	if ( !lua_process )
+		return lua_process__ret_empty_list(L,0,0);
 
-	tscan = &(handle->tscan);
+	tscan = &(lua_process->tscan);
 	nodes = &(tscan->locations);
 	ptrs = nodes->space.block;
 	
 	/* Grab current address and amount found */
-	lua_pushinteger( L, handle->tscan.done_upto );
+	lua_pushinteger( L, lua_process->tscan.done_upto );
 	lua_pushinteger( L, (count = nodes->count) );
 	
 	/* Pre-create the entire table */
@@ -262,10 +265,10 @@ int lua_proc_handle__get_scan_list(
 	return 3;
 }
 
-void lua_proc_handle_shutfiles( lua_proc_handle_t *handle )
+void lua_process_shutfiles( lua_process_t *lua_process )
 {
 	int ret = SIGSTOP;
-	tscan_t *tscan = &(handle->tscan);
+	tscan_t *tscan = &(lua_process->tscan);
 	
 	if ( tscan->pipesmade ) {
 		if ( tscan->threadmade ) {
@@ -279,11 +282,11 @@ void lua_proc_handle_shutfiles( lua_proc_handle_t *handle )
 	
 	/* sleep call is needed here to ensure system passes execution to
 	 * the other thread when it exists on the same CPU core */
-	dump_files_shut( handle->tscan.dump );
-	dump_files_shut( handle->tscan.dump + 1 );
+	dump_files_shut( lua_process->tscan.dump );
+	dump_files_shut( lua_process->tscan.dump + 1 );
 }
 
-int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
+int lua_process_undo( lua_process_t *lua_process, node_t scan )
 {
 	char const *GASP_PATH = getenv("GASP_PATH");
 	char *path;
@@ -293,11 +296,11 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	dump_t *dump;
 	tscan_t *tscan;
 	
-	if ( !handle )
+	if ( !lua_process )
 		return EINVAL;
 	
 	REPORT("Setting pointers for quick C code")
-	tscan = &(handle->tscan);
+	tscan = &(lua_process->tscan);
 	dump = tscan->dump + 1;
 	
 	REPORT("Shutting previous dump files if they're open")
@@ -348,55 +351,55 @@ int lua_proc_handle_undo( lua_proc_handle_t *handle, node_t scan )
 	return ret;
 }
 
-int lua_proc_handle_term( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_term( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	tscan_t *tscan = &(handle->tscan);
+	tscan_t *tscan = &(lua_process->tscan);
 	
 	gasp_close_pipes( tscan->main_pipes );
 	gasp_close_pipes( tscan->scan_pipes );
 	tscan->pipesmade = 0;
 	
-	(void)lua_proc_handle_undo( handle, 0 );
-	process_term( &(handle->process) );
+	(void)lua_process_undo( lua_process, 0 );
+	process_term( &(lua_process->process) );
 	
 	dump_files_shut( tscan->dump );
 	dump_files_shut( tscan->dump + 1 );
 	
-	free_nodes( &(handle->bytes) );
+	free_nodes( &(lua_process->bytes) );
 	return 0;
 }
 
-int lua_proc_handle_valid( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_valid( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushboolean( L, handle->process.hooked );
+	lua_pushboolean( L, lua_process->process.hooked );
 	return 1;
 }
 
-int lua_proc_handle_init( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_init( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	int pid = luaL_checkinteger(L,2),
 		opt = luaL_optinteger(L,3,PROCESS_O_RWX);
 		
-	if ( handle->process.path[0] )
-		lua_proc_handle_term( L );
+	if ( lua_process->process.path[0] )
+		lua_process_term( L );
 	
 	if ( pid > 0 )
-		process_info( &(handle->process), pid, 1, opt );
-	return lua_proc_handle_valid(L);
+		process_info( &(lua_process->process), pid, 1, opt );
+	return lua_process_valid(L);
 }
 
-int lua_proc_handle_glance_data( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_glance_data( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	uintmax_t addr = luaL_checkinteger(L,2);
 	ssize_t i, size = luaL_checkinteger(L,3);
 	uchar * array;
 	int ret;
 	
-	if ( !(handle->process.hooked) || size < 1 ) {
+	if ( !(lua_process->process.hooked) || size < 1 ) {
 		lua_newtable(L);
 		return 1;
 	}
@@ -406,10 +409,10 @@ int lua_proc_handle_glance_data( lua_State *L ) {
 		lua_newtable(L);
 		return 1;
 	}
-	lua_proc_handle__set_rdwr(handle,1);
+	lua_process__set_rdwr(lua_process,1);
 	ret = pglance_data(
-		&(handle->process), addr, array, size, &size );
-	lua_proc_handle__set_rdwr(handle,0);
+		&(lua_process->process), addr, array, size, &size );
+	lua_process__set_rdwr(lua_process,0);
 	if ( ret != 0 || size < 1 )
 	{
 		free(array);
@@ -425,8 +428,8 @@ int lua_proc_handle_glance_data( lua_State *L ) {
 	free(array);
 	return 1;
 }
-int lua_proc_handle_change_data( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_change_data( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	uintmax_t addr = luaL_checkinteger(L,2);
 	uchar * array = NULL;
@@ -434,79 +437,79 @@ int lua_proc_handle_change_data( lua_State *L ) {
 	ssize_t size;
 	int ret;
 	
-	if ( !(handle->process.hooked) ) {
+	if ( !(lua_process->process.hooked) ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
-	nodes = &(handle->bytes);
+	nodes = &(lua_process->bytes);
 	
 	if ( !(array = lua_extract_bytes( NULL, L, 5, nodes)) ) {
 		lua_pushinteger(L,0);
 		return 1;
 	}
 	
-	//lua_proc_handle__set_rdwr(handle,1);
+	//lua_process__set_rdwr(lua_process,1);
 	ret = proc_change_data(
-		&(handle->process), addr, array, nodes->count, &size );
-	//lua_proc_handle__set_rdwr(handle,0);
+		&(lua_process->process), addr, array, nodes->count, &size );
+	//lua_process__set_rdwr(lua_process,0);
 
 	lua_pushinteger(L,(ret == 0 && size > 0) ? size : 0);
 	return 1;
 }
 
-int lua_proc_handle_done_scans( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_done_scans( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushinteger( L, handle->tscan.done_scans );
+	lua_pushinteger( L, lua_process->tscan.done_scans );
 	return 1;
 }
 
-int lua_proc_handle_scan_done_upto( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_scan_done_upto( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushinteger( L, handle->tscan.done_upto );
+	lua_pushinteger( L, lua_process->tscan.done_upto );
 	return 1;
 }
-int lua_proc_handle_thread_active( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_thread_active( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushboolean( L, handle->tscan.threadmade );
+	lua_pushboolean( L, lua_process->tscan.threadmade );
 	return 1;
 }
-int lua_proc_handle_scanning( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_scanning( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushboolean( L, handle->tscan.scanning );
+	lua_pushboolean( L, lua_process->tscan.scanning );
 	return 1;
 }
-int lua_proc_handle_dumping( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_dumping( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushboolean( L, handle->tscan.dumping );
-	return 1;
-}
-
-int lua_proc_handle_scan_found( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
-		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	lua_pushinteger( L, handle->tscan.found );
+	lua_pushboolean( L, lua_process->tscan.dumping );
 	return 1;
 }
 
-int lua_proc_handle_get_scan_list( lua_State *L ) {
-	return lua_proc_handle__get_scan_list(
-		L, (lua_proc_handle_t*)luaL_checkudata(L,1,PROC_HANDLE_CLASS) );
+int lua_process_scan_found( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
+		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
+	lua_pushinteger( L, lua_process->tscan.found );
+	return 1;
 }
 
-int lua_proc_handle__create_pipes( lua_proc_handle_t *handle ) {
+int lua_process_get_scan_list( lua_State *L ) {
+	return lua_process__get_scan_list(
+		L, (lua_process_t*)luaL_checkudata(L,1,PROC_HANDLE_CLASS) );
+}
+
+int lua_process__create_pipes( lua_process_t *lua_process ) {
 	tscan_t *tscan;
 	
-	if ( !handle ) {
+	if ( !lua_process ) {
 		ERRMSG( EDESTADDRREQ, "Was not provided a handle" );
 		return EDESTADDRREQ;
 	}
 	
-	tscan = &(handle->tscan);
+	tscan = &(lua_process->tscan);
 	
 	if ( tscan->pipesmade )
 		return 0;
@@ -530,19 +533,19 @@ int lua_proc_handle__create_pipes( lua_proc_handle_t *handle ) {
 	return 0;
 }
 
-bool lua_proc_handle__can_scan(
-	lua_proc_handle_t *handle
+bool lua_process__can_scan(
+	lua_process_t *lua_process
 )
 {
 	tscan_t *tscan;
 	
-	if ( !handle )
+	if ( !lua_process )
 		return 0;
 	
-	tscan = &(handle->tscan);
+	tscan = &(lua_process->tscan);
 	
 #ifdef _WIN32
-	if ( !(handle->process.handle) )
+	if ( !(lua_process->process.handle) )
 	{
 		ERRMSG( EDESTADDRREQ, "No process handle provided" );
 		return 0;
@@ -555,22 +558,22 @@ bool lua_proc_handle__can_scan(
 		return 0;
 	}
 	
-	return (lua_proc_handle__create_pipes( handle ) == 0);
+	return (lua_process__create_pipes( lua_process ) == 0);
 }
 
-int lua_proc_handle_killscan( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_killscan( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	lua_pushboolean( L,
-		lua_proc_handle__end_scan( &(handle->tscan) )
+		lua_process__end_scan( &(lua_process->tscan) )
 	);
 	return 1;
 }
 
-int lua_proc_handle_percentage( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_percentage( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	tscan_t *tscan = &(handle->tscan);
+	tscan_t *tscan = &(lua_process->tscan);
 	uintmax_t zero = 0;
 	uintmax_t addr = tscan->done_upto;
 	uintmax_t upto = tscan->dumping ? ~zero : tscan->upto;
@@ -586,8 +589,8 @@ int lua_proc_handle_percentage( lua_State *L ) {
 	return 6;
 }
 
-bool lua_proc_handle_prep_scan(
-	lua_proc_handle_t *handle,
+bool lua_process_prep_scan(
+	lua_process_t *lua_process,
 	node_t scan,
 	node_t last_found,
 	node_t list_limit,
@@ -604,11 +607,11 @@ bool lua_proc_handle_prep_scan(
 	space_t space = {0};
 	
 	REPORT("Checking if can scan")
-	if ( !lua_proc_handle__can_scan( handle ) )
+	if ( !lua_process__can_scan( lua_process ) )
 		return 0;
 	
 	REPORT("Setting pointers to various objects needed for scanning");
-	tscan = &(handle->tscan);
+	tscan = &(lua_process->tscan);
 	nodes = &(tscan->locations);
 	dump = tscan->dump + 1;
 	tscan->dump->nodes = dump->nodes = &(tscan->mappings);
@@ -641,7 +644,7 @@ bool lua_proc_handle_prep_scan(
 	}
 	
 	REPORT("Undoing later scans if using earlier dump")
-	if ( (ret = lua_proc_handle_undo( handle, scan )) != 0 )
+	if ( (ret = lua_process_undo( lua_process, scan )) != 0 )
 	{
 		ERRMSG( ret, "Couldn't rollback scan number" );
 		return 0;
@@ -649,9 +652,9 @@ bool lua_proc_handle_prep_scan(
 	
 	REPORT("Preping all scan variables")
 	
-	tscan->process = &(handle->process);
-	tscan->bytes = handle->bytes.count;
-	tscan->array = tscan->bytes ? handle->bytes.space.block : NULL;
+	tscan->process = &(lua_process->process);
+	tscan->bytes = lua_process->bytes.count;
+	tscan->array = tscan->bytes ? lua_process->bytes.space.block : NULL;
 	tscan->from = from;
 	tscan->upto = upto;
 	tscan->writeable = writable;
@@ -686,19 +689,19 @@ bool lua_proc_handle_prep_scan(
 	return 1;
 }
 
-int lua_proc_handle_dump( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_dump( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	tscan_t *tscan;
 	uintmax_t from = luaL_optinteger(L,2,0);
 	uintmax_t upto = luaL_optinteger(L,3,INTPTR_MAX);
 	_Bool writable = lua_toboolean(L,4);
-	tscan =  &(handle->tscan);
+	tscan =  &(lua_process->tscan);
 	
-	handle->bytes.count = 0;
+	lua_process->bytes.count = 0;
 	
-	if ( !lua_proc_handle_prep_scan(
-			handle, 0, 0, 0, from, upto, writable, 0 )
+	if ( !lua_process_prep_scan(
+			lua_process, 0, 0, 0, from, upto, writable, 0 )
 	)
 	{
 		lua_pushboolean(L,0);
@@ -707,8 +710,7 @@ int lua_proc_handle_dump( lua_State *L ) {
 	}
 	
 	if ( pthread_create(
-			&(tscan->thread), NULL,
-			proc_handle_dumper, &(handle->tscan) ) != 0
+		&(tscan->thread), NULL, proc_handle_dumper, tscan ) != 0
 	)
 	{
 		lua_pushboolean( L, 1 );
@@ -719,8 +721,8 @@ int lua_proc_handle_dump( lua_State *L ) {
 	return 1;
 }
 
-int lua_proc_handle_bytescan( lua_State *L ) {
-	lua_proc_handle_t *handle = (lua_proc_handle_t*)
+int lua_process_bytescan( lua_State *L ) {
+	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	int index = 4;
 	uchar *array;
@@ -731,7 +733,8 @@ int lua_proc_handle_bytescan( lua_State *L ) {
 	_Bool writable = lua_toboolean(L,index+3);
 	node_t limit = luaL_optinteger(L,index+4,100), scan;
 	
-	if ( !lua_proc_handle__can_scan( handle ) )
+	REPORT("Checking for conflicts at launch of scan")
+	if ( !lua_process__can_scan( lua_process ) )
 	{
 		cannot_scan:
 		lua_pushboolean( L, 0 );
@@ -741,20 +744,21 @@ int lua_proc_handle_bytescan( lua_State *L ) {
 	
 	if ( limit > INT_MAX ) limit = 100;
 	
-	tscan = &(handle->tscan);
+	tscan = &(lua_process->tscan);
 	
 	scan = luaL_optinteger(L,index+5,tscan->done_scans);
 	if ( scan != tscan->done_scans )
 		tscan->last_found = 0;
 	
+	REPORT("Extracting byte array from parameters")
 	if ( !(array
-		= lua_extract_bytes( NULL, L, index, &(handle->bytes) )) )
-		goto cannot_scan;
+		= lua_extract_bytes( NULL, L, index, &(lua_process->bytes) ))
+	) goto cannot_scan;
 	
 	REPORT("Preparing various objects for scan thread")
 	if ( scan > tscan->done_scans ||
-		!lua_proc_handle_prep_scan(
-			handle, scan, tscan->last_found, limit,
+		!lua_process_prep_scan(
+			lua_process, scan, tscan->last_found, limit,
 			from, upto, writable, ~0 )
 	) goto cannot_scan;
 	
@@ -769,8 +773,7 @@ int lua_proc_handle_bytescan( lua_State *L ) {
 	
 	REPORT("Creating scan thread")
 	if ( pthread_create(
-			&(tscan->thread), NULL,
-			proc_handle_dumper, &(handle->tscan) ) != 0
+		&(tscan->thread), NULL, proc_handle_dumper, tscan ) != 0
 	)
 	{
 		lua_pushboolean( L, 1 );
@@ -781,21 +784,24 @@ int lua_proc_handle_bytescan( lua_State *L ) {
 	return 1;
 }
 
-int lua_proc_handle_text( lua_State *L ) {
+int lua_process_text( lua_State *L ) {
 	lua_pushstring( L, PROC_HANDLE_CLASS );
 	return 1;
 }
 
-int lua_proc_handle_grab( lua_State *L ) {
-	lua_proc_handle_t *handle =
-		(lua_proc_handle_t*)lua_newuserdata(L,sizeof(lua_proc_handle_t));
+int lua_process_grab( lua_State *L )
+{
+	lua_process_t *lua_process =
+		(lua_process_t*)lua_newuserdata(L,sizeof(lua_process_t));
 	tscan_t *tscan;
 	dump_t *dump;
-	if ( !handle ) return 0;
 	
-	(void)memset( handle, 0, sizeof(lua_proc_handle_t) );
+	if ( !lua_process )
+		return 0;
 	
-	tscan = &(handle->tscan);
+	(void)memset( lua_process, 0, sizeof(lua_process_t) );
+	
+	tscan = &(lua_process->tscan);
 	
 	dump = tscan->dump;
 	dump->info.fd = dump->used.fd = dump->data.fd = -1;
@@ -808,34 +814,34 @@ int lua_proc_handle_grab( lua_State *L ) {
 	tscan->main_pipes[0] = -1;
 	tscan->main_pipes[1] = -1;
 	
-	(void)lua_proc_handle__create_pipes( handle );
+	(void)lua_process__create_pipes( lua_process );
 	
 	luaL_setmetatable(L,PROC_HANDLE_CLASS);
 	return 1;
 }
 
 luaL_Reg lua_class_proc_handle_func_list[] = {
-	{ "new", lua_proc_handle_grab },
-	{ "init", lua_proc_handle_init },
-	{ "valid", lua_proc_handle_valid },
-	{ "glance", lua_proc_handle_glance_data },
-	{ "change", lua_proc_handle_change_data },
-	{ "dump", lua_proc_handle_dump },
-	{ "bytescan", lua_proc_handle_bytescan },
-	{ "killscan", lua_proc_handle_killscan },
-	{ "dumping", lua_proc_handle_dumping },
-	{ "scanning", lua_proc_handle_scanning },
-	{ "percentage_done", lua_proc_handle_percentage },
-	{ "thread_active", lua_proc_handle_thread_active },
-	{ "scan_found", lua_proc_handle_scan_found },
-	{ "scan_done_upto", lua_proc_handle_scan_done_upto },
-	{ "done_scans", lua_proc_handle_done_scans },
-	{ "get_scan_list", lua_proc_handle_get_scan_list },
-	{ "term", lua_proc_handle_term },
-	{ "tostring", lua_proc_handle_text },
+	{ "new", lua_process_grab },
+	{ "init", lua_process_init },
+	{ "valid", lua_process_valid },
+	{ "glance", lua_process_glance_data },
+	{ "change", lua_process_change_data },
+	{ "dump", lua_process_dump },
+	{ "bytescan", lua_process_bytescan },
+	{ "killscan", lua_process_killscan },
+	{ "dumping", lua_process_dumping },
+	{ "scanning", lua_process_scanning },
+	{ "percentage_done", lua_process_percentage },
+	{ "thread_active", lua_process_thread_active },
+	{ "scan_found", lua_process_scan_found },
+	{ "scan_done_upto", lua_process_scan_done_upto },
+	{ "done_scans", lua_process_done_scans },
+	{ "get_scan_list", lua_process_get_scan_list },
+	{ "term", lua_process_term },
+	{ "tostring", lua_process_text },
 {NULL}};
 
-int lua_proc_handle_node( lua_State *L ) {
+int lua_process_node( lua_State *L ) {
 	char const *name = NULL;
 	node_t num = 0;
 	int i, len = 0;
@@ -859,20 +865,20 @@ int lua_proc_handle_node( lua_State *L ) {
 	return 0;
 }
 
-int lua_proc_handle_make( lua_State *L ) {
+int lua_process_make( lua_State *L ) {
 	(void)L;
 	return 0;
 }
 
-int lua_proc_handle_free( lua_State *L ) {
-	lua_proc_handle_term(L);
+int lua_process_free( lua_State *L ) {
+	lua_process_term(L);
 	return 0;
 }
 
 luaL_Reg lua_class_proc_handle_meta_list[] = {
-	{ "__gc", lua_proc_handle_free },
-	{ "__index",lua_proc_handle_node },
-	{ "__newindex", lua_proc_handle_make },
+	{ "__gc", lua_process_free },
+	{ "__index",lua_process_node },
+	{ "__newindex", lua_process_make },
 {NULL,NULL}};
 
 void lua_proc_create_handle_class( lua_State *L ) {

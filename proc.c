@@ -1721,14 +1721,17 @@ int process_find(
 	(void)memset( nodes, 0, sizeof(nodes_t) );
 	
 	process = &(glance.process);
+	REPORT("Starting loop")
 	for ( ret = pglance_init( &glance, underId )
 		; ret == 0; ret = process_next( &glance )
 	)
 	{	
 		if ( name && *name ) {
 			text = process->name.space.block;
+			REPORTF( "Searching for '%s' in '%s'", name, text )
 			if ( !instr( text, name ) ) {
 				text = process->cmdl.space.block;
+				REPORTF( "Searching for '%s' in '%s'", name, text )
 				if ( !instr( text, name ) )
 					continue;
 			}
@@ -1756,6 +1759,7 @@ int process_find(
 			break;
 		}
 	}
+	REPORT("Loop ended")
 	
 	pglance_term( &glance );
 	if ( nodes->count > 0 )
@@ -1995,7 +1999,10 @@ int	process_next( pglance_t *glance )
 		)
 		{
 			if ( process->parent == glance->underId )
+			{
+				nodes->focus++;
 				return process_info( process, pid, 0, 0 );
+			}
 			
 			if ( process->parent <= 0 )
 				break;

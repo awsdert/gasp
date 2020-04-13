@@ -167,7 +167,10 @@ function autoload()
 			GUI.cfg.find_process =
 				v.app.name or GUI.cfg.find_process
 			if not GUI.donothook then
+				print( "Searching for process '"
+					.. GUI.cfg.find_process .. "'")
 				tmp = gasp.locate_app(GUI.cfg.find_process)
+				print( "Found " .. (#tmp) .. " matching processes" )
 				-- Auto hook process
 				if #tmp == 1 then
 					GUI.noticed = tmp[1]

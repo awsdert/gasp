@@ -410,7 +410,7 @@ void* lua_extract_bytes(
 	int *err, lua_State *L, int index, nodes_t *dst );
 int lua_process_find( lua_State *L );
 int lua_pglance_grab( lua_State *L );
-int lua_proc_handle_grab( lua_State *L );
+int lua_process_grab( lua_State *L );
 int lua_panic_cb( lua_State *L );
 int lua_proc_load_glance( lua_State *L );
 int lua_proc_free_glance( lua_State *L );

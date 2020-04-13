@@ -485,7 +485,7 @@ void lua_create_gasp(lua_State *L) {
 	push_branch_cfunc(L,"ptrlimit",lua_ptrlimit );
 	push_branch_cfunc(L,"locate_app",lua_process_find);
 	push_branch_cfunc(L,"new_glance",lua_pglance_grab);
-	push_branch_cfunc(L,"new_handle",lua_proc_handle_grab);
+	push_branch_cfunc(L,"new_handle",lua_process_grab);
 	push_branch_cfunc(L,"get_endian",lua_get_endian);
 	push_branch_cfunc(L,"totxtbytes",lua_totxtbytes);
 	push_branch_cfunc(L,"tointbytes",lua_tointbytes);

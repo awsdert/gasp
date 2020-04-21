@@ -2174,7 +2174,7 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 	
 	pof = "read /proc/<PID>/status";
 	errno = 0;
-	if ( gasp_read( fd, full->block, full->given ) <= 0 )
+	if ( gasp_read( fd, full->block, full->given ) < 0 )
 	{
 		ret = errno;
 		goto fail;

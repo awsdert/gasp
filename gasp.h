@@ -28,6 +28,12 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
+#if UINT_MAX > 0xFFFu
+#define PID_PATH bitsof(int)
+#else
+#define PID_PATH 32
+#endif
+
 #define VERBOSE 1
 #define COUT( TXT ) fprintf( stdout, "%s:%u:" TXT "\n", __FILE__, __LINE__ )
 #define COUTF( F, ... ) fprintf( stdout, "%s:%u:" F "\n", __FILE__, __LINE__, __VA_ARGS__ )

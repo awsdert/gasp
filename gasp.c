@@ -9,16 +9,59 @@ typedef enum TEXT_ID {
 	TEXT_ID_COUNT
 } TEXT_ID_t;
 
-int set_scope( char const *path, int set ) {
+int command( int *_sig, char const *cmdl, bool print_command )
+{
+	int ret = 0, sig = -1;
+	char *pof;
+	
+	pof = "cmdl check";
+	if ( !cmdl )
+	{
+		ret = EINVAL;
+		goto fail;
+	}
+	
+	if ( print_command )
+		EOUTF( "%s", cmdl );
+	
+	errno = 0;
+	sig = system(cmdl);
+	ret = errno;
+	
+	if ( sig != 0 )
+	{
+		if ( ret == 0 )
+			ret = ENODATA;
+		goto fail;
+	}
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
+	if ( _sig )
+		*_sig = sig;
+	
+	return ret;
+}
+
+int set_scope( char const *path, int set, int *prv ) {
 	FILE *file = NULL;
+	int ret = 0;
 	int get = 0;
 	char cmdl[128] = {0};
-	if ( set < 0 ) set = 0;
+	
+	if ( set < 0 )
+		set = 0;
+	
 	if ( strstr(path,"conf") )
 		sprintf( cmdl,
 		"sudo echo kernel.yama.ptrace_scope = %d > '%s'", set, path );
 	else
 		sprintf( cmdl, "sudo echo %d > '%s'", set, path );
+	
 	if ( access( path, F_OK ) == 0 ) {
 		if ( !(file = fopen(path,"r")) ) {
 			if ( set < 1 ) {
@@ -35,6 +78,7 @@ int set_scope( char const *path, int set ) {
 		fclose( file );
 		file = NULL;
 	}
+	
 	if ( set < get ) {
 		fprintf( stderr, "%s:1:0: ptrace scope is restrained by"
 		" value %d,\nAttempting to override to %d, "
@@ -45,9 +89,10 @@ int set_scope( char const *path, int set ) {
 				", manually restore if fail!\n", path, set );
 	}
 	
-	fprintf( stdout, "%s\n", cmdl );
-	system(cmdl);
-	return get;
+	ret = command( NULL, cmdl, 1 );
+	if ( prv )
+		*prv = get;
+	return ret;
 }
 
 #if 0
@@ -242,14 +287,16 @@ int find_option( nodes_t *ARGS, char const *opt, node_t *pos )
 	node_t i;
 	option_t *option, *options = ARGS->space.block;
 	text_t TEXT = {0};
-	char *txt, *key;
+	char *txt, *key, *pof;
 	size_t size = strlen(opt) + 1;
 	
+	pof = "more characters";
 	if ( (ret = more_nodes( char, &TEXT, size )) != 0 )
-		goto done;
+		goto fail;
 		
 	txt = TEXT.space.block;
 	(void)memcpy( txt, opt, size );
+	
 	key = strchr( (opt = txt), ' ' );
 	if ( key )
 		*(key++) = 0;
@@ -266,10 +313,18 @@ int find_option( nodes_t *ARGS, char const *opt, node_t *pos )
 			}
 		}
 	}
-	
 	i = ~0;
+	
 	done:
-	free_nodes( &TEXT );
+	
+	switch ( ret )
+	{
+	case 0: case EEXIST: break;
+	default:
+		fail:
+		FAILED( ret, pof );
+	}
+	
 	if ( pos ) *pos = i;
 	return ret;
 }
@@ -323,10 +378,16 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 	return 0;
 }
 
-int append_path_to_self( text_t *TEXT )
+int append_path_to_self( text_t *TEXT, bool use_proc_pid_exe )
 {
 	int ret = 0;
-	char *text, *pof;
+	char *text, *pof, path[PID_PATH] = {0};
+	char const *launch = NULL,
+		*PWD = getenv("PWD"),
+		*CWD = getenv("CWD"),
+		*CD = getenv("CD"),
+		*_CWD = getenv("CURRENT_WORKING_DIRECTORY");
+	size_t need = 0;
 	
 	pof = "TEXT";
 	if ( !TEXT )
@@ -335,113 +396,161 @@ int append_path_to_self( text_t *TEXT )
 		goto fail;
 	}
 	
-	pof = "nodes";
-	if ( (ret = more_nodes(
-		char, TEXT, TEXT->count + bitsof(int) )) != 0
-	) goto fail;
+#ifdef _DEBUG
+	launch = "gasp-d.elf";
+#else
+	launch = "gasp.elf";
+#endif
+	
+	if ( !PWD ) PWD = CWD;
+	if ( !PWD ) PWD = CD;
+	if ( !PWD ) PWD = _CWD;
+	
+	if ( !PWD || use_proc_pid_exe )
+	{
+		sprintf( path, "/proc/%d", getpid() );
+		PWD = path;
+		launch = "exe";
+	}
+	
+	need = TEXT->count + strlen(PWD) + strlen(launch) + 2;
+	
+	pof = "character allocation";
+	if ( (ret = more_nodes( char, TEXT, need )) != 0 )
+		goto fail;
 	
 	text = TEXT->space.block;
 	pof = "sprintf";
 	errno = 0;
-	if ( sprintf( text, "/path/%d/exe", getpid() ) <= 0 )
+	if ( sprintf( strchr( text, 0 ), "%s/%s", PWD, launch ) <= 0 )
 	{
 		ret = errno;
 		fail:
 		FAILED( ret, pof );
+		EOUTF( "PWD = '%s'", PWD ? PWD : "(null)" );
+		EOUTF( "CWD = '%s'", CWD ? CWD : "(null)" );
+		EOUTF( "CD = '%s'", CD ? CD : "(null)" );
+		EOUTF( "CURRENT_WORKING_DIRECTORY = '%s'",
+			_CWD ? _CWD : "(null)" );
 	}
 	return ret;
 }
 
 int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
 {
-	int ret = 0;
-	char const *launch, *sudo = "pkexec", *root = "--inrootmode",
-		*PWD = getenv("PWD"), *CWD = getenv("CWD");
+	int ret = 0, sig = 0;
+	char const *sudo = "pkexec", *opt = "--inrootmode", *pof;
 	char *cmdl;
 	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
 	size_t need;
 	
-	if ( (ret = find_option( ARGS, root, NULL )) != 0 )
-		return ret;
+	pof = "find option";
+	switch ( (ret = find_option( ARGS, opt, NULL )) )
+	{
+	case 0: break;
+	case EEXIST: return ret;
+	default:
+		goto fail;
+	}
 	
-#ifdef _DEBUG
-	launch = "gasp-d.elf";
-#else
-	launch = "gasp.elf";
-#endif
-
-	if ( !PWD ) PWD = CWD;
+	need = strlen(sudo) + 2; /* For ' ' & '\0' */
 	
-	need = BUFSIZ;
-	need += strlen(sudo) + 1; /* For '\0' */
-	need += strlen(PWD) + 1; /* For '\0' */
-	need += strlen(launch) + 1; /* For '\0' */
-	need += strlen(root) + 2; /* For ' ' and '\0' */
-	
+	pof = "allocate characters for pkexec";
 	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
-		return ret;
+		goto fail;
 	cmdl = CMDL->space.block;
 	
-	sprintf( cmdl, "%s %s/%s %s", sudo, PWD, launch, root );
+	sprintf( cmdl, "%s ", sudo );
 	
+	pof = "append path to self";
+	if ( (ret = append_path_to_self( CMDL, 1 )) != 0 )
+		goto fail;
+		
+	pof = "append characters for declaring root";
+	if ( (ret = more_nodes( char, CMDL, strlen(opt) + 2 )) != 0 )
+		goto fail;
+	cmdl = CMDL->space.block;
+		
+	(void)sprintf( strchr( cmdl, 0 ), " %s",  opt );
+	
+	pof = "append options";
 	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
-		return ret;
+		goto fail;
 	cmdl = CMDL->space.block;
 	
-	errno = 0;
-	fprintf( stdout, "%s\n", cmdl );
+	pof = "launch self";
+	if ( (ret = command( &sig, cmdl, 1 )) != 0 )
+		goto fail;
 	
-	ret = system( cmdl );
-	if ( errno != 0 )
-		return errno;
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+		EOUTF( "sig = %d", sig );
+	}
+	
 	return ret;
 }
 
 int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 {
-	int ret = 0;
-	char const *launch, *gede = "--gede",
-		*PWD = getenv("PWD"), *CWD = getenv("CWD");
-	char *cmdl, *pos, *nxt;
+	int ret = 0, sig = 0;
+	char const *gede = "gede --args ", *opt = "--gede";
+	char *cmdl, *pos, *nxt, *pof;
 	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
 	size_t need;
 	
-	if ( (ret = find_option( ARGS, gede, NULL )) != EEXIST )
-		return ret;
+	pof = "find option";
+	switch ( (ret = find_option( ARGS, opt, NULL )) )
+	{
+	case 0: return 0;
+	case EEXIST: break;
+	default:
+		goto fail;
+	}
 	
-	launch = "gasp-d.elf";
-		
-	if ( !PWD ) PWD = CWD;
+	/* For ' ' & '\0' */
+	need = strlen(gede) + 2;
 	
-	need = BUFSIZ;
-	need += strlen(launch) + 1; /* For '\0' */
-	need += strlen(PWD) + 1; /* For '\0' */
-	need += strlen(gede) + 5; /* For " -D " '\0' */
-	
+	pof = "allocate characters for launching gede with arguments";
 	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
 		return ret;
 	cmdl = CMDL->space.block;
 	
-	sprintf( cmdl, "gede --args ./%s", launch );
+	sprintf( cmdl, "%s", gede );
+	
+	pof = "append path to self";
+	if ( (ret = append_path_to_self( CMDL, 1 )) != 0 )
+		goto fail;
 
+	pof = "append options";
 	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
-		return ret;
+		goto fail;
 	cmdl = CMDL->space.block;
 	
 	/* Prevent infinite loop */
-	pos = strstr( cmdl, gede );
-	
-	fprintf( stderr, "%s\n", cmdl );
+	pos = strstr( cmdl, opt );
 	if ( pos )
 	{
-		nxt = pos + strlen( gede );
+		nxt = pos + strlen( opt );
 		(void)memmove( pos, nxt, strlen(nxt) + 1 );
 	}
+	else
+	{
+		ret = EDESTADDRREQ;
+		goto fail;
+	}
 	
-	errno = 0;
-	ret = system( cmdl );
-	if ( errno != 0 )
-		return errno;
+	pof = "launch self";
+	if ( (ret = command( &sig, cmdl, 1 )) != 0 )
+		goto fail;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+		EOUTF( "sig = %d", sig );
+	}
 	return ret;
 }
 
@@ -458,8 +567,13 @@ int launch_lua( text_t *TEXTV ) {
 #endif
 	lua_State *L = NULL;
 	
-	scope = set_scope( ptrace_scope, 0 );
-	conf = set_scope( ptrace_conf, 0 );
+	pof = "set scope via /proc";
+	if ( (ret = set_scope( ptrace_scope, 0, &scope )) != 0 )
+		goto fail;
+	
+	pof = "set scope via /etc";
+	if ( (ret = set_scope( ptrace_conf, 0, &conf )) != 0 )
+		goto fail;
 	
 	pof = "environment variables check";
 	if ( !(PWD = getenv("PWD")) ) PWD = getenv("CWD");
@@ -519,9 +633,9 @@ int launch_lua( text_t *TEXTV ) {
 		EOUTF( "HOME = %p, '%s'", HOME, HOME ? HOME : "(null)" );
 	}
 	
-#if 0
-	set_scope( ptrace_scope, scope );
-	set_scope( ptrace_conf, conf );
+#if 1
+	ret = set_scope( ptrace_scope, scope, NULL );
+	ret = set_scope( ptrace_conf, conf, NULL );
 #else
 	(void)scope;
 	(void)conf;
@@ -569,6 +683,7 @@ int main( int argc, char *argv[] )
 	HOME = getenv( "HOME" );
 	TEXT = TEXTV + TEXT_ID_SHARED;
 	leng += strlen( HOME ) + strlen(PWD);
+	pof = "allocate characters for PWD & HOME";
 	if ( (ret = more_nodes( char, TEXT, leng )) != 0 )
 		goto fail;
 	text = TEXT->space.block;
@@ -579,11 +694,13 @@ int main( int argc, char *argv[] )
 	{
 		(void)memset( text, 0, TEXT->space.given );
 		(void)sprintf( text, "%s/.config", HOME );
+		pof = "create ~/.config";
 		if ( (gasp_isdir( text, 1 )) != 0 )
 			goto fail;
 
 		(void)memset( text, 0, TEXT->space.given );
 		(void)sprintf( text, "%s/.config/gasp", HOME );
+		pof = "create ~/.config/gasp";
 		if ( (gasp_isdir( text, 1 )) != 0 )
 			goto fail;
 	}
@@ -606,6 +723,7 @@ int main( int argc, char *argv[] )
 	
 	(void)memset( text, 0, TEXT->space.given );
 	(void)sprintf( text, "%s/?.so", PWD );
+	pof = "add define for LUA_CPATH";
 	if ( (ret = add_define( &ARGS, "LUA_CPATH", &pos, 0 )) != EEXIST )
 	{
 		if ( ret != 0 )
@@ -623,6 +741,7 @@ int main( int argc, char *argv[] )
 	(void)memset( text, 0, TEXT->space.given );
 	(void)sprintf( text,
 		"%s/?.lua;%s/lua/?.lua", PWD, getenv("GASP_PATH") );
+	pof = "add define for LUA_PATH";
 	if ( (ret = add_define( &ARGS, "LUA_PATH", &pos, 0 )) != EEXIST )
 	{
 		if ( ret != 0 )
@@ -637,13 +756,16 @@ int main( int argc, char *argv[] )
 		setenv( "LUA_PATH", option->val, 1 );
 	}
 	
+	pof = "launch under sudo check";
 	if ( (ret = launch_sudo_gasp( TEXTV, &ARGS )) == EEXIST )
 	{
+		pof = "launch under gasp check";
 		if ( (ret = launch_test_gasp( TEXTV, &ARGS )) == 0 )
 		{
 			/* Don't need this so give back memory */
 			free_nodes( TEXTV + TEXT_ID_CMD_LINE );
 			/* Open user interface */
+			pof = "launch lua";
 			ret = launch_lua( TEXTV );
 		}
 	}

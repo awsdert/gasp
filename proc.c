@@ -112,18 +112,20 @@ int file_glance_size( char const *path, ssize_t *size )
 	}
 	
 	pof = "read";
-	while ( (done = gasp_read( fd, buff, BUFSIZ )) > 0 )
+	while ( (done = gasp_read( fd, buff, BUFSIZ )) < 0 )
 		bytes += done;
 
 	ret = errno;
-	close(fd);
 	
-	if ( done < 0 || bytes <= 0 )
+	if ( ret != 0 && ret != EOF )
 	{
 		fail:
 		FAILED( ret, pof );
 		return ret;
 	}
+	
+	if ( fd > 0 )
+		close(fd);
 	
 	*size = bytes;
 	return 0;

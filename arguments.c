@@ -109,16 +109,13 @@ int add_define(
 
 int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 	option_t *options, *option;
-	char *opt, *key, *val, c = 0, *tmp;
+	char *opt, *key, *val, c = 0, *tmp, *pof;
 	int begin, i, ret = 0;
-	size_t leng = 1;
+	size_t leng = 0;
 	
-	if ( _leng ) *_leng = 1;
-	
-	if ( (ret = more_nodes( option_t, ARGS, argc )) != 0 ) {
-		ERRMSG( ret, "Couldn't allocate memory for argument pairs" );
-		return ret;
-	}
+	pof = "option objects allocation";
+	if ( (ret = more_nodes( option_t, ARGS, argc )) != 0 )
+		goto fail;
 	options = ARGS->space.block;
 	
 #if 1
@@ -134,8 +131,9 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		opt = argv[i];
 		leng = strlen(opt);
 		
+		pof = "append switch to option object";
 		if ( (ret = append_to_option( option, "opt", opt )) != 0 )
-			return ret;
+			goto fail;
 		
 		if ( !strstr(opt,"-D") )
 			continue;
@@ -144,8 +142,9 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		tmp = strstr( key, "=" );
 		if ( tmp ) *tmp = 0;
 		
+		pof = "append name to option object";
 		if ( (ret = append_to_option( option, "key", key )) != 0 )
-			return ret;
+			goto fail;
 	
 		if ( tmp )
 		{
@@ -157,8 +156,9 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		else
 			val = argv[++i];
 		
+		pof = "append value to option object";
 		if ( (ret = append_to_option( option, "val", val )) != 0 )
-			return ret;
+			goto fail;
 		
 		val = option->val;
 		switch ( (c = *val) )
@@ -174,6 +174,13 @@ int arguments( int argc, char *argv[], nodes_t *ARGS, size_t *_leng ) {
 		(void)setenv( option->key, option->val, 1 );
 	}
 	
-	if ( _leng ) *_leng = leng;
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
+	if ( _leng )
+		*_leng = leng;
 	return ret;
 }

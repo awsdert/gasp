@@ -1,12 +1,12 @@
 #include "gasp.h"
-int proc_handle_stop( process_t *process ) {
+int process_stop( process_t *process ) {
 	int ret = 0;
 	(void)kill( process->pid, SIGSTOP );
 	(void)waitpid( process->pid, &ret, WUNTRACED );
 	process->paused = 1;
 	return 0;
 }
-int proc_handle_cont( process_t *process ) {
+int process_cont( process_t *process ) {
 	if ( process->paused ) {
 		if ( kill( process->pid, SIGCONT ) != 0 )
 			return errno;
@@ -25,7 +25,7 @@ int process_grab( process_t *process ) {
 	}
 	return ret;
 }
-int proc_handle_free( process_t *process ) {
+int process_free( process_t *process ) {
 	if ( process->hooked ) {
 		if ( ptrace( PTRACE_DETACH, process->pid, NULL, NULL ) != 0 )
 			return errno;
@@ -66,20 +66,32 @@ int file_change_perm( char const * path, mode_t perm ) {
 int file_glance_size( char const *path, ssize_t *size )
 {
 	int fd = -1, ret = 0;
-	char buff[BUFSIZ];
+	char buff[BUFSIZ], *pof;
 	gasp_off_t bytes = 0, done = -1;
 	struct stat st;
 	
+	pof = "size";
 	if ( !size )
-		return EDESTADDRREQ;
+	{
+		ret = EDESTADDRREQ;
+		goto fail;
+	}
 	
 	*size = 0;
+	pof = "path";
 	if ( !path )
-		return EINVAL;
+	{
+		ret = EINVAL;
+		goto fail;
+	}
 	
+	pof = "stat";
 	errno = 0;
 	if ( stat( path, &st ) != 0 )
-		return errno;
+	{
+		ret = errno;
+		goto fail;
+	}
 	
 	if ( st.st_size > 0 )
 	{
@@ -87,6 +99,7 @@ int file_glance_size( char const *path, ssize_t *size )
 		return 0;
 	}
 	
+	pof = "open";
 	errno = 0;
 	if ( (fd = open(path,O_RDONLY)) < 0 )
 	{
@@ -94,20 +107,23 @@ int file_glance_size( char const *path, ssize_t *size )
 		switch ( ret ) {
 		case ENOENT: case ENOTDIR:
 			return 0;
-		default:
-			ERRMSG( ret, "Could not open file to calculate size" );
 		}
-		return ret;
+		goto fail;
 	}
 	
+	pof = "read";
 	while ( (done = gasp_read( fd, buff, BUFSIZ )) > 0 )
 		bytes += done;
-	
+
 	ret = errno;
 	close(fd);
 	
-	if ( bytes <= 0 )
+	if ( done < 0 || bytes <= 0 )
+	{
+		fail:
+		FAILED( ret, pof );
 		return ret;
+	}
 	
 	*size = bytes;
 	return 0;
@@ -132,59 +148,91 @@ int mapped_list( process_t *process, nodes_t *nodes )
 	int ret = 0, fd = -1;
 	mapped_t m = {0}, *mv = NULL;
 	ssize_t size = 0;
-	char *line, *pos, path[SCHAR_MAX] = {0};
+	char *line, *pos, path[SCHAR_MAX] = {0}, *pof = NULL;
 	space_t space = {0};
 	node_t n = 0;
 	
+	pof = "nodes check";
 	if ( !nodes )
 	{
 		ret = EDESTADDRREQ;
-		return ret;
+		goto fail;
 	}
 	
+	REPORT("Clearing data stored in nodes parameter")
 	nodes->focus = nodes->count = 0;
 	nodes->total = nodes->space.given / sizeof(mapped_t);
+	if ( nodes->space.block )
+	{
+		pof = "nodes data cleanup";
+		errno = 0;
+		if ( !memset( nodes->space.block, 0, nodes->space.given ) )
+		{
+			ret = errno;
+			goto fail;
+		}
+	}
 	
+	pof = "process check";
 	if ( !process )
 	{
 		ret = EINVAL;
-		return ret;
+		goto fail;
 	}
 	
 	(void)sprintf( path, "%s/maps", process->path );
+	pof = "glance size";
 	if ( (ret = file_glance_size( path, &size )) != 0 )
-		return ret;
-		
+		goto fail;
+	
+	pof = "more space";
 	if ( (ret = more_space( &space, size + 1 )) != 0 )
-		return ret;
+		goto fail;
 	
+	pof = "more nodes";
 	if ( (ret = more_nodes( mapped_t, nodes, 50 )) != 0 )
-		return ret;
+		goto fail;
 	
+	pof = "open";
 	if ( (fd = open( path, O_RDONLY )) < 0 )
 	{
 		ret = errno;
-		return ret;
+		goto fail;
 	}
 	
+	pof = "read";
 	if ( (size = gasp_read( fd, space.block, space.given )) <= 0 )
 	{
 		ret = errno;
-		close(fd);
-		return ret;
+		goto fail;
 	}
 	
 	close(fd);
+	fd = -1;
 	
 	for ( line = space.block; *line; ++line )
 	{
-		(void)memset( &m, 0, sizeof(mapped_t) );
+		pof = "object cleanup";
+		errno = 0;
+		if ( !memset( &m, 0, sizeof(mapped_t) ) )
+		{
+			ret = errno;
+			goto fail;
+		}
 		
 		/* Read address range */
-		sscanf( line, "%jx-%jx", &(m.head), &(m.foot) );
+		pof = "address range";
+		errno = 0;
+		if ( sscanf( line, "%jx-%jx", &(m.head), &(m.foot) ) < 0 )
+		{
+			ret = errno;
+			goto fail;
+		}
 		
 		/* Get position right after address range */
 		pos = strchr( line, ' ' );
+		if ( !pos )
+			break;
 		
 		/* Clear so that only the range is used for file name */
 		*pos = 0;
@@ -202,12 +250,23 @@ int mapped_list( process_t *process, nodes_t *nodes )
 			/* Check if validated share */
 			m.prot |= (pos[3] == 's') ? 0 : 020;
 		
-		sprintf( path, "%s/map_files/%s", process->path, line );
+		pof = "map files";
+		errno = 0;
+		if ( sprintf( path,
+			"%s/map_files/%s", process->path, line ) < 0
+		)
+		{
+			ret = errno;
+			goto fail;
+		}
+		
+		pof = "glance perm";
 		if ( (ret = file_glance_perm( path, &(m.perm) )) != 0 )
-			return ret;
+			goto fail;
 			
+		pof = "add node";
 		if ( (ret = add_node( nodes, &n, sizeof(mapped_t))) != 0 )
-			return ret;
+			goto fail;
 		mv = nodes->space.block;
 		mv[n] = m;
 		
@@ -217,8 +276,17 @@ int mapped_list( process_t *process, nodes_t *nodes )
 				break;
 		}
 	}
+	pof = NULL;
 	
-	return 0;
+	if ( pof )
+	{
+		fail:
+		FAILED( ret, pof );
+		EOUTF( "path = '%s'", path );
+	}
+	if ( fd >= 0 ) close(fd);
+	free_space( &space );
+	return ret;
 }
 
 int mapped_next(
@@ -229,16 +297,17 @@ int mapped_next(
 	nodes_t nodes = {0};
 	node_t n;
 	mapped_t *m, *mv;
+	char * pof;
 	
+	pof = "mapped pointer check";
 	if ( !mapped ) {
 		ret = EDESTADDRREQ;
-		ERRMSG( ret, "Need destination for page details" );
-		return ret;
+		goto fail;
 	}
 	
+	pof = "list mappings";
 	if ( (ret = mapped_list( process, &nodes )) != 0 )
-		return ret;
-	
+		goto fail;
 	mv = nodes.space.block;
 	
 	for ( n = 0; n < nodes.count; ++n ) {
@@ -256,8 +325,12 @@ int mapped_next(
 		ret = ERANGE;
 	}
 	
+	if ( ret != 0 && ret != ERANGE )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
 	free_nodes( &nodes );
-	
 	return ret;
 }
 
@@ -269,16 +342,18 @@ int mapped_addr(
 	nodes_t nodes = {0};
 	node_t n;
 	mapped_t *m, *mv;
+	char *pof;
 	
-	if ( !mapped ) {
+	pof = "mapped pointer check";
+	if ( !mapped )
+	{
 		ret = EDESTADDRREQ;
-		ERRMSG( ret, "Need destination for mapping details" );
-		return ret;
+		goto fail;
 	}
 	
+	pof = "list mappings";
 	if ( (ret = mapped_list( process, &nodes )) != 0 )
 		return ret;
-	
 	mv = nodes.space.block;
 	
 	for ( n = 0; n < nodes.count; ++n ) {
@@ -296,8 +371,12 @@ int mapped_addr(
 		ret = ERANGE;
 	}
 	
+	if ( ret != 0 && ret != ERANGE )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
 	free_nodes( &nodes );
-	
 	return ret;
 }
 
@@ -306,18 +385,29 @@ int proc__rwvmem_test(
 )
 {
 	int ret = 0;
+	char *pof;
 	
-	if ( !done ) {
+	pof = "bytes done pointer check";
+	if ( !done )
+	{
 		ret = EDESTADDRREQ;
-		ERRMSG( ret, "Need somewhere to set bytes done" );
+		goto fail;
 	}
 	
 	*done = 0;
-	if ( !process || !mem || size <= 0 || !done ) {
+	if ( !process || !mem || size <= 0 || !done )
+	{
 		ret = EINVAL;
-		if ( !process ) ERRMSG( ret, "Invalid handle" );
-		if ( !mem ) ERRMSG( ret, "Invalid memory pointer" );
-		if ( size <= 0 ) ERRMSG( ret, "Invalid memory size" );
+		if ( !process ) pof= "process handle check";
+		if ( !mem ) pof = "memory pointer check";
+		if ( size <= 0 ) pof = "memory size check";
+		goto fail;
+	}
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
 	}
 	
 	return ret;
@@ -379,28 +469,40 @@ int proc__glance_vmem(
 	struct iovec internal, external;
 	int ret;
 	uchar *m = mem;
+	char *pof;
 	
+	pof = "parameter check";
 	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
-		return ret;
+		goto fail;
 	
 	internal.iov_base = m;
 	internal.iov_len = size;
 	external.iov_base = (void*)addr;
 	external.iov_len = size;
 	
+	pof = "read process memory";
 	errno = 0;
 	if ( (*done = process_vm_readv(
 		process->pid, &internal, 1, &external, 1, 0)) <= 0 )
 	{
 		ret = errno;
-		ERRMSG( ret, "Couldn't glance at VM" );
-		fprintf( stderr, "%p\n", external.iov_base );
+		goto fail;
+	}
+	
+#else
+	ret = ENOSYS;
+#endif
+
+	if ( ret != 0 )
+	{
+#ifdef _GNU_SOURCE
+		fail:
+#endif
+		FAILED( ret, pof );
+		EOUTF( "external.iov_base = %p", external.iov_base );
 	}
 	
 	return ret;
-#else
-	return ENOSYS;
-#endif
 }
 
 int proc__glance_file(
@@ -409,22 +511,40 @@ int proc__glance_file(
 )
 {
 #ifdef gasp_pread
-	int ret, fd;
-	char path[bitsof(int) * 2] = {0};
+	int ret = 0, fd = -1;
+	char path[bitsof(int) * 2] = {0}, *pof;
 	
+	pof = "parameter check";
 	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
-		return ret;
+		goto fail;
 	
 	sprintf( path, "%s/mem", process->path );
-	if ( (fd = open(path,O_RDONLY)) < 0 )
-		return errno;
-	
-	if ( (*done = gasp_pread( fd, mem, size, addr )) <= 0 )
+	pof = "open file";
+	errno = 0;
+	if ( (fd = open(path,O_RDONLY)) <= 0 )
+	{
 		ret = errno;
-	close(fd);
+		goto fail;
+	}
+	
+	pof = "read file";
+	if ( (*done = gasp_pread( fd, mem, size, addr )) <= 0 )
+	{
+		ret = errno;
+		if ( *done < 0 )
+			goto fail;
+	}
 
-	if ( ret != 0 && ret != ESPIPE && ret != EIO )
-		ERRMSG( ret, "Couldn't read process memory" );
+	switch ( ret )
+	{
+	case 0: case ESPIPE: case EIO: break;
+	default:
+		fail:
+		FAILED( ret, pof );
+	}
+	
+	if ( fd > 0 )
+		close( fd );
 	return ret;
 #else
 	return ENOSYS;
@@ -437,18 +557,27 @@ int proc__glance_self(
 )
 {
 	int ret;
+	char *pof;
 	
+	pof = "parameter check";
 	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
-		return ret;
+		goto fail;
 	
 	if ( process->self ) {
+		pof = "memmove";
 		errno = 0;
 		(void)memmove( mem, (void*)addr, size );
 		ret = errno;
 		if ( ret != 0 )
-			ERRMSG( ret, "Couldn't override VM" );
-		else
-			*done = size;
+			goto fail;
+		
+		*done = size;
+	}
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
 	}
 	
 	return ret;
@@ -771,121 +900,152 @@ int dump_files__read_file(
 	dump_file_t *dump_file, void *dst, ssize_t size, ssize_t *done
 )
 {
+	int ret = 0;
+	char *pof;
+	
+	pof = "parameter check";
 	if ( !dump_file || !dst || size < 1 || !done )
-		return EINVAL;
+	{
+		ret = EINVAL;
+		goto fail;
+	}
 
+	pof = "read dump file offset";
 	errno = 0;
-	if ( (dump_file->prv = gasp_lseek( dump_file->fd, 0, SEEK_CUR ))
-		< 0
+	if ( (dump_file->prv =
+		gasp_lseek( dump_file->fd, 0, SEEK_CUR )) < 0
 	)
 	{
-		if ( errno == 0 ) errno = EIO;
-		ERRMSG( errno, "Failed to glance at file offset" );
-		return errno;
+		ret = errno;
+		goto fail;
 	}
 	
+	pof = "read dump file data";
 	errno = 0;
 	if ( (*done = gasp_read( dump_file->fd, dst, size )) < 0 )
 	{
-		if ( errno == 0 ) errno = EIO;
-		ERRMSG( errno, "Failed to glance at file data" );
-		return errno;
+		ret = errno;
+		goto fail;
 	}
 	
+	pof = "store new dump file offset";
 	errno = 0;
-	if ( (dump_file->pos = gasp_lseek( dump_file->fd, 0, SEEK_CUR ))
-		< 0
+	if ( (dump_file->pos =
+		gasp_lseek( dump_file->fd, 0, SEEK_CUR )) < 0
 	)
 	{
-		if ( errno == 0 ) errno = EIO;
-		ERRMSG( errno, "Failed to glance at file offset" );
-		return errno;
+		ret = errno;
+		goto fail;
 	}
-	return 0;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		if ( ret == 0 ) ret = EIO;
+		FAILED( ret, pof );
+	}
+	
+	return ret;
 }
 
 int dump_files__write_file(
 	dump_file_t *dump_file, void *dst, ssize_t size, ssize_t *done
 )
 {
+	int ret = 0;
+	char *pof;
+	
+	pof = "parameter check";
 	if ( !dump_file || !dst || size < 1 || !done )
 		return EINVAL;
 
+	pof = "store dump file offset";
 	errno = 0;
-	if ( (dump_file->prv = gasp_lseek( dump_file->fd, 0, SEEK_CUR ))
-		< 0
+	if ( (dump_file->prv =
+		gasp_lseek( dump_file->fd, 0, SEEK_CUR )) < 0
 	)
 	{
-		if ( errno == 0 ) errno = EIO;
-		ERRMSG( errno, "Failed to glance at file offset" );
-		return errno;
+		ret = errno;
+		goto fail;
 	}
 	
+	pof = "write dump file data";
 	errno = 0;
 	if ( (*done = gasp_write( dump_file->fd, dst, size )) < 0 )
 	{
-		if ( errno == 0 ) errno = EIO;
-		ERRMSG( errno, "Failed to glance at file data" );
-		return errno;
+		ret = errno;
+		goto fail;
 	}
 	
+	pof = "store new dump file offset";
 	errno = 0;
-	if ( (dump_file->pos = gasp_lseek( dump_file->fd, 0, SEEK_CUR ))
-		< 0
+	if ( (dump_file->pos =
+		gasp_lseek( dump_file->fd, 0, SEEK_CUR )) < 0
 	)
 	{
-		if ( errno == 0 ) errno = EIO;
-		ERRMSG( errno, "Failed to glance at file offset" );
-		return errno;
+		ret = errno;
+		goto fail;
 	}
-	return 0;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		if ( ret == 0 ) errno = EIO;
+		FAILED( ret, pof );
+	}
+	
+	return ret;
 }
 
 int dump_files__dir( space_t *space, long inst, bool make ) {
 	int ret = 0;
-	char const *GASP_PATH;
-	char *path;
+	char const *GASP_PATH = NULL, *pof;
+	char *path = NULL;
 	size_t len;
 	
-	REPORT( "Checking destination pointer" )
+	pof = "destination of path text check";
 	if ( !space )
-		return EDESTADDRREQ;
+	{
+		ret = EDESTADDRREQ;
+		goto fail;
+	}
 	
-	REPORT( "Checking GASP_PATH" )
 	GASP_PATH = getenv("GASP_PATH");
+	pof = "GASP_PATH check";
 	if ( !GASP_PATH )
 	{
 		ret = EINVAL;
-		ERRMSG( ret, "GASP_PATH environment variable is undefined!" );
-		return ret;
+		goto fail;
 	}
 	
 	len = strlen(GASP_PATH) + (2 * (sizeof(node_t) * CHAR_BIT));
 	
-	REPORTF( "%s, GASP_PATH = '%s'",
-		"Allocating memory to verify directory exists", GASP_PATH )
 	if ( (ret = more_space( space, len )) != 0 )
-	{
-		ERRMSG( ret, "Couldn't allocate space for path variable" );
-		return ret;
-	}
+		goto fail;
 	path = space->block;
 	
-	REPORTF( "Checking for directory '%s'", GASP_PATH )
+	pof = GASP_PATH;
 	if ( (ret = gasp_isdir( GASP_PATH, make )) != 0 )
 		return ret;
 	
+	pof = path;
 	sprintf( path, "%s/scans", GASP_PATH );
-	REPORTF( "Checking for directory '%s'", path )
 	if ( (ret = gasp_isdir( path, make )) != 0 )
-		return ret;
+		goto fail;
 	
 	sprintf( path, "%s/scans/%ld", GASP_PATH, inst );
-	REPORTF( "Checking for directory '%s'", path )
 	if ( (ret = gasp_isdir( path, make )) != 0 )
-		return ret;
+		goto fail;
 	
-	return 0;
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+		EOUTF( "GASP_PATH = '%s'", GASP_PATH ? GASP_PATH : "(null)" );
+		EOUTF( "path = '%s'", path ? path : "(null)" );
+	}
+	
+	return ret;
 }
 
 int dump_files_init( dump_t *dump ) {
@@ -935,9 +1095,14 @@ int dump_files_init( dump_t *dump ) {
 int dump_files_open( dump_t *dump, long inst, long scan ) {
 	int ret = 0;
 	space_t space = {0};
+	char *pof;
 	
+	pof = "dump object check";
 	if ( !dump )
-		return EDESTADDRREQ;
+	{
+		ret = EDESTADDRREQ;
+		goto errmsg;
+	}
 	
 	/* Cleanse structure of left over data data */
 	if ( dump_files_test( *dump ) == 0 )
@@ -945,82 +1110,84 @@ int dump_files_open( dump_t *dump, long inst, long scan ) {
 	else
 		(void)dump_files_init( dump );
 	
-	if ( (ret = dump_files__dir( &space, inst, 1 ))
-		!= 0 ) {
-		ERRMSG( ret, "Couldn't create needed directories" );
+	pof = "create any missing directories"; 
+	if ( (ret = dump_files__dir( &space, inst, 1 )) != 0 )
 		goto fail;
-	}
 
+	pof = "open info file";
 	if ( (ret =
 		dump_files__open_file(
-			&(dump->info), &space, inst, scan, ".info" )) != 0 )
-	{
-		ERRMSG( ret,
-			"Couldn't create/open %/gasp/scans/#/*.info file"
-		);
-		goto fail;
-	}
+			&(dump->info), &space, inst, scan, ".info" )) != 0
+	) goto fail;
 	
+	pof = "open used pointers file";
 	if ( (ret =
 		dump_files__open_file(
 			&(dump->used), &space, inst, scan, ".used" )) != 0
-	)
-	{
-		ERRMSG( ret,
-			"Couldn't create/open %/gasp/scans/#/*.used file"
-		);
-		dump_files__shut_file( &(dump->info) );
-		goto fail;
-	}
+	) goto fail;
 	
+	pof = "open data file";
 	if ( (ret =
 		dump_files__open_file(
 			&(dump->data), &space, inst, scan, ".data" )) != 0
-	)
+	) goto fail;
+	
+	if ( ret != 0 )
 	{
-		ERRMSG( ret,
-			"Couldn't create/open %/gasp/scans/#/*.data file"
-		);
+		fail:
 		dump_files__shut_file( &(dump->info) );
 		dump_files__shut_file( &(dump->used) );
-		goto fail;
+		dump_files__shut_file( &(dump->data) );
+		errmsg:
+		FAILED( ret, pof );
 	}
 	
-	fail:
 	free_space( &space );
 	return ret;
 }
 
 int dump_files_change_info( dump_t *dump ) {
 	int ret = 0;
+	char *pof;
 	ssize_t size;
 	nodes_t *nodes;
 	
-	if ( !dump ) {
+	pof = "dump object check";
+	if ( !dump )
+	{
 		ret = EDESTADDRREQ;
-		ERRMSG( ret, "Must have somewhere to read data into" );
-		return ret;
+		goto fail;
 	}
 		
-	if ( gasp_lseek( dump->info.fd, 0, SEEK_SET ) != 0 ) {
+	pof = "reset info offset";
+	if ( gasp_lseek( dump->info.fd, 0, SEEK_SET ) != 0 )
+	{
 		ret = errno;
-		ERRMSG( ret, "Couldn't reset dump info file offset" );
-		return ret;
+		goto fail;
 	}
 	
 	size = sizeof(node_t);
-	if ( gasp_write( dump->info.fd, &(dump->number), size ) != size ) {
+	pof = "write scan number";
+	errno = 0;
+	if ( gasp_write( dump->info.fd, &(dump->number), size ) != size )
+	{
 		ret = errno;
-		ERRMSG( ret, "Couldn't write scan number" );
-		return ret;
+		goto fail;
 	}
 	
-	size = sizeof(size_t);
 	nodes = dump->nodes;
-	if ( gasp_write( dump->info.fd, &(nodes->count), size ) != size ) {
+	pof = "write mappings count";
+	errno = 0;
+	if ( gasp_write( dump->info.fd, &(nodes->count), size ) != size )
+	{
 		ret = errno;
-		ERRMSG( ret, "Failed to write mappings count" );
-		return ret;
+		goto fail;
+	}
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
 	}
 	
 	return 0;
@@ -1029,57 +1196,58 @@ int dump_files_change_info( dump_t *dump ) {
 int dump_files_reset_offsets( dump_t *dump, bool read_info )
 {	
 	int ret = 0;
+	char *pof;
 	nodes_t *nodes;
 	space_t *space;
 	(void)read_info;
 	
-	if ( !dump ) {
+	pof = "dump object check";
+	if ( !dump )
+	{
 		ret = EDESTADDRREQ;
-		ERRMSG( ret, "Must have a handle to work with" );
-		return ret;
+		goto fail;
 	}
 	
-	REPORT( "Clearing bytes done" )
 	dump->done = 0;
-	REPORT( "Clearing base index of buffer to start reading as data" )
 	dump->base = 0;
-	REPORT( "Clearing address that base would map to in source data" )
 	dump->addr = 0;
-	REPORT( "Clearing bytes kept from end of previous buffer" )
 	dump->kept = 0;
-	REPORT( "Clearing size of data read into buffer base refers to" )
 	dump->size = 0;
-	REPORT( "Clearing scan number" )
 	dump->number = 0;
 	
-	REPORT( "Setting nodes pointer (for source memory info)" )
-	nodes = dump->nodes;
-	REPORT( "Setting space pointer (for smaller C code)" )
+	pof = "mappings list check";
+	if ( !(nodes = dump->nodes) )
+	{
+		ret = EINVAL;
+		goto fail;
+	}
+	
 	space = &(nodes->space);
 	
-	REPORTF( "Clearing used address buffer, %p", dump->used.data )
 	(void)memset( dump->used.data, 0, DUMP_LOC_NODE_SIZE );
-	REPORT( "Clearing data buffer" )
 	(void)memset( dump->data.data, 0, DUMP_LOC_NODE_SIZE );
-	REPORT( "Clearing source memory info buffer" )
 	(void)memset( space->block, 0, space->given );
 	
-	REPORT("Seeking to start of used addresses file")
+	pof = "seek to start of used address bit booleans";
 	if ( gasp_lseek( dump->used.fd, 0, SEEK_SET ) != 0 ) {
 		ret = errno;
-		ERRMSG( ret, "Couldn't reset used addresses offset" );
-		return ret;
+		goto fail;
 	}
 	
-	REPORT("Seeking to start of data file")
-	if ( gasp_lseek( dump->data.fd, 0, SEEK_SET ) != 0 ) {
+	pof = "seek to start of dumpped data";
+	if ( gasp_lseek( dump->data.fd, 0, SEEK_SET ) != 0 )
+	{
 		ret = errno;
-		ERRMSG( ret, "Couldn't reset data offset" );
-		return ret;
+		goto fail;
 	}
 	
-	REPORT("Done with reset")
-	return 0;
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
+	return ret;
 }
 
 void dump_files_shut( dump_t *dump ) {
@@ -1087,7 +1255,7 @@ void dump_files_shut( dump_t *dump ) {
 		return;
 	REPORT("Shutting info file")
 	dump_files__shut_file( &(dump->info) );
-	REPORT("Shutting used addresses file")
+	REPORT("Shutting used pointers file")
 	dump_files__shut_file( &(dump->used) );
 	REPORT("Shutting data file")
 	dump_files__shut_file( &(dump->data) );
@@ -1101,7 +1269,7 @@ int dump_files_test( dump_t dump ) {
 	return 0;
 }
 
-typedef uintmax_t (*func_proc_handle_rdwr_t)(
+typedef uintmax_t (*func_process_rdwr_t)(
 	int *err, process_t *process,
 		uintmax_t addr, void *buff, uintmax_t size
 );
@@ -1121,36 +1289,69 @@ bool gasp_tpolli( int int_pipes[2], int *sig, int msTimeout )
 
 bool gasp_tpollo( int ext_pipes[2], int sig, int msTimeout )
 {
+	int ret = 0;
+	char *pof;
 	struct pollfd pfd = {0};
+	
+	pof = "external pipes check";
 	if ( ext_pipes[1] <= 0 )
-		return 0;
+	{
+		ret = EINVAL;
+		goto fail;
+	}
+	
 	pfd.fd = ext_pipes[1];
 	pfd.events = POLLOUT;
 	if ( poll( &pfd, 1, msTimeout ) != 1 )
-		return 0;
-	write( ext_pipes[1], &sig, sizeof(int) );
+	{
+		ret = errno;
+		goto fail;
+	}
+	
+	if ( write( ext_pipes[1], &sig, sizeof(int) ) != sizeof(int) )
+	{
+		ret = errno;
+		goto fail;
+	}
+		
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
 	return 1;
 }
 
-bool gasp_thread_should_die( int ext_pipes[2], int int_pipes[2] )
+int gasp_thread_should_die( int ext_pipes[2], int int_pipes[2] )
 {
 	int ret = SIGCONT;
 	if ( !gasp_tpolli( int_pipes, &ret, 0 ) )
 		return 0;
 	if ( ret == SIGKILL )
-		return 1;
-	while ( ret == SIGSTOP ) {
+		return ECANCELED;
+	while ( ret == SIGSTOP )
+	{
 		if ( !gasp_tpollo( ext_pipes, SIGCONT, -1 ) )
-			return 1;
+			return ECANCELED;
 		if ( !gasp_tpolli( int_pipes, &ret, -1 ) )
-			return 1;
+			return ECANCELED;
 	}
-	return (ret == SIGKILL);
+	return (ret == SIGKILL) ? ECANCELED : 0;
 }
 
-node_t proc_handle_dump( tscan_t *tscan )
+void dump_files__puts( dump_t *dump )
+{
+	char *pfx = "dump->";
+	if ( !dump ) return;
+	EOUTF( "%sinfo.fd = %d, %sdata.fd = %d, %sused.fd = %d",
+		pfx, dump->info.fd, pfx, dump->data.fd, pfx, dump->used.fd );
+}
+
+node_t process_dump( tscan_t *tscan )
 {
 	int ret = 0;
+	char *pof;
 	nodes_t nodes = {0}, *mappings;
 	mapped_t *src, *SRC, *dst, *DST;
 	process_t *process;
@@ -1172,21 +1373,24 @@ node_t proc_handle_dump( tscan_t *tscan )
 	prot |= tscan->writeable ? 02 : 0;
 	process = tscan->process;
 	
+	pof = "process handle check";
 	if ( !process )
-		return EINVAL;
+	{
+		ret = EINVAL;
+		goto fail;
+	}
 	
+	pof = "dump file desciptor tests";
 	if ( (ret = dump_files_test( *dump )) != 0 )
-		goto done;
+		goto fail;
 	
 	if ( tscan->zero != 0 )
 		tscan->zero = ~0;
 	
 	/* No further need to change anything */
+	pof = "reset dump file offsets";
 	if ( (ret = dump_files_reset_offsets( dump, 0 )) != 0 )
-		goto done;
-	
-	if ( (ret = dump_files_change_info( dump )) != 0 )
-		goto done;
+		goto fail;
 	
 	/* Since this is a dump set all address booleans to true,
 	 * a later scan can simply override the values,
@@ -1197,20 +1401,20 @@ node_t proc_handle_dump( tscan_t *tscan )
 	if ( tscan->done_scans )
 		goto dump_data;
 	
-	if ( (ret = mapped_list( process, &nodes )) != 0
-		&& ret != EOF
-	) return ret;
+	pof = "mappings list";
+	if ( (ret = mapped_list( process, &nodes )) != 0 && ret != EOF )
+		goto fail;
 	
-	if ( (ret = more_nodes(
-			mapped_t, mappings, nodes.count )) != 0
-	) return ret;
+	pof = "allocation for mappings count";
+	if ( (ret = more_nodes( mapped_t, mappings, nodes.count )) != 0 )
+		goto fail;
 	
 	DST = mappings->space.block;
 	SRC = nodes.space.block;
 
 	mappings->focus = 0;
 	mappings->count = 0;
-
+	
 	for ( nodes.focus = 0; nodes.focus < nodes.count; nodes.focus++ )
 	{
 		src = SRC + nodes.focus;
@@ -1226,13 +1430,14 @@ node_t proc_handle_dump( tscan_t *tscan )
 		dst = DST + (dump->nodes->count);
 		
 		/* Add the mapping to the list */
-		memcpy( dst, src, sizeof(mapped_t) );
+		(void)memcpy( dst, src, sizeof(mapped_t) );
 		dump->nodes->count++;
 	}
 	
 	dump_data:
 	
 	SRC = DST;
+	REPORT( "Dumping mappings in range" )
 	for ( mappings->focus = 0;
 		mappings->focus < mappings->count; mappings->focus++
 	)
@@ -1248,13 +1453,10 @@ node_t proc_handle_dump( tscan_t *tscan )
 			i = src->size - bytes;
 			if ( i > DUMP_LOC_NODE_SIZE ) i = DUMP_LOC_NODE_SIZE;
 			
-			if ( gasp_thread_should_die(
-				tscan->main_pipes, tscan->scan_pipes )
-			)
-			{
-				ret = EXIT_FAILURE;
-				return ret;
-			}
+			pof = "die signal check";
+			if ( (ret = gasp_thread_should_die(
+				tscan->main_pipes, tscan->scan_pipes )) != 0
+			) goto fail;
 			
 			tscan->done_upto = src->head + bytes;
 			
@@ -1262,9 +1464,10 @@ node_t proc_handle_dump( tscan_t *tscan )
 			(void)memset( data, tscan->zero, i );
 			
 			if ( (ret = pglance_data(
-				process, src->head, data, i, &size )) <= 0
+				process, src->head, data, i, &size )) != 0
 			) break;
 			
+			pof = "write data";
 			errno = 0;
 			if ( gasp_write( dump->data.fd, data, size ) != size )
 			{
@@ -1290,6 +1493,13 @@ node_t proc_handle_dump( tscan_t *tscan )
 	
 	fsync( dump->info.fd );
 	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+		dump_files__puts( dump );
+	}
+	
 	/* Make sure we don't leak memory */
 	free_nodes( &nodes );
 	return ret;
@@ -1302,24 +1512,39 @@ enum {
 	PROC_MAPPED_PTR_COUNT
 };
 
-int dump_files__mappings( dump_t *dump, mapped_t **ptrs ) {
+int dump_files__mappings( dump_t *dump, mapped_t **ptrs )
+{
+	int ret = 0;
 	nodes_t *nodes;
 	mapped_t *vec, *now;
+	char *pof;
 	
+	pof = "mapping destination check";
 	if ( !ptrs )
-		return EINVAL;
+	{
+		ret = EDESTADDRREQ;
+		goto fail;
+	}
 	
 	(void)memset( ptrs, 0, PROC_MAPPED_PTR_COUNT * sizeof(void*) );
 	
+	pof = "dump pointer check";
 	if ( !dump )
-		return EINVAL;
+	{
+		ret = EINVAL;
+		goto fail;
+	}
 		
 	nodes = dump->nodes;
 	
 	vec = (mapped_t*)(nodes->space.block);
 	
+	pof = "mapping nodes pointer check";
 	if ( !vec )
-		return ENODATA;
+	{
+		ret = ENODATA;
+		goto fail;
+	}
 	
 	ptrs[PROC_MAPPED_PTR_VEC] = vec;
 	
@@ -1332,22 +1557,30 @@ int dump_files__mappings( dump_t *dump, mapped_t **ptrs ) {
 	ptrs[PROC_MAPPED_PTR_PRV] = (now != vec) ? now - 1 : NULL;
 	ptrs[PROC_MAPPED_PTR_NOW] = now;
 	
-	return 0;
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
+	return ret;
 }
 
 int dump_files_glance_stored( dump_t *dump, size_t keep )
 {
 	int ret = 0;
+	char *pof;
 	ssize_t expect = 0, size = 0;
 	uchar *data, *used;
 	mapped_t *pmap, *nmap, *ptrs[PROC_MAPPED_PTR_COUNT] = {NULL};
 	nodes_t *nodes;
 	
+	pof = "dump mappings list check";
 	if ( (ret = dump_files__mappings( dump, (mapped_t**)(&ptrs) )) != 0 )
 	{
 		if ( ret == EINVAL )
-			return EDESTADDRREQ;
-		return ret;
+			ret = EDESTADDRREQ;
+		goto fail;
 	}
 	
 	/* Initialise pointers */
@@ -1375,7 +1608,8 @@ int dump_files_glance_stored( dump_t *dump, size_t keep )
 	}
 	
 	expect = nmap->size - dump->done;
-	if ( expect > DUMP_LOC_NODE_HALF ) expect = DUMP_LOC_NODE_HALF;
+	if ( expect > DUMP_LOC_NODE_HALF )
+		expect = DUMP_LOC_NODE_HALF;
 	dump->base = DUMP_LOC_NODE_HALF;
 	dump->last = DUMP_LOC_NODE_HALF;
 	
@@ -1384,9 +1618,9 @@ int dump_files_glance_stored( dump_t *dump, size_t keep )
 	(void)memmove( data,
 		data + DUMP_LOC_NODE_HALF, DUMP_LOC_NODE_HALF );
 	
+	pof = "read used pointers file";
 	if ( (ret = dump_files__read_file(
-		&(dump->used), used + DUMP_LOC_NODE_HALF, expect, &size))
-		!= 0 || size != expect
+		&(dump->used), used + DUMP_LOC_NODE_HALF, expect, &size)) != 0
 	)
 	{
 		fprintf( stderr,
@@ -1394,12 +1628,12 @@ int dump_files_glance_stored( dump_t *dump, size_t keep )
 			"fd = %d, ptr = %p, size = %zd\n, expect = %zd",
 			nmap->head, nmap->foot, nmap->size, dump->done,
 			dump->used.fd, used + DUMP_LOC_NODE_HALF, size, expect );
-		goto failure;
+		goto fail;
 	}
 	
+	pof = "read data file";
 	if ( (ret = dump_files__read_file(
-		&(dump->data), data + DUMP_LOC_NODE_HALF, expect, &size))
-		!= 0 || size != expect
+		&(dump->data), data + DUMP_LOC_NODE_HALF, expect, &size)) != 0
 	)
 	{
 		fprintf( stderr,
@@ -1407,7 +1641,7 @@ int dump_files_glance_stored( dump_t *dump, size_t keep )
 			"fd = %d, ptr = %p, size = %zd\n, expect = %zd",
 			nmap->head, nmap->foot, nmap->size, dump->done,
 			dump->data.fd, data + DUMP_LOC_NODE_HALF, size, expect );
-		goto failure;
+		goto fail;
 	}
 	
 	dump->tail = DUMP_LOC_NODE_SIZE - size;
@@ -1419,10 +1653,10 @@ int dump_files_glance_stored( dump_t *dump, size_t keep )
 	
 	if ( dump->done || dump->addr == pmap->foot )
 	{
+		pof = "keep bytes check";
 		if ( keep >= DUMP_LOC_NODE_HALF ) {
 			ret = ERANGE;
-			ERRMSG( ret, "Number of bytes to keep was too large" );
-			goto failure;
+			goto fail;
 		}
 		
 		dump->addr -= keep;
@@ -1431,11 +1665,14 @@ int dump_files_glance_stored( dump_t *dump, size_t keep )
 	}
 	dump->done += size;
 	
-	return 0;
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+		if ( ret == ENOMEM )
+			fprintf( stderr, "Requested 0x%08jX bytes\n", size );
+	}
 	
-	failure:
-	if ( ret == ENOMEM )
-		fprintf( stderr, "Requested 0x%08jX bytes\n", size );
 	return ret;
 }
 
@@ -1457,7 +1694,7 @@ bool dump_files_change_stored( dump_t *dump )
 	return 1;
 }
 
-int proc_handle__aobscan_next( tscan_t *tscan, dump_t *dump )
+int process__aobscan_next( tscan_t *tscan, dump_t *dump )
 {
 	if ( !tscan )
 		return EDESTADDRREQ;
@@ -1467,7 +1704,7 @@ int proc_handle__aobscan_next( tscan_t *tscan, dump_t *dump )
 	return dump_files_glance_stored( dump, tscan->bytes - 1 );
 }
 
-int proc_handle__aobscan_test( tscan_t *tscan )
+int process__aobscan_test( tscan_t *tscan )
 {
 	uchar *used, *data;
 	uintmax_t addr, a, *ptrs;
@@ -1508,18 +1745,20 @@ int proc_handle__aobscan_test( tscan_t *tscan )
 	return dump_files_change_stored( dump );
 }
 
-int proc_handle_aobscan( tscan_t *tscan ) {
+int process_aobscan( tscan_t *tscan ) {
 	int ret = 0;
 	uintmax_t minus;
 	mode_t prot = 04;
 	bool have_prev_results = 0;
 	dump_t *dump, *prev;
 	ssize_t done;
+	char *pof;
 	
-	if ( !tscan ) {
+	pof = "thread object check";
+	if ( !tscan )
+	{
 		ret = EDESTADDRREQ;
-		ERRMSG( ret, "bytescanner was given NULL" );
-		return ret;
+		goto fail;
 	}
 	
 	minus = tscan->bytes - 1;
@@ -1528,29 +1767,26 @@ int proc_handle_aobscan( tscan_t *tscan ) {
 	prev = tscan->dump;
 	dump = prev + 1;
 	
-	if ( minus > tscan->bytes || tscan->bytes >= DUMP_LOC_NODE_HALF ) {
+	pof = "limit for bytes check";
+	if ( minus > tscan->bytes || tscan->bytes >= DUMP_LOC_NODE_HALF )
+	{
 		ret = EINVAL;
-		ERRMSG( ret, "Too many bytes!" );
 		goto set_found;
 	}
 
-	if ( (ret = dump_files_test( *dump )) != 0 ) {
-		ERRMSG( ret, "Invalid dump to scan" );
+	pof = "dump files check";
+	if ( (ret = dump_files_test( *dump )) != 0 )
 		goto set_found;
-	}
 
 	prot |= tscan->writeable ? 02 : 0;
 	
-	if ( (ret =
-		proc__rwvmem_test( tscan->process, tscan->array, tscan->bytes, &done ))
-		!= 0
-	)
-	{
-		fprintf( stderr, "Failed at proc__rwvmen_test()\n" );
-		goto set_found;
-	}
+	pof = "rwvmem check";
+	if ( (ret = proc__rwvmem_test(
+		tscan->process, tscan->array, tscan->bytes, &done )) != 0
+	) goto set_found;
 	
-	if ( (ret = dump_files_reset_offsets( dump, 1 )) != 0 
+	pof = "reset dump file offsets";
+	if ( (ret = dump_files_reset_offsets( dump, 1 )) != 0 )
 	{
 		fprintf( stderr, "Failed at dump_files_reset_offsets()\n" );
 		goto set_found;
@@ -1558,11 +1794,9 @@ int proc_handle_aobscan( tscan_t *tscan ) {
 	
 	if ( dump_files_test( *prev ) == 0 ) {
 		
+		pof = "reset previous dump file offsets";
 		if ( (ret = dump_files_reset_offsets( prev, 1 )) != 0 )
-		{
-			fprintf( stderr, "Failed at 2nd dump_files_reset_offsets()\n" );
 			goto set_found;
-		}
 		
 		have_prev_results = 1;
 	}
@@ -1570,43 +1804,35 @@ int proc_handle_aobscan( tscan_t *tscan ) {
 	/* Make sure we start at the first recorded mapping */
 	dump->nodes->focus = 0;
 
-#if VERBOSE
-	fprintf( stderr, "Started scan at %p\n", (void*)(dump->addr) );
-#endif
+	REPORTF( "Started scan at %p", (void*)(dump->addr) )
 
-	while ( (ret = proc_handle__aobscan_next( tscan, dump )) == 0 )
+	while ( (ret = process__aobscan_next( tscan, dump )) == 0 )
 	{
-#if VERBOSE
-		fprintf( stderr, "%p-%p\n",
-			(void*)(dump->addr), (void*)(dump->addr + dump->size) );
-#endif
+		REPORTF( "%p-%p",
+			(void*)(dump->addr), (void*)(dump->addr + dump->size) )
 		
 		if ( have_prev_results ) {
-			/* Ensure we check only addresses that have been marked
+			/* Ensure we check only pointers that have been marked
 			 * as a result previously */
+			pof = "read previous dump file";
 			if (
 				(ret = dump_files_glance_stored(
 					prev, tscan->bytes - 1 )) != 0
-			)
-			{
-				ERRMSG( ret, "Couldn't glance at previous results" );
-				goto set_found;
-			}
+			) goto set_found;
+			
 			(void)memcpy(
 				dump->used.data, prev->used.data, DUMP_LOC_NODE_SIZE );
 		}
 		else {
-			/* Ensure we check all addresses */
+			/* Ensure we check all pointers */
 			(void)memset( dump->used.data, ~0, DUMP_LOC_NODE_SIZE );
 		}
 		
-		if ( !proc_handle__aobscan_test( tscan ) )
+		if ( !process__aobscan_test( tscan ) )
 			goto set_found;
 	}
 	
-#if VERBOSE
-	fprintf( stderr, "Ended scan at %p\n", (void*)(dump->addr) );
-#endif
+	REPORTF( "Ended scan at %p", (void*)(dump->addr) )
 	
 	tscan->done_upto = tscan->upto;
 	
@@ -1614,61 +1840,65 @@ int proc_handle_aobscan( tscan_t *tscan ) {
 	tscan->last_found = tscan->found;
 	tscan->done_scans++;
 	
-	switch ( ret ) {
-	case 0: case EOF: case ECANCELED:
-		ret = 0;
-		break;
-	default:
-		ERRMSG( ret, "Byte scan failed to run fully" );
+	pof = "result check";
+	switch ( ret ) { case EOF: case ECANCELED: ret = 0; }
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
 	}
 	
 	return ret;
 }
 
-void* proc_handle_dumper( void * _tscan ) {
+void* process_dumper( void * _tscan ) {
 	int ret = 0;
 	tscan_t *tscan = _tscan;
+	char *pof;
 	
+	pof = "thread object check";
 	if ( !tscan )
-		return NULL;
+	{
+		ret = EDESTADDRREQ;
+		goto fail;
+	}
 		
 	tscan->threadmade = 1;
 	tscan->found = 0;
 	
-#if VERBOSE
-	fprintf( stderr, "Starting dump" );
-#endif
+	REPORT( "Starting dump" )
 
 	tscan->dumping = 1;
-	ret = proc_handle_dump( tscan );
+	ret = process_dump( tscan );
 	tscan->dumping = 0;
 	
-	if ( ret != 0 ) {
-		ERRMSG( ret, "Unable to complete dump, aborting..." );
+	pof = "dump result check";
+	if ( ret != 0 )
 		goto fail;
-	}
 
 #if VERBOSE
 	fprintf( stderr, "Starting scan" );
 #endif
 	
 	tscan->scanning = 1;
-	ret = proc_handle_aobscan( tscan );
+	ret = process_aobscan( tscan );
 	tscan->scanning = 0;
 	
-	if ( ret != 0 ) {
-		ERRMSG( ret, "Unable to complete scan, aborting..." );
+	pof = "scan result check";
+	if ( ret != 0 )
 		goto fail;
-	}
 
-#if VERBOSE
-	fprintf( stderr, "Finished" );
-#endif
+	REPORT( "Finished" )
 	
-	fail:
 	gasp_tpollo( tscan->main_pipes, SIGCONT, -1 );
 	tscan->threadmade = 0;
 	tscan->ret = ret;
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
 	return _tscan;
 }
 
@@ -1723,14 +1953,14 @@ int process_find(
 	node_t i = 0;
 	pglance_t glance = {0};
 	process_t *process, *processes, *ent;
-	char *text;
+	char *text, *pof;
 	char const * (*instr)( char const *src, char const *txt )
 		= usecase ? substr : substri;
 	
+	pof = "nodes pointer check";
 	if ( !nodes ) {
 		ret = EDESTADDRREQ;
-		ERRMSG( ret, "nowhere to place noticed processes" );
-		return ret;
+		goto fail;
 	}
 	
 	(void)memset( nodes, 0, sizeof(nodes_t) );
@@ -1775,7 +2005,14 @@ int process_find(
 	pglance_term( &glance );
 	if ( nodes->count > 0 )
 		return 0;
-	if ( ret == 0 ) ret = ENOENT;
+	if ( ret == 0 )
+		ret = ENOENT;
+	if ( ret != ENONET )
+	{
+		pof = "Final process in glance check";
+		fail:
+		FAILED( ret, pof );
+	}
 	return ret;
 }
 
@@ -1799,8 +2036,8 @@ void process_term( process_t *process ) {
 	if ( process->thread.active )
 		process->thread.active = 0;
 	
-	proc_handle_free( process );
-	proc_handle_cont( process );
+	process_free( process );
+	process_cont( process );
 	
 	(void)change_kvpair( &(process->kvpair), 0, 0, 0, 0 );
 	free_nodes( &(process->name) );
@@ -1831,19 +2068,21 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 	char path[bitsof(int) * 2] = {0};
 	text_t *name, *cmdl;
 	space_t *full;
-	char *k, *v, *n;
+	char *k, *v, *n, *pof;
 	intmax_t size;
 	
+	pof = "process pointer check";
 	if ( !process )
 	{
 		ret = EDESTADDRREQ;
-		return ret;
+		goto fail;
 	}
 	
+	pof = "handle activity check";
 	if ( process->hooked || process->thread.active )
 	{
 		ret = EBUSY;
-		return ret;
+		goto fail;
 	}
 	
 	/* Set pointers */
@@ -1876,6 +2115,7 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 		(void)memset( full->block, 0, full->given );
 	
 	/* Prevent attempts to read system process */
+	pof = "pid check";
 	if ( pid < 1 )
 	{
 		ret = EDESTADDRREQ;
@@ -1884,18 +2124,24 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 	
 	sprintf( path, "%s/cmdline", process->path );
 	
+	pof = "sizeof /proc/<PID>/cmdline";
 	if ( (ret = file_glance_size( path, &size )) != 0 )
-		return ret;
+		goto fail;
 	
+	pof = "/proc/<PID>/cmdline destination allocation";
 	if ( (ret = more_nodes( char, cmdl, size )) != 0 )
 		goto fail;
 	
+	pof = "open /proc/<PID>/cmdline";
+	errno = 0;
 	if ( (fd = open(path,O_RDONLY)) < 0 )
 	{
 		ret = errno;
 		goto fail;
 	}
 	
+	pof = "read /proc/<PID>/cmdline";
+	errno = 0;
 	if ( gasp_read( fd, cmdl->space.block, cmdl->space.given ) < size )
 	{
 		ret = errno;
@@ -1908,18 +2154,24 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 	
 	sprintf( path, "%s/status", process->path );
 	
+	pof = "sizeof /proc/<PID>/status";
 	if ( (ret = file_glance_size( path, &size )) != 0 )
 		goto fail;
 	
+	pof = "/proc/<PID>/status destination allocation";
 	if ( (ret = more_space( full, size * 2 )) != 0 )
 		goto fail;
 	
+	pof = "open /proc/<PID>/status";
+	errno = 0;
 	if ( (fd = open(path,O_RDONLY)) < 0 )
 	{
 		ret = errno;
 		goto fail;
 	}
 	
+	pof = "read /proc/<PID>/status";
+	errno = 0;
 	if ( gasp_read( fd, full->block, full->given ) <= 0 )
 	{
 		ret = errno;
@@ -1931,12 +2183,9 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 	fd = -1;
 	
 	/* Ensure we have enough space for the name */
+	pof = "name allocation";
 	if ( (ret = more_nodes( char, name, full->given )) != 0 )
-	{
-		ERRMSG( ret, "Couldn't allocate memory for name");
-		process_data_state_puts(process);
-		return ret;
-	}
+		goto fail;
 	
 	k = full->block;
 	while ( size > 0 )
@@ -1966,25 +2215,33 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 		k = ++n;
 	}
 	
+	pof = "name pointer and ppid check";
 	if ( !(*((char*)(name->space.block))) || process->parent < 0 )
 		goto fail;
 	
 	if ( hook )
 	{
 		process->flags = flags;
+		pof = "wait4exit thread creation";
+		errno = 0;
 		if ( pthread_create( &(process->thread.thread), NULL,
 			process__wait4exit, process ) != 0
-		) ret = errno;
+		)
+		{
+			ret = errno;
+			goto fail;
+		}
 	}
 
-	fail:
-	if ( fd > -1 )
-		close(fd);
 	if ( ret != 0 )
 	{
-		ERRMSG( ret, "Couldn't locate process" );
+		fail:
+		FAILED( ret, pof );
 		process_data_state_puts(process);
 	}
+	
+	if ( fd > -1 )
+		close(fd);
 	return ret;
 }
 
@@ -2032,18 +2289,23 @@ int	pglance_init( pglance_t *glance, int underId )
 	DIR *dir;
 	struct dirent *ent;
 	node_t i = 0;
-	char *name;
+	char *name, *pof;
 	
-	if ( !glance ) {
+	pof = "glance pointer check";
+	if ( !glance )
+	{
 		ret = EDESTADDRREQ;
-		ERRMSG( ret, "glance was NULL" );
-		return ret;
+		goto fail;
 	}
 	
 	(void)memset( glance, 0, sizeof(pglance_t) );
 	
+	pof = "glance pid buffer allocation";
 	glance->underId = underId;
-	if ( (ret = more_nodes( int, &(glance->nodes), 2000 )) == 0 ) {
+	if ( (ret = more_nodes( int, &(glance->nodes), 2000 )) == 0 )
+	{
+		pof = "open directory";
+		errno = 0;
 		if ( (dir = opendir("/proc")) ) {
 			while ( (ent = readdir( dir )) ) {
 				for ( name = ent->d_name;; ++name ) {
@@ -2062,14 +2324,18 @@ int	pglance_init( pglance_t *glance, int underId )
 					((int*)(glance->nodes.space.block)) + i
 				);
 			}
-			
 			closedir(dir);
+			
+			pof = "pid count check";
 			if ( glance->nodes.count )
 				return process_next( glance );
+			ret = EPERM;
 		}
+		else ret = errno;
 	}
 	
-	ERRMSG( ret, "" );
+	fail:
+	FAILED( ret, pof );
 	return ret;
 }
 
@@ -2078,51 +2344,58 @@ int pglance_data(
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
 {
-	int ret;
+	int ret = 0;
+	char *pof;
 	
+	pof = "rwvmem check";
 	if ( (ret = proc__rwvmem_test( process, mem, size, done )) != 0 )
-		return ret;
+		goto fail;
 	
-	if ( (ret = proc_handle_stop(process)) != 0 )
-		return ret;
+	pof = "stop target process";
+	if ( (ret = process_stop(process)) != 0 )
+		goto fail;
 	
+	pof = "grab process handle";
 	if ( (ret = process_grab(process)) != 0 ) 
-		return ret;
+		goto fail;
 	
-	/* Aviod fiddling with own memory file */
+	pof = "glance via memmove";
 	if ( (ret =
 		proc__glance_self( process, addr, mem, size, done )) == 0
-	) goto success;
+	) goto done;
 #if 1
-	//fputs( "Next: pread()\n", stderr );
-	/* gasp_pread() */
+	pof = "glance via file (pread)";
 	if ( (ret =
 		proc__glance_file( process, addr, mem, size, done )) == 0
-	) goto success;
+	) goto done;
 #endif
 #if 1
-	//fputs( "Next: read()\n", stderr );
-	/* gasp_lseek() & gasp_read() */
+	pof = "glance via file (lseek, read)";
 	if ( (ret =
 		proc__glance_seek( process, addr, mem, size, done )) == 0
-	) goto success;
+	) goto done;
 #endif
 #if 0
-	//fputs( "Next: process_vm_readv()\n", stderr );
-	/* Last ditch effort to avoid ptrace */
+	pof = "glance via process_vm_readv";
 	if ( (ret =
 		proc__glance_vmem( process, addr, mem, size, done )) == 0
-	) goto success;
+	) goto done;
 #endif
-	/* PTRACE_PEEKDATA */
+	pof = "glance via ptrace";
 	if ( (ret =
 		proc__glance_peek( process, addr, mem, size, done )) == 0
-	) goto success;
+	) goto done;
 	
 	/* Detatch and ensure continued activity */
-	success:
-	ret = proc_handle_free(process);
-	return proc_handle_cont(process);
+	done:
+	ret = process_free(process);
+	ret = process_cont(process);
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	return ret;
 }
 
 int proc_change_data(
@@ -2135,7 +2408,7 @@ int proc_change_data(
 	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
 		return ret;
 	
-	if ( (ret = proc_handle_stop(process)) != 0 )
+	if ( (ret = process_stop(process)) != 0 )
 		return ret;
 
 	if ( (ret = process_grab(process)) != 0 )
@@ -2163,6 +2436,6 @@ int proc_change_data(
 	) goto success;
 	
 	success:
-	ret = proc_handle_free(process);
-	return proc_handle_cont(process);
+	ret = process_free(process);
+	return process_cont(process);
 }

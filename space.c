@@ -1,25 +1,26 @@
 #include "gasp.h"
 int change_space( space_t *space, size_t want, int dir ) {
 	int ret = 0;
+	char *pof;
 	uchar *block;
 	/* Known variables, size, prev_size, old_top, top */
 	size_t padding = (sizeof(size_t) * 2) + (sizeof(void*) * 2);
+	pof = "destination pointer check";
 	if ( !space ) {
 		if ( !want )
 			return 0;
 		ret = EDESTADDRREQ;
-		ERRMSG( ret, "Need somewhere to place allocated memory" );
-		return ret;
+		goto fail;
 	}
 	
 	if ( want == space->given )
 		return 0;
 	
 	/* Shrink */
+	pof = "should shrink check";
 	if ( dir < 0 && want > space->given ) {
 		ret = ERANGE;
-		ERRMSG( ret, "Tried to grow shrink-only memory" );
-		return ret;
+		goto fail;
 	}
 	
 	/* Expand */
@@ -46,6 +47,7 @@ int change_space( space_t *space, size_t want, int dir ) {
 	{
 		space->block = NULL;
 		space->given = 0;
+		pof = "malloc";
 		errno = 0;
 		if ( !(block = malloc( want )) )
 		{
@@ -55,10 +57,13 @@ int change_space( space_t *space, size_t want, int dir ) {
 		goto done;
 	}
 	
+	pof = "realloc";
 	errno = 0;
 	if ( !(block = realloc( (space->block), want + padding )) ) {
 		ret = errno;
-		return ret ? ret : ENOMEM;
+		if ( ret == 0 )
+			ret = ENOMEM;
+		goto fail;
 	}
 	
 	done:
@@ -73,6 +78,12 @@ int change_space( space_t *space, size_t want, int dir ) {
 	
 	/* Now it is safe to overwrite size */
 	space->given = want;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
 	
 	return 0;
 }

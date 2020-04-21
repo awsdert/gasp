@@ -33,6 +33,11 @@
 #define COUTF( F, ... ) fprintf( stdout, "%s:%u:" F "\n", __FILE__, __LINE__, __VA_ARGS__ )
 #define EOUT( TXT ) fprintf( stderr, "%s:%u:" TXT "\n", __FILE__, __LINE__ )
 #define EOUTF( F, ... ) fprintf( stderr, "%s:%u:" F "\n", __FILE__, __LINE__, __VA_ARGS__ )
+#define FAILED( RET, POF ) \
+	EOUTF( "Error %d (0x%X), %s = '%s', %s = '%s'", \
+		RET, RET, \
+		"Point of Failure", POF, \
+		"System Message", strerror(RET) )
 
 #if VERBOSE
 #define REPORT(MSG) EOUT( " Info: " #MSG );
@@ -42,10 +47,6 @@
 #define REPORTF(MSG,...)
 #endif
 
-#define ERRMSG( ERR, MSG ) \
-	fprintf( stderr, "%s:%d:%s() 0x%08X"\
-	"\nExternal Msg '%s'\nInternal Msg '%s'\n"\
-	, __FILE__, __LINE__, __func__, ERR, strerror(ERR), MSG )
 #if TOVAL(HAVE_8_BYTE_INT)
 #define gasp_off_t off64_t
 #define gasp_lseek lseek64
@@ -292,7 +293,7 @@ typedef struct tscan {
 	uintmax_t done_upto;
 } tscan_t;
 
-void *proc_handle_dumper( void *_tscan );
+void *process_dumper( void *_tscan );
 
 /** @brief Thread to scan for bytes in
  * @param _tscan expects to hold a tscan_t object
@@ -317,7 +318,7 @@ void process_init( process_t *process );
  * @param flags Currently unsupported, ignore until this text changes
  * @note Although we can load information in notice it is possible for
  * a process to die before we try to open it's memory thus we keep that
- * attempt to the proc_handle_open() function, even thereafter it is
+ * attempt to the process_open() function, even thereafter it is
  * possible for the captured process to die in while the handle is open
  * but as long as it is open then failures will not be critical but
  * rather an indication that the handle is no longer useful
@@ -383,10 +384,10 @@ int dump_files_glance_stored( dump_t *dump, size_t keep );
 /** @brief Deallocates any memory before deallocating the handle itself
  * @param handle The process handle to deallocate
 **/
-node_t proc_handle_dump( tscan_t *tscan );
+node_t process_dump( tscan_t *tscan );
 /** @brief Reads what was in memory at the time of the read/pread call
  * @param err Where to pass errors to
- * @param handle Handle opened with proc_handle_open()
+ * @param handle Handle opened with process_open()
  * @param addr Where to read from
  * @param dst Where to read into
  * @param size Number of bytes to read into dst
@@ -397,7 +398,7 @@ int pglance_data(
 	uintmax_t addr, void *dst, ssize_t size, ssize_t *done );
 /** @brief Writes what was in memory at the time of the write/pwrite call
  * @param err Where to pass errors to
- * @param handle Handle opened with proc_handle_open()
+ * @param handle Handle opened with process_open()
  * @param addr Where to write from
  * @param src Array of bytes to write out
  * @param size Number of bytes to write from src
@@ -410,8 +411,8 @@ int proc_change_data(
 extern bool g_reboot_gui;
 void lua_create_gasp(lua_State *L);
 void lua_create_proc_classes( lua_State *L );
-void* lua_extract_bytes(
-	int *err, lua_State *L, int index, nodes_t *dst );
+int lua_extract_bytes(
+	lua_State *L, int index, nodes_t *dst, uchar **pointer );
 int lua_process_find( lua_State *L );
 int lua_pglance_grab( lua_State *L );
 int lua_process_grab( lua_State *L );

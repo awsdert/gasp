@@ -176,7 +176,7 @@ void lua_proc_create_glance_class( lua_State *L ) {
 	lua_setglobal(L, PROC_GLANCE_CLASS );
 }
 
-#define PROC_HANDLE_CLASS "class_proc_handle"
+#define PROC_HANDLE_CLASS "class_process"
 
 typedef struct lua_process {
 	nodes_t bytes;
@@ -294,47 +294,47 @@ void lua_process_shutfiles( lua_process_t *lua_process )
 int lua_process_undo( lua_process_t *lua_process, node_t scan )
 {
 	char const *GASP_PATH = getenv("GASP_PATH");
-	char *path;
+	char *path, *pof;
 	int ret = 0;
 	node_t i;
 	space_t path_space = {0}, space = {0};
 	dump_t *dump;
 	tscan_t *tscan;
 	
+	pof = "lua process object check";
 	if ( !lua_process )
-		return EINVAL;
+	{
+		ret = EINVAL;
+		goto fail;
+	}
 	
-	REPORT("Setting pointers for quick C code")
 	tscan = &(lua_process->tscan);
 	dump = tscan->dump + 1;
 	
-	REPORT("Shutting previous dump files if they're open")
 	dump_files_shut( tscan->dump );
 	
-	REPORT("Checking if using latest scan")
-	if ( scan == tscan->done_scans ) {
-		REPORT("Moving dump file info to previous dump file info object")
+	if ( scan == tscan->done_scans )
+	{
 		(void)memmove( tscan->dump, dump, sizeof(dump_t) );
-		REPORT("Clearing current dump file info object ready for new info")
 		return dump_files_init(dump);
 	}
 
-	REPORT("Shutting current dump file info")
 	dump_files_shut( dump );
 	
+	pof = "alloc path memory";
 	if ( (ret = more_space(
 		&path_space, strlen( GASP_PATH ) + UCHAR_MAX)) != 0
-	)
-	{
-		ERRMSG( ret, "Couldn't allocate memory for scan path" );
-		return ret;
-	}
+	) goto fail;
 	path = path_space.block;
 	
 	if ( !scan ) {
 		sprintf( path, "rm -r \"%s/scans/%lu\"",
 				GASP_PATH, (ulong)(tscan->id) );
-		if ( gasp_isdir( path, 0 ) == 0 ) {
+			
+		pof = "path is directory check";
+		if ( gasp_isdir( path, 0 ) == 0 )
+		{
+			ret = errno;
 			fprintf( stderr, "%s\n", path );
 			system( path );
 		}
@@ -352,6 +352,13 @@ int lua_process_undo( lua_process_t *lua_process, node_t scan )
 	
 	done:
 	tscan->done_scans = scan;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
 	free_space( &space );
 	return ret;
 }
@@ -402,36 +409,51 @@ int lua_process_glance_data( lua_State *L ) {
 	uintmax_t addr = luaL_checkinteger(L,2);
 	ssize_t i, size = luaL_checkinteger(L,3);
 	uchar * array;
-	int ret;
+	int ret = 0;
+	char *pof;
 	
-	if ( lua_process__valid( lua_process ) == 0 || size < 1 ) {
+	pof = "process check";
+	if ( (ret = lua_process__valid( lua_process )) != 0 || size < 1 )
+	{
 		lua_newtable(L);
-		return 1;
+		goto fail;
 	}
+	
 	array = calloc( size, 1 );
 	if ( !array ) {
-		ERRMSG( errno, "Couldn't allocate memory" );
 		lua_newtable(L);
-		return 1;
+		goto fail;
 	}
-	lua_process__set_rdwr(lua_process,1);
-	ret = pglance_data(
-		&(lua_process->process), addr, array, size, &size );
+	
+	if ( lua_process__set_rdwr(lua_process,1) )
+		ret = pglance_data(
+			&(lua_process->process), addr, array, size, &size );
 	lua_process__set_rdwr(lua_process,0);
-	if ( ret != 0 || size < 1 )
+	
+	if ( ret != 0 )
 	{
-		free(array);
 		lua_newtable(L);
-		return 1;
+		goto done;
 	}
+	
+	if ( size < 0 ) size = 0;
 	lua_createtable( L, size, 0 );
-	for ( i = 0; i < size; ++i ) {
+	for ( i = 0; i < size; ++i )
+	{
 		lua_pushinteger(L,i+1);
 		lua_pushinteger(L,array[i]);
 		lua_settable(L,-3);
 	}
+	
+	done:
 	free(array);
-	return 1;
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	lua_pushinteger( L, ret );
+	return 2;
 }
 int lua_process_change_data( lua_State *L ) {
 	lua_process_t *lua_process = (lua_process_t*)
@@ -439,27 +461,33 @@ int lua_process_change_data( lua_State *L ) {
 	uintmax_t addr = luaL_checkinteger(L,2);
 	uchar * array = NULL;
 	nodes_t *nodes;
-	ssize_t size;
-	int ret;
+	ssize_t size = 0;
+	int ret = 0;
+	char *pof;
 	
-	if ( lua_process__valid( lua_process ) == 0 ) {
-		lua_pushinteger(L,0);
-		return 1;
-	}
+	pof = "process check";
+	if ( (ret = lua_process__valid( lua_process )) != 0 )
+		goto fail;
 	nodes = &(lua_process->bytes);
 	
-	if ( !(array = lua_extract_bytes( NULL, L, 5, nodes)) ) {
-		lua_pushinteger(L,0);
-		return 1;
-	}
+	pof = "bytes extraction";
+	if ( (ret = lua_extract_bytes( L, 5, nodes, &array )) != 0 )
+		goto fail;
 	
+	pof = "data change";
 	//lua_process__set_rdwr(lua_process,1);
 	ret = proc_change_data(
 		&(lua_process->process), addr, array, nodes->count, &size );
 	//lua_process__set_rdwr(lua_process,0);
 
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
 	lua_pushinteger(L,(ret == 0 && size > 0) ? size : 0);
-	return 1;
+	lua_pushinteger(L,ret);
+	return 2;
 }
 
 int lua_process_done_scans( lua_State *L ) {
@@ -506,12 +534,17 @@ int lua_process_get_scan_list( lua_State *L ) {
 		L, (lua_process_t*)luaL_checkudata(L,1,PROC_HANDLE_CLASS) );
 }
 
-int lua_process__create_pipes( lua_process_t *lua_process ) {
+int lua_process__create_pipes( lua_process_t *lua_process )
+{
+	int ret = 0;
+	char *pof;
 	tscan_t *tscan;
 	
-	if ( !lua_process ) {
-		ERRMSG( EDESTADDRREQ, "Was not provided a handle" );
-		return EDESTADDRREQ;
+	pof = "process handle check";
+	if ( !lua_process )
+	{
+		ret = EDESTADDRREQ;
+		goto fail;
 	}
 	
 	tscan = &(lua_process->tscan);
@@ -519,23 +552,37 @@ int lua_process__create_pipes( lua_process_t *lua_process ) {
 	if ( tscan->pipesmade )
 		return 0;
 	
-	if ( tscan->main_pipes[0] <= 0 ) {	
-		if ( pipe2( tscan->main_pipes, 0 ) == -1 ) {
-			ERRMSG( errno, "Couldn't open main thread pipes" );
-			return errno;
+	if ( tscan->main_pipes[0] <= 0 )
+	{
+		pof = "main pipes creation";
+		errno = 0;
+		if ( pipe2( tscan->main_pipes, 0 ) == -1 )
+		{
+			ret = errno;
+			goto fail;
 		}
 	}
 	
-	if ( tscan->scan_pipes[0] <= 0 ) {
-		if ( pipe2( tscan->scan_pipes, 0 ) == -1 ) {
-			gasp_close_pipes( tscan->main_pipes );
-			ERRMSG( errno, "Couldn't open scan thread pipes" );
-			return errno;
+	if ( tscan->scan_pipes[0] <= 0 )
+	{
+		pof = "scan pipes creation";
+		errno = 0;
+		if ( pipe2( tscan->scan_pipes, 0 ) == -1 )
+		{
+			ret = errno;
+			goto fail;
 		}
 	}
 	
 	tscan->pipesmade = 1;
-	return 0;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
+	return ret;
 }
 
 int lua_process__can_scan(
@@ -543,33 +590,44 @@ int lua_process__can_scan(
 )
 {
 	int ret = 0;
+	char *pof;
 	tscan_t *tscan;
 	
+	pof = "process handle check";
 	if ( !lua_process )
-		return EDESTADDRREQ;
+	{
+		ret = EDESTADDRREQ;
+		goto fail;
+	}
 	
 	tscan = &(lua_process->tscan);
 	
 #ifdef _WIN32
-	REPORT( "Checking WIN32 Process handle" )
+	pof = "WIN32 process handle check";
 	if ( !(lua_process->process.handle) )
 	{
 		ret = EINVAL;
-		ERRMSG( ret, "No process handle provided" );
-		return ret;
+		goto fail;
 	}
 #endif
 
-	REPORT("Checking if scan thread is running")
+	pof = "thread check";
 	if ( tscan->threadmade )
 	{
 		ret = EBUSY;
-		ERRMSG( ret, "Scan thread currently busy" );
-		return ret;
+		goto fail;
 	}
 	
-	REPORT("Creating pipes")
-	return lua_process__create_pipes( lua_process );
+	pof = "pipe creation";
+	if ( (ret = lua_process__create_pipes( lua_process )) != 0 )
+		goto fail;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	return ret;
 }
 
 int lua_process_killscan( lua_State *L ) {
@@ -600,7 +658,7 @@ int lua_process_percentage( lua_State *L ) {
 	return 6;
 }
 
-bool lua_process_prep_scan(
+int lua_process_prep_scan(
 	lua_process_t *lua_process,
 	node_t scan,
 	node_t last_found,
@@ -616,27 +674,23 @@ bool lua_process_prep_scan(
 	nodes_t *nodes;
 	dump_t *dump;
 	space_t space = {0};
+	char *pof;
 	
-	REPORT("Checking if can scan")
-	if ( lua_process__can_scan( lua_process ) != 0 )
-		return 0;
+	pof = "can scan check";
+	if ( (ret = lua_process__can_scan( lua_process )) != 0 )
+		goto fail;
 	
-	REPORT("Setting pointers to various objects needed for scanning");
 	tscan = &(lua_process->tscan);
 	nodes = &(tscan->locations);
 	dump = tscan->dump + 1;
 	tscan->dump->nodes = dump->nodes = &(tscan->mappings);
 	
-	REPORT("Requesting memory for address list")
+	pof = "address list allocation";
 	if ( (ret = more_nodes( uintmax_t, nodes, list_limit )) != 0 )
-	{
-		if ( ret != 0 )
-			ERRMSG( ret, "Unable to allocate memory for address list" );
-		return 0;
-	}
+		goto fail;
 	(void)memset( nodes->space.block, 0, nodes->space.given );
 	
-	REPORT("Checking for an assigned scan folder")
+	pof = "folder creation";
 	if ( !(tscan->assignedID) )
 	{
 		for ( tscan->id = 0; tscan->id < INT_MAX; tscan->id++ )
@@ -647,20 +701,13 @@ bool lua_process_prep_scan(
 		free_space(&space);
 		if ( ret == ENOTDIR )
 			tscan->assignedID = 1;
-		else {
-			ERRMSG( ret, "Couldn't allocate a folder for scans" );
-			return 0;
-		}
+		else
+			goto fail;
 	}
 	
-	REPORT("Undoing later scans if using earlier dump")
+	pof = "undo scans";
 	if ( (ret = lua_process_undo( lua_process, scan )) != 0 )
-	{
-		ERRMSG( ret, "Couldn't rollback scan number" );
-		return 0;
-	}
-	
-	REPORT("Preping all scan variables")
+		goto fail;
 	
 	tscan->process = &(lua_process->process);
 	tscan->bytes = lua_process->bytes.count;
@@ -677,29 +724,30 @@ bool lua_process_prep_scan(
 	tscan->last_found = last_found;
 	tscan->zero = zero ? ~0 : 0;
 	
-	REPORT("Opening files to dump memory to prior to scan")
+	pof = "open output files";
 	if ( (ret = dump_files_open( dump, tscan->id, scan )) != 0 )
-	{
-		ERRMSG( ret, "Couldn't open output file" );
-		return 0;
-	}
+		goto fail;
 	
-	REPORT("Open previous scan dump files if not already open")
+	pof = "open previous files (if applicable)";
 	if ( scan && dump_files_test(tscan->dump[0]) != 0 ) {
 		if ( (ret = dump_files_open(
 			tscan->dump, tscan->id, scan )) != 0
-		)
-		{
-			dump_files_shut( dump );
-			ERRMSG( ret, "Couldn't open input file" );
-			return 0;
-		}
+		) goto fail;
 	}
 	
-	return 1;
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
+	return ret;
 }
 
-int lua_process_dump( lua_State *L ) {
+int lua_process_dump( lua_State *L )
+{
+	int ret = 0;
+	char *pof;
 	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
 	tscan_t *tscan;
@@ -710,32 +758,39 @@ int lua_process_dump( lua_State *L ) {
 	
 	lua_process->bytes.count = 0;
 	
-	if ( !lua_process_prep_scan(
-			lua_process, 0, 0, 0, from, upto, writable, 0 )
+	pof = "prep scan";
+	if ( (ret = lua_process_prep_scan(
+			lua_process, 0, 0, 0, from, upto, writable, 0 )) != 0
 	)
 	{
 		lua_pushboolean(L,0);
-		ERRMSG( EXIT_FAILURE, "Failed to prep scan" );
-		return 1;
+		goto fail;
 	}
 	
+	errno = 0;
 	if ( pthread_create(
-		&(tscan->thread), NULL, proc_handle_dumper, tscan ) != 0
+		&(tscan->thread), NULL, process_dumper, tscan ) != 0
 	)
 	{
-		lua_pushboolean( L, 1 );
-		ERRMSG( errno, "Couldn't create dump thread" );
+		ret = errno;
+		goto fail;
 	}
 	
-	lua_pushboolean( L, 1 );
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	lua_pushboolean( L, (ret == 0) );
 	return 1;
 }
 
 int lua_process_bytescan( lua_State *L ) {
 	lua_process_t *lua_process = (lua_process_t*)
 		luaL_checkudata(L,1,PROC_HANDLE_CLASS);
-	int index = 4;
+	int ret = 0, index = 4;
 	uchar *array;
+	char *pof;
 	tscan_t *tscan;
 	uintmax_t a;
 	uintmax_t from = luaL_optinteger(L,index+1,0);
@@ -743,14 +798,9 @@ int lua_process_bytescan( lua_State *L ) {
 	_Bool writable = lua_toboolean(L,index+3);
 	node_t limit = luaL_optinteger(L,index+4,100), scan;
 	
-	REPORT("Checking for conflicts at launch of scan")
-	if ( lua_process__can_scan( lua_process ) != 0 )
-	{
-		cannot_scan:
-		lua_pushboolean( L, 0 );
-		REPORT( "Failed to verify scan is valid" )
-		return 1;
-	}
+	pof = "conflicts check";
+	if ( (ret = lua_process__can_scan( lua_process )) != 0 )
+		goto fail;
 	
 	if ( limit > INT_MAX ) limit = 100;
 	
@@ -760,19 +810,18 @@ int lua_process_bytescan( lua_State *L ) {
 	if ( scan != tscan->done_scans )
 		tscan->last_found = 0;
 	
-	REPORT("Extracting byte array from parameters")
-	if ( !(array
-		= lua_extract_bytes( NULL, L, index, &(lua_process->bytes) ))
-	) goto cannot_scan;
+	pof = "bytes extraction";
+	if ( (ret = lua_extract_bytes(
+		L, index, &(lua_process->bytes), &array )) != 0
+	) goto fail;
 	
-	REPORT("Preparing various objects for scan thread")
+	pof = "prep scan";
 	if ( scan > tscan->done_scans ||
-		!lua_process_prep_scan(
+		(ret = lua_process_prep_scan(
 			lua_process, scan, tscan->last_found, limit,
-			from, upto, writable, ~0 )
-	) goto cannot_scan;
+			from, upto, writable, ~0 )) != 0
+	) goto fail;
 	
-	REPORT("Clearing byte memory")
 	/* Decide how we will clear memory */
 	for ( a = 0; a < tscan->bytes; ++a ) {
 		if ( array[a] ) {
@@ -781,17 +830,23 @@ int lua_process_bytescan( lua_State *L ) {
 		}
 	}
 	
-	REPORT("Creating scan thread")
+	pof = "thread creation";
 	if ( pthread_create(
-		&(tscan->thread), NULL, proc_handle_dumper, tscan ) != 0
+		&(tscan->thread), NULL, process_dumper, tscan ) != 0
 	)
 	{
-		lua_pushboolean( L, 1 );
-		ERRMSG( errno, "Couldn't create scan thread" );
+		ret = errno;
+		goto fail;
 	}
 
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
 	lua_pushboolean( L, 1 );
-	return 1;
+	lua_pushinteger( L, ret );
+	return 2;
 }
 
 int lua_process_text( lua_State *L ) {
@@ -830,7 +885,7 @@ int lua_process_grab( lua_State *L )
 	return 1;
 }
 
-luaL_Reg lua_class_proc_handle_func_list[] = {
+luaL_Reg lua_class_process_func_list[] = {
 	{ "new", lua_process_grab },
 	{ "init", lua_process_init },
 	{ "valid", lua_process_valid },
@@ -861,11 +916,11 @@ int lua_process_node( lua_State *L ) {
 		len = strlen(name);
 		if ( sscanf( name, "%d", &i ) < len ) {
 			for ( num = 0;
-				lua_class_proc_handle_func_list[num].name;
+				lua_class_process_func_list[num].name;
 				++num
 			)
 			{
-				reg = lua_class_proc_handle_func_list + num;
+				reg = lua_class_process_func_list + num;
 				if ( strcmp(name,reg->name) == 0 )
 					return reg->func(L);
 			}
@@ -885,7 +940,7 @@ int lua_process_free( lua_State *L ) {
 	return 0;
 }
 
-luaL_Reg lua_class_proc_handle_meta_list[] = {
+luaL_Reg lua_class_process_meta_list[] = {
 	{ "__gc", lua_process_free },
 	{ "__index",lua_process_node },
 	{ "__newindex", lua_process_make },
@@ -901,14 +956,14 @@ void lua_proc_create_handle_class( lua_State *L ) {
 	/* metatable = {} */
 	luaL_newmetatable(L, PROC_HANDLE_CLASS);
 	meta_id = lua_gettop(L);
-	luaL_setfuncs(L, lua_class_proc_handle_meta_list, 0);
+	luaL_setfuncs(L, lua_class_process_meta_list, 0);
 	
 	/* metatable.__index = _methods */
-	luaL_newlib( L, lua_class_proc_handle_func_list );
+	luaL_newlib( L, lua_class_process_func_list );
 	lua_setfield( L, meta_id, "__index" );  
 
 	/* metatable.__metatable = _meta */
-	luaL_newlib( L, lua_class_proc_handle_meta_list );
+	luaL_newlib( L, lua_class_process_meta_list );
 	lua_setfield( L, meta_id, "__metatable");
 
 	/* class.__metatable = metatable */

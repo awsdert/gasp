@@ -12,21 +12,22 @@ void lua_error_cb( lua_State *L, char const *text ) {
 	lua_panic_cb(L);
 }
 
-void* lua_extract_bytes(
-	int *err, lua_State *L, int index, nodes_t *dst
+int lua_extract_bytes(
+	lua_State *L, int index, nodes_t *dst, uchar **pointer
 )
 {
 	int ret = 0;
-	char const *text = luaL_checkstring(L,index-2);
+	char const *text = luaL_checkstring(L,index-2), *pof;
 	char unexpected[64] = {0};
 	uintmax_t ival;
 	lua_Number	fval;
-	uchar *array;
+	uchar *array = NULL;
 	node_t i, leng, size = luaL_checkinteger(L,index-1);
 	size_t value = 0;
 	
-	if ( (ret = more_nodes( uchar, dst, BUFSIZ )) != 0 )
-		return NULL;
+	pof = "byte allocation";
+	if ( (ret = more_nodes( uchar, dst, size + 1 )) != 0 )
+		goto fail;
 	array = dst->space.block;
 	
 	if ( strcmp(text,"signed") == 0 || strcmp(text,"unsigned") == 0 ) {
@@ -34,24 +35,25 @@ void* lua_extract_bytes(
 		for ( i = 0; i < size; ++i, ival >>= CHAR_BIT )
 			array[i] = ival & UCHAR_MAX;
 		dst->count = size;
-		return array;
+		goto done;
 	}
 	else if ( strcmp(text,"number") == 0 ) {
 		fval = luaL_checknumber(L,index);
 		dst->count = sizeof(lua_Number);
 		memcpy( array, &fval, sizeof(lua_Number) );
-		return array;
+		goto done;
 	}
 	else if ( strcmp(text,"string") == 0 ) {
 		text = luaL_checkstring(L,index);
 		memcpy( array, text, size );
 		dst->count = size;
-		return array;
+		goto done;
 	}
 	else if ( strcmp(text,"bytes") == 0 ) {
 		text = luaL_checkstring(L,index);
 		leng = strlen(text);
 		
+		pof = "bytes allocation based on length";
 		if ( !leng || (ret = more_nodes( uchar, dst, leng )) != 0 )
 			goto fail;
 		array = dst->space.block;
@@ -85,7 +87,7 @@ void* lua_extract_bytes(
 			array[dst->count] = value;
 			dst->count++;
 		}
-		return array;
+		goto done;
 	}
 	else if ( strcmp(text,"table") == 0 ) {
 		luaL_checktype(L,index,LUA_TTABLE);
@@ -95,22 +97,29 @@ void* lua_extract_bytes(
 			lua_pop(L,1);
 		}
 		dst->count = size;
-		return array;
+		goto done;
 	}
-	else if ( lua_isuserdata(L,index ) ) {
-		ERRMSG( EXIT_SUCCESS, "Unexpected userdata value" );
-		fprintf( stderr, "In argument #%d\n", index );
+	else if ( lua_isuserdata(L,index ) )
+	{
+		pof = "userdata check";
 		goto fail;
 	}
 	else {
 		dst->count = 1;
 		array[0] = lua_isnil(L,index) ? 0 : lua_toboolean(L,index);
-		return array;
+		goto done;
 	}
-	fail:
-	if ( err )
-		ERRMSG( EXIT_SUCCESS, "Fail" );
-	return NULL;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+		fprintf( stderr, "In argument #%d\n", index );
+	}
+	done:
+	if ( pointer )
+		*pointer = array;
+	return ret;
 }
 
 void push_global_cfunc(
@@ -343,15 +352,20 @@ int lua_ptrlimit( lua_State *L ) {
 	return 1;
 }
 
-int lua_int2bytes( lua_State *L ) {
+int lua_int2bytes( lua_State *L )
+{
+	int ret = 0;
+	char *pof;
 	nodes_t nodes = {0};
 	uchar *array;
 	node_t i;
-	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes )) ) {
-		free_nodes( &nodes );
+	
+	pof = "bytes extraction";
+	if ( (ret = lua_extract_bytes( L, 3, &nodes, &array )) != 0 )
+	{
 		lua_pushinteger( L, 0 );
 		lua_newtable(L);
-		return 2;
+		goto fail;
 	}
 	lua_pushinteger( L, nodes.count );
 	lua_createtable( L, nodes.count, 0);
@@ -360,21 +374,29 @@ int lua_int2bytes( lua_State *L ) {
 		lua_pushinteger( L, array[i] );
 		lua_settable( L, -3 );
 	}
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
 	free_nodes( &nodes );
 	return 2;
 }
 
-int lua_tointbytes( lua_State *L ) {
+int lua_tointbytes( lua_State *L )
+{
+	int ret = 0;
 	node_t i;
 	nodes_t nodes = {0};
 	uchar *array;
-	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes ))
-	) 
+	char *pof;
+	
+	pof = "bytes extraction";
+	if ( (ret = lua_extract_bytes( L, 3, &nodes, &array )) != 0 ) 
 	{
-		free_nodes( &nodes );
 		lua_pushinteger( L, 0 );
 		lua_newtable( L );
-		return 2;
+		goto fail;
 	}
 	lua_pushinteger( L, nodes.count );
 	lua_createtable( L, nodes.count, 1 );
@@ -383,20 +405,31 @@ int lua_tointbytes( lua_State *L ) {
 		lua_pushinteger( L, array[i] );
 		lua_settable(L,-3);
 	}
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
 	free_nodes( &nodes );
 	return 2;
 }
 
-int lua_flipbytes( lua_State *L ) {
+int lua_flipbytes( lua_State *L )
+{
+	int ret = 0;
 	nodes_t nodes = {0};
 	node_t i, j;
 	uchar * array;
-	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes )) ) {
-		free_nodes( &nodes );
+	char *pof;
+	
+	pof = "byte extraction";
+	if ( (ret = lua_extract_bytes( L, 3, &nodes, &array )) != 0 )
+	{
 		lua_pushinteger( L, 0 );
 		lua_newtable(L);
-		return 2;
+		goto fail;
 	}
+	
 	lua_pushinteger( L, nodes.count );
 	lua_createtable( L, nodes.count, 1 );
 	for ( i = 0, j = nodes.count - 1; i < nodes.count; ++i, --j ) {
@@ -404,53 +437,77 @@ int lua_flipbytes( lua_State *L ) {
 		lua_pushinteger(L,array[j]);
 		lua_settable(L,-3);
 	}
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	lua_pushinteger( L, ret );
 	free_nodes( &nodes );
-	return 2;
+	return 3;
 }
 
-int lua_totxtbytes( lua_State *L ) {
+int lua_totxtbytes( lua_State *L )
+{
+	int ret = 0;
 	node_t i;
 	nodes_t nodes = {0}, text = {0};
-	uchar *array;
-	char *txt;
+	uchar *array = NULL;
+	char *txt = "", *pof;
 	
-	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes ))
+	pof = "bytes extraction";
+	if ( (ret = lua_extract_bytes( L, 3, &nodes, &array )) != 0
 		|| more_nodes( char, &text, nodes.count * CHAR_BIT ) != 0
-	)
-	{
-		free_nodes( &nodes );
-		lua_pushstring(L,"");
-		return 1;
-	}
+	) goto fail;
 	txt = nodes.space.block;
 	
 	sprintf( txt, "%02X", *array );
 	for ( i = 1; i < nodes.count; ++i )
 		sprintf( strchr(txt,'\0'), " %02X", array[i] );
 
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
 	lua_pushstring(L,txt);
+	lua_pushinteger(L,ret);
 	free_nodes( &nodes );
 	free_nodes( &text );
-	return 1;
+	return 2;
 }
 
-int lua_bytes2int( lua_State *L ) {
+int lua_bytes2int( lua_State *L )
+{
+	int ret = 0;
+	char *pof;
 	node_t i;
 	nodes_t nodes = {0};
-	uchar *array;
+	uchar *array = NULL;
 	uintmax_t val = 0;
-	if ( !(array = lua_extract_bytes( NULL, L, 3, &nodes )) ) {
-		free_nodes( &nodes );
-		lua_pushinteger(L,0);
-		return 1;
-	}
-	for ( i = 0; i < nodes.count; ++i ) {
+	
+	pof = "bytes extraction";
+	if ( (ret = lua_extract_bytes( L, 3, &nodes, &array )) )
+		goto fail;
+	
+	for ( i = 0; i < nodes.count; ++i )
+	{
 		val <<= CHAR_BIT;
 		val |= array[i];
 	}
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
 	lua_pushinteger(L,val);
+	lua_pushinteger(L,ret);
 	free_nodes( &nodes );
-	return 1;
+	return 2;
 }
 bool g_reboot_gui = false;
 

@@ -63,29 +63,31 @@ int launchv( char const *app, char const *args, va_list l ) {
 	if ( !app )
 		return 0;
 		
-	if ( more_nodes( char &ret, &nodes, strlen(args) ) != 0 )
-	{
-		ERRMSG( ret, "Couldn't allocate enough space for arguments" );
-		return ret;
-	}
+	pof = "character block allocation";
+	if ( (ret = more_nodes( char, &nodes, strlen(args) )) != 0 )
+		goto fail;
 		
 	for ( ; *args; ++args, nodes.count = strlen(text) ) {
 		
 		if ( *args != '%' ) {
-			if ( !(text = more_nodes(	
-				char, &ret, &nodes, nodes.count + 1))
+			pof = "character allocation";
+			if ( (ret = more_nodes(
+				char, &nodes, nodes.count + 1)) != 0
 			) goto fail;
+			text = nodes.space.block;
 			text[nodes.count] = *args;
 			nodes.count++;
 			continue;
 		}
 		++args;
 		
-		if ( *args = 's' ) {
+		if ( *args = 's' )
+		{
 			min = 0;
 			pfx = ' ';
 			print_str:
 			va_arg( s_arg, l );
+			pof = "string allocation";
 			if ( (ret = more_nodes(
 				char, &nodes, nodes.count + strlen( s_arg ))) != 0
 			) goto fail;
@@ -98,11 +100,13 @@ int launchv( char const *app, char const *args, va_list l ) {
 			sprintf( strchr( text, 0 ), format, s_arg );
 		}
 		
-		if ( *args == 'd' || *args == 'i' ) {
+		if ( *args == 'd' || *args == 'i' )
+		{
 			min = 0;
 			get_int:
 			va_arg( d_arg, l );
 			put_int:
+			pof = "integer allocation";
 			if ( (ret = more_nodes(	
 				char, &nodes, nodes.count + bitsof(intmax_t) )) != 0
 			) goto fail;
@@ -119,6 +123,7 @@ int launchv( char const *app, char const *args, va_list l ) {
 			get_uint:
 			u_arg = va_arg( uint, l );
 			put_uint:
+			pof "unsigned integer allocation";
 			if ( (ret = more_nodes(	
 				char, &nodes, nodes.count + bitsof(intmax_t) ))
 			) goto fail;
@@ -131,7 +136,11 @@ int launchv( char const *app, char const *args, va_list l ) {
 		}
 	}
 	
-	fail:
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
 	free_nodes( char, NULL, &nodes );
 	return ret;
 }
@@ -148,11 +157,19 @@ int launchf( char const *app, char *args, ... ) {
 int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 	int ret = 0;
 	option_t *options, *option;
-	char const *key, *val;
+	char const *key, *val, *pof;
 	node_t i;
 	va_list v;
 	
 	va_start( v, ARGS );
+	
+	pof = "ARGS check";
+	if ( !ARGS )
+	{
+		ret = EDESTADDRREQ;
+		goto fail;
+	}
+	
 	while ( (key = va_arg( v, char const *)) )
 	{
 		if ( !(val = getenv(key)) )
@@ -179,8 +196,7 @@ int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 				if ( option->val )
 					EOUTF( "val = '%s'", option->val );
 				ret = EINVAL;
-				ERRMSG( ret, "Corrupt option" );
-				return ret;
+				goto fail;
 			}
 			
 			if ( strcmp( option->opt, "-D" ) != 0 )
@@ -210,8 +226,13 @@ int gasp_make_defenv_opt( nodes_t *ARGS, ... ) {
 		
 		ARGS->count++;
 	}
-	va_end(v);
 	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	va_end(v);
 	return ret;
 }
 
@@ -300,6 +321,35 @@ int append_options( text_t *TEXTV, nodes_t *ARGS )
 	}
 	
 	return 0;
+}
+
+int append_path_to_self( text_t *TEXT )
+{
+	int ret = 0;
+	char *text, *pof;
+	
+	pof = "TEXT";
+	if ( !TEXT )
+	{
+		ret = EDESTADDRREQ;
+		goto fail;
+	}
+	
+	pof = "nodes";
+	if ( (ret = more_nodes(
+		char, TEXT, TEXT->count + bitsof(int) )) != 0
+	) goto fail;
+	
+	text = TEXT->space.block;
+	pof = "sprintf";
+	errno = 0;
+	if ( sprintf( text, "/path/%d/exe", getpid() ) <= 0 )
+	{
+		ret = errno;
+		fail:
+		FAILED( ret, pof );
+	}
+	return ret;
 }
 
 int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
@@ -396,8 +446,8 @@ int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 }
 
 int launch_lua( text_t *TEXTV ) {
-	int ret = 0, scope, conf;
-	char const
+	int ret = 0, scope = 1, conf = 1;
+	char const *pof,
 		*ptrace_scope = "/proc/sys/kernel/yama/ptrace_scope",
 		*ptrace_conf = "/etc/sysctl.d/10-ptrace.conf";
 	char *paths[TEXT_ID_COUNT] = {NULL}, *HOME = NULL, *PWD = NULL;
@@ -411,41 +461,37 @@ int launch_lua( text_t *TEXTV ) {
 	scope = set_scope( ptrace_scope, 0 );
 	conf = set_scope( ptrace_conf, 0 );
 	
+	pof = "environment variables check";
 	if ( !(PWD = getenv("PWD")) ) PWD = getenv("CWD");
 	
 	if ( !(HOME = getenv("HOME")) || !PWD )
 	{
 		ret = ENODATA;
-		ERRMSG( ret, "Couldn't get $(HOME) and/or $(PWD)" );
-		EOUTF( "PWD = %p, '%s'", PWD, PWD ? PWD : "(null)" );
-		EOUTF( "HOME = %p, '%s'", HOME, HOME ? HOME : "(null)" );
-		return ret;
+		goto fail;
 	}
 	
 	leng = strlen(PWD) + BUFSIZ + strlen(HOME);
 	for ( i = 0; i < TEXT_ID_COUNT; ++i )
 	{
+		pof = "alloc memory for shared text";
 		if ( (ret = more_nodes( char, TEXTV + i, leng )) != 0 )
-		{
-			ERRMSG( ret, "Unable to allocate memory for local path" );
 			goto fail;
-		}
 		paths[i] = TEXTV[i].space.block;
 	}
 	
-	/* Initialise lua */
+	pof = "init lua";
 	errno = 0;
-	if ( !(L = luaL_newstate()) ) {
+	if ( !(L = luaL_newstate()) )
+	{
 		ret = errno;
-		ERRMSG( ret, "Couldn't create lua instance" );
 		goto fail;
 	}
 	lua_atpanic(L,lua_panic_cb);
 	
 	/* Just a hack for slipups upstream */
-	(void)luaL_dostring(L,
-		"if not loadlib then\n"
-			"loadlib = package.loadlib\n"
+	(void)luaL_dostring( L,
+		"if not _G.loadlib then\n"
+			"_G.loadlib = package.loadlib\n"
 		"end"
 	);
 	
@@ -465,7 +511,14 @@ int launch_lua( text_t *TEXTV ) {
 	
 	lua_close(L);
 	
-	fail:
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+		EOUTF( "PWD = %p, '%s'", PWD, PWD ? PWD : "(null)" );
+		EOUTF( "HOME = %p, '%s'", HOME, HOME ? HOME : "(null)" );
+	}
+	
 #if 0
 	set_scope( ptrace_scope, scope );
 	set_scope( ptrace_conf, conf );
@@ -473,49 +526,44 @@ int launch_lua( text_t *TEXTV ) {
 	(void)scope;
 	(void)conf;
 #endif
+
 	return ret;
 }
 
-int main( int argc, char *argv[] ) {
-	int ret = EXIT_SUCCESS;
+int main( int argc, char *argv[] )
+{
+	int ret = 0;
 	text_t TEXTV[TEXT_ID_COUNT] = {{0}}, *TEXT;
 	nodes_t ARGS = {0};
 	option_t *options, *option;
 	size_t leng = BUFSIZ;
 	node_t i, pos;
 	char const *PWD, *HOME;
-	char *text;
+	char *text, *pof;
 	
 	/* Allocate all memory need for start up */
+	pof = "allocate all shared memory";
 	for ( i = 0; i < TEXT_ID_COUNT; ++i )
 	{
 		if ( (ret = more_nodes( char, TEXTV + i, leng )) != 0 )
-		{
-			ERRMSG( ret, "Unable to allocate memory for shared text" );
 			goto fail;
-		}
 	}
 	
 	// Identify environment overrides, files to load and other things
+	pof = "argument capture";
 	if ( (ret = arguments( argc, argv, &ARGS, &leng )) != 0 )
-	{
-		ERRMSG( ret, "Couldn't get argument pairs" );
 		goto fail;
-	}
 	
 	// TODO: Implement ini file based options
 	// Current Groups I've thought of:
 	// [Defines] [Process] [CheatFiles]
 	
+	pof = "environment variable defines";
 	if ( (ret = gasp_make_defenv_opt( &ARGS,
 		"PWD", "CWD", "HOME", "GASP_PATH", "LUA_PATH", "LUA_CPATH",
 		"DISPLAY", "XDG_CURRENT_DESKTOP", "GDMSESSION",
 		NULL )) != 0
-	)
-	{
-		ERRMSG( ret, "Couldn't get environment variables" );
-		goto fail;
-	}
+	) goto fail;
 	
 	PWD = getenv( "PWD" );
 	HOME = getenv( "HOME" );
@@ -540,6 +588,7 @@ int main( int argc, char *argv[] ) {
 			goto fail;
 	}
 	
+	pof = "add define for GASP_PATH";
 	if ( (ret = add_define( &ARGS, "GASP_PATH", &pos, 0 )) != EEXIST )
 	{
 		if ( ret != 0 )
@@ -547,7 +596,8 @@ int main( int argc, char *argv[] ) {
 		
 		options = ARGS.space.block;
 		option = options + pos;
-			
+		
+		pof = "append value to option object";
 		if ( (ret = append_to_option( option, "val", text )) != 0 )
 			goto fail;
 			
@@ -598,7 +648,12 @@ int main( int argc, char *argv[] ) {
 		}
 	}
 	
-	fail:
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
 	options = ARGS.space.block;
 	if ( options )
 	{
@@ -611,9 +666,6 @@ int main( int argc, char *argv[] ) {
 	
 	for ( i = 0; i < TEXT_ID_COUNT; ++i )
 		free_nodes( TEXTV + i );
-	
-	if ( ret != 0 )
-		ERRMSG( ret, "Test failed" );
 	
 	return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

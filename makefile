@@ -32,7 +32,7 @@ init_gasp_objs:=gasp.c.o $(gasp_objs)
 init_gasp_d_objs:=gasp.c-d.o $(gasp_d_objs)
 gasp_exe:=gasp.$(exe_ext)
 gasp_d_exe:=gasp-d.$(exe_ext)
-BASIC_TARGETS:=rebuild clean libs build debug test
+BASIC_TARGETS:=rebuild clean libs build debug test leaks
 PHONY_TARGETS:=makefile default all run gede moon-libs
 PHONY_TARGETS+= $(BASIC_TARGETS)
 PHONY_TARGETS+= $(BASIC_TARGETS:%=%-all)
@@ -116,13 +116,6 @@ clean:
 	rm -f *.o
 	rm -f gasp*.so
 
-leaks: build debug
-	valgrind -s ./$(deep_gasp_d_exe) $(ARGS)
-	valgrind -s ./$(test_gasp_exe) $(ARGS)
-	valgrind -s ./$(gasp_d_exe) $(ARGS)
-	valgrind -s ./$(deep_gasp_exe) $(ARGS)
-	valgrind -s ./$(gasp_exe) $(ARGS)
-
 run: build
 	./$(gasp_exe) $(ARGS)
 
@@ -130,8 +123,12 @@ gede: debug
 	gede --args ./$(gasp_d_exe) $(ARGS)
 
 test-all: libs-all test
-test: $(gasp_exe) $(gasp_d_exe)
-	./$(gasp_exe) --gede
+test: debug
+	./$(gasp_d_exe) --gede $(ARGS)
+
+leaks-all: libs-all leaks
+leaks: debug
+	valgrind -s ./$(gasp_d_exe) --leaks $(ARGS)
 
 build-all: libs-all build
 build: $(gasp_exe)

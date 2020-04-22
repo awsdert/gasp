@@ -9,7 +9,7 @@ typedef enum TEXT_ID {
 	TEXT_ID_COUNT
 } TEXT_ID_t;
 
-int command( int *_sig, char const *cmdl, bool print_command )
+int command( char const *cmdl, bool print_command )
 {
 	int ret = 0, sig = -1;
 	char *pof;
@@ -24,6 +24,7 @@ int command( int *_sig, char const *cmdl, bool print_command )
 	if ( print_command )
 		EOUTF( "%s", cmdl );
 	
+	pof = "command execution";
 	errno = 0;
 	sig = system(cmdl);
 	ret = errno;
@@ -31,7 +32,12 @@ int command( int *_sig, char const *cmdl, bool print_command )
 	if ( sig != 0 )
 	{
 		if ( ret == 0 )
-			ret = ENODATA;
+		{
+			if ( sig > 128 )
+				ret = sig - 128;
+			else
+				ret = ENODATA;
+		}
 		goto fail;
 	}
 	
@@ -39,10 +45,8 @@ int command( int *_sig, char const *cmdl, bool print_command )
 	{
 		fail:
 		FAILED( ret, pof );
+		EOUTF( "sig = %d", sig );
 	}
-	
-	if ( _sig )
-		*_sig = sig;
 	
 	return ret;
 }
@@ -89,7 +93,7 @@ int set_scope( char const *path, int set, int *prv ) {
 				", manually restore if fail!\n", path, set );
 	}
 	
-	ret = command( NULL, cmdl, 1 );
+	ret = command( cmdl, 1 );
 	if ( prv )
 		*prv = get;
 	return ret;
@@ -436,13 +440,73 @@ int append_path_to_self( text_t *TEXT, bool use_proc_pid_exe )
 	return ret;
 }
 
+int launch_under(
+	text_t *TEXTV, nodes_t *ARGS,
+	char const *app, char const *add_opt, char const *rem_opt,
+	bool print_command
+)
+{
+	int ret = 0;
+	char *pof, *cmdl, *pos, *nxt;
+	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
+	size_t need;
+	
+	need = strlen(app) + 2; /* For ' ' & '\0' */
+	
+	pof = "allocate characters for pkexec";
+	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
+		goto fail;
+	cmdl = CMDL->space.block;
+	
+	sprintf( cmdl, "%s ", app );
+	
+	pof = "append path to self";
+	if ( (ret = append_path_to_self( CMDL, 0 )) != 0 )
+		goto fail;
+		
+	if ( add_opt && *add_opt )
+	{
+		pof = "append characters for declaring root";
+		need = CMDL->count + strlen(add_opt) + 2;
+		if ( (ret = more_nodes( char, CMDL, need )) != 0 )
+			goto fail;
+		cmdl = CMDL->space.block;
+			
+		(void)sprintf( strchr( cmdl, 0 ), " %s", add_opt );
+	}
+	
+	pof = "append options";
+	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
+		goto fail;
+	cmdl = CMDL->space.block;
+	
+	if ( rem_opt && *rem_opt )
+	{
+		pos = strstr( cmdl, rem_opt );
+		if ( pos )
+		{
+			nxt = pos + strlen( rem_opt );
+			(void)memmove( pos, nxt, strlen(nxt) + 1 );
+		}
+	}
+	
+	pof = "launch self";
+	if ( (ret = command( cmdl, print_command )) != 0 )
+		goto fail;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+	}
+	
+	return ret;
+}
+
 int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
 {
 	int ret = 0, sig = 0;
-	char const *sudo = "pkexec", *opt = "--inrootmode", *pof;
-	char *cmdl;
-	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
-	size_t need;
+	char const *app = "pkexec", *opt = "--inrootmode", *pof;
 	
 	pof = "find option";
 	switch ( (ret = find_option( ARGS, opt, NULL )) )
@@ -453,33 +517,8 @@ int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
 		goto fail;
 	}
 	
-	need = strlen(sudo) + 2; /* For ' ' & '\0' */
-	
-	pof = "allocate characters for pkexec";
-	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
-		goto fail;
-	cmdl = CMDL->space.block;
-	
-	sprintf( cmdl, "%s ", sudo );
-	
-	pof = "append path to self";
-	if ( (ret = append_path_to_self( CMDL, 1 )) != 0 )
-		goto fail;
-		
-	pof = "append characters for declaring root";
-	if ( (ret = more_nodes( char, CMDL, strlen(opt) + 2 )) != 0 )
-		goto fail;
-	cmdl = CMDL->space.block;
-		
-	(void)sprintf( strchr( cmdl, 0 ), " %s",  opt );
-	
-	pof = "append options";
-	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
-		goto fail;
-	cmdl = CMDL->space.block;
-	
-	pof = "launch self";
-	if ( (ret = command( &sig, cmdl, 1 )) != 0 )
+	pof = "launch under pkexec";
+	if ( (ret = launch_under( TEXTV, ARGS, app, opt, NULL, 1 )) != 0 )
 		goto fail;
 	
 	if ( ret != 0 )
@@ -495,10 +534,7 @@ int launch_sudo_gasp( text_t *TEXTV, nodes_t *ARGS )
 int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 {
 	int ret = 0, sig = 0;
-	char const *gede = "gede --args ", *opt = "--gede";
-	char *cmdl, *pos, *nxt, *pof;
-	text_t *CMDL = TEXTV + TEXT_ID_CMD_LINE;
-	size_t need;
+	char const *app = "gede --args", *opt = "--gede", *pof;
 	
 	pof = "find option";
 	switch ( (ret = find_option( ARGS, opt, NULL )) )
@@ -509,40 +545,36 @@ int launch_test_gasp( text_t *TEXTV, nodes_t *ARGS )
 		goto fail;
 	}
 	
-	/* For ' ' & '\0' */
-	need = strlen(gede) + 2;
-	
-	pof = "allocate characters for launching gede with arguments";
-	if ( (ret = more_nodes( char, CMDL, need )) != 0 )
-		return ret;
-	cmdl = CMDL->space.block;
-	
-	sprintf( cmdl, "%s", gede );
-	
-	pof = "append path to self";
-	if ( (ret = append_path_to_self( CMDL, 1 )) != 0 )
+	pof = "launch under app";
+	if ( (ret = launch_under( TEXTV, ARGS, app, NULL, opt, 1 )) != 0 )
 		goto fail;
+	
+	if ( ret != 0 )
+	{
+		fail:
+		FAILED( ret, pof );
+		EOUTF( "sig = %d", sig );
+	}
+	return ret;
+}
 
-	pof = "append options";
-	if ( (ret = append_options( TEXTV, ARGS )) != 0 )
-		goto fail;
-	cmdl = CMDL->space.block;
+int launch_leak_test( text_t *TEXTV, nodes_t *ARGS )
+{
+	int ret = 0, sig = 0;
+	char const *app = "valgrind --leak-check=full -s ",
+		*opt = "--leaks", *pof;
 	
-	/* Prevent infinite loop */
-	pos = strstr( cmdl, opt );
-	if ( pos )
+	pof = "find option";
+	switch ( (ret = find_option( ARGS, opt, NULL )) )
 	{
-		nxt = pos + strlen( opt );
-		(void)memmove( pos, nxt, strlen(nxt) + 1 );
-	}
-	else
-	{
-		ret = EDESTADDRREQ;
+	case 0: return 0;
+	case EEXIST: break;
+	default:
 		goto fail;
 	}
 	
-	pof = "launch self";
-	if ( (ret = command( &sig, cmdl, 1 )) != 0 )
+	pof = "launch under app";
+	if ( (ret = launch_under( TEXTV, ARGS, app, NULL, opt, 1 )) != 0 )
 		goto fail;
 	
 	if ( ret != 0 )
@@ -759,14 +791,18 @@ int main( int argc, char *argv[] )
 	pof = "launch under sudo check";
 	if ( (ret = launch_sudo_gasp( TEXTV, &ARGS )) == EEXIST )
 	{
-		pof = "launch under gasp check";
+		pof = "launch under gede check";
 		if ( (ret = launch_test_gasp( TEXTV, &ARGS )) == 0 )
 		{
-			/* Don't need this so give back memory */
-			free_nodes( TEXTV + TEXT_ID_CMD_LINE );
-			/* Open user interface */
-			pof = "launch lua";
-			ret = launch_lua( TEXTV );
+			pof = "launch under valgrind check";
+			if ( (ret = launch_leak_test( TEXTV, &ARGS )) == 0 )
+			{
+				/* Don't need this so give back memory */
+				free_nodes( TEXTV + TEXT_ID_CMD_LINE );
+				/* Open user interface */
+				pof = "launch lua";
+				ret = launch_lua( TEXTV );
+			}
 		}
 	}
 	

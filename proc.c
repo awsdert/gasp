@@ -112,10 +112,11 @@ int file_glance_size( char const *path, ssize_t *size )
 	}
 	
 	pof = "read";
-	while ( (done = gasp_read( fd, buff, BUFSIZ )) < 0 )
+	while ( (done = gasp_read( fd, buff, BUFSIZ )) > 0 )
 		bytes += done;
 
 	ret = errno;
+	*size = bytes;
 	
 	if ( ret != 0 && ret != EOF )
 	{
@@ -127,7 +128,6 @@ int file_glance_size( char const *path, ssize_t *size )
 	if ( fd > 0 )
 		close(fd);
 	
-	*size = bytes;
 	return 0;
 }
 
@@ -2003,8 +2003,6 @@ int process_find(
 			break;
 		}
 	}
-	
-	pglance_term( &glance );
 	if ( nodes->count > 0 )
 		return 0;
 	if ( ret == 0 )
@@ -2015,6 +2013,7 @@ int process_find(
 		fail:
 		FAILED( ret, pof );
 	}
+	pglance_term( &glance );
 	return ret;
 }
 
@@ -2059,9 +2058,11 @@ void pglance_term( pglance_t *glance ) {
 void process_data_state_puts( process_t *process ) {
 	if ( !process )
 		return;
-	fprintf( stderr, "%s() Process %04X under %04X is named '%s'\n",
+	EOUTF( "%s() Process %04X under %04X is named '%s' with path '%s'",
 		__func__, process->pid, process->parent,
-		(char*)(process->name.space.block) );
+		(char*)(process->name.space.block),
+		(char*)(process->cmdl.space.block)
+	);
 }
 
 int process_info( process_t *process, int pid, bool hook, int flags )
@@ -2218,8 +2219,12 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 	}
 	
 	pof = "name pointer and ppid check";
-	if ( !(*((char*)(name->space.block))) || process->parent < 0 )
+	n = name->space.block;
+	if ( !n || !(*n) || process->parent < 0 )
+	{
+		ret = ENODATA;
 		goto fail;
+	}
 	
 	if ( hook )
 	{
@@ -2239,6 +2244,7 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 	{
 		fail:
 		FAILED( ret, pof );
+		EOUTF( "size = %jd", size );
 		process_data_state_puts(process);
 	}
 	

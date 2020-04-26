@@ -1981,12 +1981,14 @@ int process_find(
 			}
 		}
 		
+		pof = "add process object";
 		if ( (ret = add_node( nodes, &i, sizeof(process_t) )) != 0 )
 			break;
 			
 		processes = nodes->space.block;
 		ent = processes + i;
 		
+		pof = "copy name";
 		if ( (ret = fill_text_object_with_str(
 			&(ent->name), process->name.space.block )) != 0
 		)
@@ -1995,6 +1997,7 @@ int process_find(
 			break;
 		}
 		
+		pof = "copy launch line";
 		if ( (ret = fill_text_object_with_str(
 			&(ent->cmdl), process->cmdl.space.block )) != 0
 		)
@@ -2003,9 +2006,9 @@ int process_find(
 			break;
 		}
 	}
-	if ( nodes->count > 0 )
+	if ( nodes->count )
 		return 0;
-	if ( ret == 0 )
+	if ( ret == 0 || ret == ENODATA )
 		ret = ENOENT;
 	if ( ret != ENONET )
 	{

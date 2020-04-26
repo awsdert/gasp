@@ -1,14 +1,13 @@
 #include "gasp.h"
 
 int lua_panic_cb( lua_State *L ) {
-	puts("Error: Lua traceback...");
-	luaL_traceback(L,L,"[error]",-1);
-	puts(lua_tostring(L,-1));
+	luaL_traceback(L,L,NULL,0);
+	EOUTF( " Error, lua tracback:\n%s", lua_tostring(L,-1) );
 	return 0;
 }
 
 void lua_error_cb( lua_State *L, char const *text ) {
-	fprintf(stderr,"%s\n", text);
+	EOUTF( "%s", text);
 	lua_panic_cb(L);
 }
 
@@ -52,11 +51,11 @@ int lua_extract_bytes(
 	else if ( strcmp(text,"bytes") == 0 ) {
 		text = luaL_checkstring(L,index);
 		leng = strlen(text);
-		
 		pof = "bytes allocation based on length";
-		if ( !leng || (ret = more_nodes( uchar, dst, leng )) != 0 )
+		if ( (ret = more_nodes( uchar, dst, size )) != 0 )
 			goto fail;
 		array = dst->space.block;
+		(void)memset( array, 0, dst->space.given );
 		
 		for ( i = 0; i < leng; ++i ) {
 			if ( text[i] == ' ' )
@@ -115,6 +114,7 @@ int lua_extract_bytes(
 		fail:
 		FAILED( ret, pof );
 		fprintf( stderr, "In argument #%d\n", index );
+		lua_panic_cb(L);
 	}
 	done:
 	if ( pointer )

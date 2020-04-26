@@ -169,11 +169,13 @@ function autoload()
 				print( "Searching for process '"
 					.. GUI.cfg.find_process .. "'")
 				tmp = gasp.locate_app(GUI.cfg.find_process)
-				print( "Found " .. (#tmp) .. " matching processes" )
-				-- Auto hook process
-				if #tmp == 1 then
-					GUI.noticed = tmp[1]
-					hook_process()
+				if tmp then
+					print( "Found " .. (#tmp) .. " matching processes" )
+					-- Auto hook process
+					if #tmp == 1 then
+						GUI.noticed = tmp[1]
+						hook_process()
+					end
 				end
 			end
 		end

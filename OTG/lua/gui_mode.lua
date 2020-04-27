@@ -132,21 +132,27 @@ end
 
 
 function hook_process()
-	if not GUI.donothook then
-		if GUI.noticed then
-			if not GUI.handle then
-				GUI.handle = gasp.new_handle()
-			end
-			if not GUI.handle then
-				return false
-			end
-			if GUI.handle:valid() == true then
-				return true
-			end
-			return GUI.handle:init( GUI.noticed.entryId )
-		end
+	if not GUI.noticed then
+		--print( "not GUI.noticed" )
+		return false
 	end
-	return false
+	if GUI.donothook then
+		--print( "GUI.donothook" )
+	end
+	if not GUI.handle then
+		--print( "not GUI.handle (1)" )
+		GUI.handle = gasp.new_handle( GUI.noticed.entryId )
+	end
+	if not GUI.handle then
+		--print( "not GUI.handle (2)" )
+		return false
+	end
+	if GUI.handle:valid() == true then
+		--print( "GUI.handle:valid() == true" )
+		return true
+	end
+	--print( "GUI.noticed.entryId = " .. GUI.noticed.entryId )
+	return GUI.handle:init( GUI.noticed.entryId )
 end
 
 function autoload()

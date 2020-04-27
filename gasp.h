@@ -387,6 +387,7 @@ bool gasp_tpollo( int ext_pipes[2], int sig, int msTimeout );
  * @return 0 on success, code from errno.h on failure
 **/
 int dump_files_glance_stored( dump_t *dump, size_t keep );
+int process_test( process_t *process );
 /** @brief Deallocates any memory before deallocating the handle itself
  * @param handle The process handle to deallocate
 **/
@@ -410,7 +411,7 @@ int pglance_data(
  * @param size Number of bytes to write from src
  * @return Number of bytes written from src
 **/
-int proc_change_data(
+int pchange_data(
 	process_t *process,
 	uintmax_t addr, void *src, ssize_t size, ssize_t *done );
 

@@ -188,7 +188,7 @@ int lua_process__valid( lua_process_t *lua_process )
 {
 	if ( !lua_process )
 		return EINVAL;
-	return (lua_process->process.parent > -1) ? 0 : ENOENT;
+	return process_test(&(lua_process->process));
 }
 
 bool lua_process__end_scan( tscan_t *tscan ) {
@@ -415,6 +415,8 @@ int lua_process_glance_data( lua_State *L ) {
 	pof = "process check";
 	if ( (ret = lua_process__valid( lua_process )) != 0 || size < 1 )
 	{
+		if ( ret == 0 )
+			ret = ERANGE;
 		lua_newtable(L);
 		goto fail;
 	}
@@ -476,7 +478,7 @@ int lua_process_change_data( lua_State *L ) {
 	
 	pof = "data change";
 	//lua_process__set_rdwr(lua_process,1);
-	ret = proc_change_data(
+	ret = pchange_data(
 		&(lua_process->process), addr, array, nodes->count, &size );
 	//lua_process__set_rdwr(lua_process,0);
 

@@ -1,22 +1,42 @@
 #include "gasp.h"
+int process_test( process_t *process ) {
+	if ( !process )
+		return EADDRNOTAVAIL;
+	if ( !(process->path[0]) )
+		return ENOTDIR;
+	if ( !(process->name.space.block) )
+		return ENOTNAM;
+	if ( !(process->cmdl.space.block) )
+		return ENODATA;
+	if ( process->pid < 1 )
+		return ENOTUNIQ;
+	if ( process->hooked )
+		return 0;
+	return EINVAL;
+}
 int process_stop( process_t *process ) {
-	int ret = 0;
+	int ret = process_test(process), sig;
+	if ( ret != 0 )
+		return ret;
 	(void)kill( process->pid, SIGSTOP );
-	(void)waitpid( process->pid, &ret, WUNTRACED );
+	(void)waitpid( process->pid, &sig, WUNTRACED );
 	process->paused = 1;
 	return 0;
 }
 int process_cont( process_t *process ) {
+	int ret = process_test( process );
+	if ( ret != 0 )
+		return ret;
 	if ( process->paused ) {
-		if ( kill( process->pid, SIGCONT ) != 0 )
-			return errno;
+		(void)kill( process->pid, SIGCONT );
 		process->paused = 0;
 	}
 	return 0;
 }
 int process_grab( process_t *process ) {
-	int ret = 0;
-	if ( !(process->hooked) ) {
+	int ret = process_test(process);
+	if ( ret == EINVAL )
+	{
 		errno = 0;
 		if ( ptrace( PTRACE_ATTACH, process->pid, NULL, NULL ) != 0 )
 			return errno;
@@ -25,13 +45,16 @@ int process_grab( process_t *process ) {
 	}
 	return ret;
 }
-int process_free( process_t *process ) {
-	if ( process->hooked ) {
+int process_free( process_t *process )
+{
+	int ret = process_test( process );
+	if ( ret == 0 )
+	{
 		if ( ptrace( PTRACE_DETACH, process->pid, NULL, NULL ) != 0 )
 			return errno;
 		process->hooked = 0;
 	}
-	return 0;
+	return ret;
 }
 int file_glance_perm( char const *path, mode_t *perm ) {
 	struct stat st;
@@ -382,12 +405,16 @@ int mapped_addr(
 	return ret;
 }
 
-int proc__rwvmem_test(
+int pmemory_test(
 	process_t *process, void *mem, ssize_t size, ssize_t *done
 )
 {
-	int ret = 0;
+	int ret = process_test(process);
 	char *pof;
+	
+	pof = "process object check";
+	if ( ret != 0 )
+		goto fail;
 	
 	pof = "bytes done pointer check";
 	if ( !done )
@@ -400,7 +427,6 @@ int proc__rwvmem_test(
 	if ( !process || !mem || size <= 0 || !done )
 	{
 		ret = EINVAL;
-		if ( !process ) pof= "process handle check";
 		if ( !mem ) pof = "memory pointer check";
 		if ( size <= 0 ) pof = "memory size check";
 		goto fail;
@@ -415,7 +441,7 @@ int proc__rwvmem_test(
 	return ret;
 }
 
-int proc__glance_peek(
+int pglance__peek(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
@@ -425,7 +451,7 @@ int proc__glance_peek(
 	uchar *m = mem;
 	size_t temp;
 	
-	if ( (ret = proc__rwvmem_test(process, mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process, mem,size,done)) != 0 )
 		return ret;
 
 	errno = 0;
@@ -462,7 +488,7 @@ int proc__glance_peek(
 	return 0;
 }
 
-int proc__glance_vmem(
+int pglance__vmem(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
@@ -474,7 +500,7 @@ int proc__glance_vmem(
 	char *pof;
 	
 	pof = "parameter check";
-	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process,mem,size,done)) != 0 )
 		goto fail;
 	
 	internal.iov_base = m;
@@ -507,7 +533,7 @@ int proc__glance_vmem(
 	return ret;
 }
 
-int proc__glance_file(
+int pglance__file(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
@@ -517,7 +543,7 @@ int proc__glance_file(
 	char path[bitsof(int) * 2] = {0}, *pof;
 	
 	pof = "parameter check";
-	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process,mem,size,done)) != 0 )
 		goto fail;
 	
 	sprintf( path, "%s/mem", process->path );
@@ -553,7 +579,7 @@ int proc__glance_file(
 #endif
 }
 
-int proc__glance_self(
+int pglance__self(
 	process_t *process,
 	uintmax_t addr, void *mem, size_t size, ssize_t *done
 )
@@ -562,7 +588,7 @@ int proc__glance_self(
 	char *pof;
 	
 	pof = "parameter check";
-	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process,mem,size,done)) != 0 )
 		goto fail;
 	
 	if ( process->self ) {
@@ -585,7 +611,7 @@ int proc__glance_self(
 	return ret;
 }
 
-int proc__glance_seek(
+int pglance__seek(
 	process_t *process,
 	uintmax_t addr, void *mem, size_t size, ssize_t *done
 )
@@ -593,7 +619,7 @@ int proc__glance_seek(
 	char path[bitsof(int)*2] = {0};
 	int ret, fd;
 	
-	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process,mem,size,done)) != 0 )
 		return ret;
 	
 	sprintf( path, "%s/mem", process->path );
@@ -614,7 +640,7 @@ int proc__glance_seek(
 	return ret;
 }
 
-int proc__change_poke(
+int pchange__poke(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
@@ -624,7 +650,7 @@ int proc__change_poke(
 	uchar *m = mem;
 	size_t temp;
 	
-	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process,mem,size,done)) != 0 )
 		return ret;
 
 	if ( (process->flags & 02) != 02 )
@@ -650,7 +676,7 @@ int proc__change_poke(
 	return ret;
 }
 
-int proc__change_vmem(
+int pchange__vmem(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
@@ -659,7 +685,7 @@ int proc__change_vmem(
 	struct iovec internal, external;
 	int ret;
 	
-	if ( (ret = proc__rwvmem_test(process, mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process, mem,size,done)) != 0 )
 		return ret;
 	
 	if ( (process->flags & 02) != 02 )
@@ -681,7 +707,7 @@ int proc__change_vmem(
 #endif
 }
 
-int proc__change_file(
+int pchange__file(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
@@ -690,7 +716,7 @@ int proc__change_file(
 	int ret = 0, fd = -1;
 	char path[bitsof(int)*2] = {0};
 	
-	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process,mem,size,done)) != 0 )
 		return ret;
 	
 	if ( (process->flags & 02) != 02 )
@@ -713,14 +739,14 @@ int proc__change_file(
 #endif
 }
 
-int proc__change_self(
+int pchange__self(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
 {
 	int ret;
 	
-	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process,mem,size,done)) != 0 )
 		return ret;
 	
 	if ( (process->flags & 02) != 02 )
@@ -738,7 +764,7 @@ int proc__change_self(
 	return 0;
 }
 
-int proc__change_seek(
+int pchange__seek(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
@@ -746,7 +772,7 @@ int proc__change_seek(
 	char path[bitsof(int) * 2] = {0};
 	int ret, fd;
 	
-	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process,mem,size,done)) != 0 )
 		return ret;
 	
 	sprintf( path, "%s/mem", process->path );
@@ -1783,7 +1809,7 @@ int process_aobscan( tscan_t *tscan ) {
 	prot |= tscan->writeable ? 02 : 0;
 	
 	pof = "rwvmem check";
-	if ( (ret = proc__rwvmem_test(
+	if ( (ret = pmemory_test(
 		tscan->process, tscan->array, tscan->bytes, &done )) != 0
 	) goto set_found;
 	
@@ -2070,22 +2096,22 @@ void process_data_state_puts( process_t *process ) {
 
 int process_info( process_t *process, int pid, bool hook, int flags )
 {
-	int ret = 0, fd = -1;
+	int ret = process_test(process), fd = -1;
 	char path[bitsof(int) * 2] = {0};
 	text_t *name, *cmdl;
 	space_t *full;
 	char *k, *v, *n, *pof;
 	intmax_t size;
 	
-	pof = "process pointer check";
-	if ( !process )
+	pof = "process object check";
+	switch ( ret )
 	{
-		ret = EDESTADDRREQ;
-		goto fail;
+		case 0: case EDESTADDRREQ:
+			goto fail;
 	}
 	
-	pof = "handle activity check";
-	if ( process->hooked || process->thread.active )
+	pof = "process thread activity check";
+	if ( process->thread.active )
 	{
 		ret = EBUSY;
 		goto fail;
@@ -2198,8 +2224,10 @@ int process_info( process_t *process, int pid, bool hook, int flags )
 	{
 		n = strchr( k, '\n' );
 		v = strchr( k, ':' );
-		if ( !v ) {
-			if ( n ) {
+		if ( !v )
+		{
+			if ( n )
+			{
 				k = ++n;
 				continue;
 			}
@@ -2359,7 +2387,7 @@ int pglance_data(
 	char *pof;
 	
 	pof = "rwvmem check";
-	if ( (ret = proc__rwvmem_test( process, mem, size, done )) != 0 )
+	if ( (ret = pmemory_test( process, mem, size, done )) != 0 )
 		goto fail;
 	
 	pof = "stop target process";
@@ -2372,29 +2400,29 @@ int pglance_data(
 	
 	pof = "glance via memmove";
 	if ( (ret =
-		proc__glance_self( process, addr, mem, size, done )) == 0
+		pglance__self( process, addr, mem, size, done )) == 0
 	) goto done;
 #if 1
 	pof = "glance via file (pread)";
 	if ( (ret =
-		proc__glance_file( process, addr, mem, size, done )) == 0
+		pglance__file( process, addr, mem, size, done )) == 0
 	) goto done;
 #endif
 #if 1
 	pof = "glance via file (lseek, read)";
 	if ( (ret =
-		proc__glance_seek( process, addr, mem, size, done )) == 0
+		pglance__seek( process, addr, mem, size, done )) == 0
 	) goto done;
 #endif
 #if 0
 	pof = "glance via process_vm_readv";
 	if ( (ret =
-		proc__glance_vmem( process, addr, mem, size, done )) == 0
+		pglance__vmem( process, addr, mem, size, done )) == 0
 	) goto done;
 #endif
 	pof = "glance via ptrace";
 	if ( (ret =
-		proc__glance_peek( process, addr, mem, size, done )) == 0
+		pglance__peek( process, addr, mem, size, done )) == 0
 	) goto done;
 	
 	/* Detatch and ensure continued activity */
@@ -2409,14 +2437,14 @@ int pglance_data(
 	return ret;
 }
 
-int proc_change_data(
+int pchange_data(
 	process_t *process,
 	uintmax_t addr, void *mem, ssize_t size, ssize_t *done
 )
 {
 	int ret;
 
-	if ( (ret = proc__rwvmem_test(process,mem,size,done)) != 0 )
+	if ( (ret = pmemory_test(process,mem,size,done)) != 0 )
 		return ret;
 	
 	if ( (ret = process_stop(process)) != 0 )
@@ -2427,23 +2455,23 @@ int proc_change_data(
 	
 	/* Avoid fiddling with own memory file */
 	if ( (ret =
-		proc__change_self( process, addr, mem, size, done )) == 0
+		pchange__self( process, addr, mem, size, done )) == 0
 	) goto success;
 	/* gasp_pwrite() */
 	if ( (ret =
-		proc__change_file( process, addr, mem, size, done )) == 0
+		pchange__file( process, addr, mem, size, done )) == 0
 	) goto success;
 	/* gasp_seek() & gasp_write() */
 	if ( (ret =
-		proc__change_seek( process, addr, mem, size, done )) == 0
+		pchange__seek( process, addr, mem, size, done )) == 0
 	) goto success;
 	/* Last ditch effort to avoid ptrace */
 	if ( (ret =
-		proc__change_vmem( process, addr, mem, size, done )) == 0
+		pchange__vmem( process, addr, mem, size, done )) == 0
 	) goto success;
 	/* PTRACE_POKEDATA */
 	if ( (ret =
-		proc__change_poke( process, addr, mem, size, done )) == 0
+		pchange__poke( process, addr, mem, size, done )) == 0
 	) goto success;
 	
 	success:

@@ -15,6 +15,21 @@ I'm working with so don't expect me to target anything more than that
 (although I will plug-in some #ifdef code for _WIN32 for sake of
 ReactOS builds)
 
+## Current target
+Currently planning to rewrite from scratch using cleaner code and the
+now functional alu project (https://github.com/awsdert/alu), I will
+finish fixing some minor bugs and try out an idea I have for retreiving
+the remainder of a floating division, the division has a rounding error
+but the much needed bit comparison function (alu__cmp_int2int) is working
+as expected, it will be needed for replicating the bit search feature
+that Cheat Engine has (yes I'm using that as the inspiration for features
+in this project). Anyways this little section was added because I realised
+I hadn't uploaded for a long time and peops might've thought the project
+was dead, no it isn't, I just got severly side tracked with other projects,
+there's still things I can do in this project that I just won't get in
+PINCE (which for time being is now the best option for linux), example of
+which is cheat lists in full lua, makes converting existing cheats easier.
+
 ## APIs
 Uses C under the hood but will be mostly scripted in Lua for so users
 can customize for themselves (also make Trainers easier to design).

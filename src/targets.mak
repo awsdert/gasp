@@ -1,0 +1,2 @@
+$(MAKEFILEGOALS):
+	make $<.mak

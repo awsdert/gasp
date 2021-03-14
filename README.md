@@ -3,50 +3,35 @@ Game Assistive tech for Solo Play
 
 ## About
 Got tired of waiting for PINCE to be usable so started this myself.
-Gasp currently can edit known memory but scanning it is gonna be
-inefficeint until I've re-worked what the lua wrapper for aobscan
-returns and also implemented integer search, string search will work
-in aobscan but again I need to get round to making that more efficeint.
-The basic goal is to be a drop-in replacement for GameConqueror with
-more flexability, there is no intent to make this a full debugging
-interface like PINCE seems to be steering towards, scanmem is not used
-neither is gdb, the API's supported by manjaro cinnamon minimal is what
-I'm working with so don't expect me to target anything more than that
-(although I will plug-in some #ifdef code for _WIN32 for sake of
-ReactOS builds)
 
 ## Current target
-Currently planning to rewrite from scratch using cleaner code and the
-now functional alu project (https://github.com/awsdert/alu), I will
-finish fixing some minor bugs and try out an idea I have for retreiving
-the remainder of a floating division, the division has a rounding error
-but the much needed bit comparison function (alu__cmp_int2int) is working
-as expected, it will be needed for replicating the bit search feature
-that Cheat Engine has (yes I'm using that as the inspiration for features
-in this project). Anyways this little section was added because I realised
-I hadn't uploaded for a long time and peops might've thought the project
-was dead, no it isn't, I just got severly side tracked with other projects,
-there's still things I can do in this project that I just won't get in
-PINCE (which for time being is now the best option for linux), example of
-which is cheat lists in full lua, makes converting existing cheats easier.
+Started the re-write I planned, 
 
 ## APIs
-Uses C under the hood but will be mostly scripted in Lua for so users
+Uses C under the hood but will be mostly scripted in Lua so users
 can customize for themselves (also make Trainers easier to design).
-For now only plugged in the moon libraries however I plan to eventually
-plug in OpenAL related libraries and libraries for those who are both
-deaf & blind, however the use of such libraries will be have to be
-implemented by the users themselves because I don't have those kinda
-touch screens nor am I inclined to buy them.
+Found a better GUI framework called tekUI, for manjaro I had to add
+"-j 1" after the make command in the build file but otherwise is
+easy to compile
 
-This will not be compatible with Cheat Engine scripts, they will have
-to be ported to fit the libraries I plug in, won't stop anyone from
-branching when I stabilize the API to make a port of Cheat Engine though
+This will not be compatible with Cheat Engine scripts, lua is used
+for the sake of easing the port process, I will consider serious
+support for windows after I'm satisfied with linux support, you're
+free to branch this to support it prorerly yourself though, I wll
+advise you to wait until I'm satisfied gasp can properly scan and
+communicate ongoing scan results to the GUI though.
 
 ## 3rd Party
 These are the open source libraries I'm currently using whether
 directly or indrectly (not including system libraries)
 * https://github.com/lua/lua
+* http://tekui.neoscientists.org/
+
+Gasp used to use these but I changed to tekUI for the sake of
+easing accessibility support, if I'm right then I don't have to
+do anything more to enable screenreaders and the like to
+understand the GUI elements I'll be working with for devlopement,
+please let me know if you experience problems with the results
 * https://github.com/stetre/moongl
 * https://github.com/stetre/moonglfw
 * https://github.com/stetre/moonnuklear

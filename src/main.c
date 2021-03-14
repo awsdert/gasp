@@ -1,5 +1,16 @@
 #include <workers.h>
 
+void* worker_lua( struct worker *worker )
+{
+	struct worker_msg own = {0};
+	
+	/* Only way to identify the worker after it died */
+	own.type = WORKER_MSG_DIED;
+	own.data = worker;
+	
+	return worker;
+}
+
 int main()
 {
 	int i;
@@ -13,11 +24,16 @@ int main()
 	pipe_t pipes[PIPE_COUNT] = {INVALID_PIPE,INVALID_PIPE};
 	worker_t workers[WORKER_COUNT] = {{0}}, *worker, *worker_ret[WORKER_COUNT];
 	Worker_t Worker[WORKER_COUNT] = { NULL };
+	struct pollfd fds = {0};
+	void *ptr = NULL;
+	
+	fds.fd = pipes[PIPE_RD];
+	fds.events = POLLIN | POLLERR | POLLHUP | POLLNVAL;
 	
 	Worker[WORKER_MM] = (Worker_t)mmworker;
 	Worker[WORKER_FOO] = (Worker_t)fooworker;
 	
-#define JOIN
+//#define JOIN
 #ifdef JOIN
 	workers[WORKER_MM].join = true;
 	workers[WORKER_FOO].join = true;
@@ -35,9 +51,12 @@ int main()
 		worker = &(workers[i]);
 		worker->num = i;
 		worker->tid = INVALID_TID;
-		worker->mmi_pipes[PIPE_RD] = pipes[PIPE_RD];
-		worker->mmi_pipes[PIPE_WR] = pipes[PIPE_WR];
+		worker->all_pipes[PIPE_RD] = pipes[PIPE_RD];
+		worker->all_pipes[PIPE_WR] = pipes[PIPE_WR];
 		worker->attr_created = false;
+		
+		if ( open_pipes( worker->own_pipes ) != 0 )
+			goto cleanup;
 		
 		if ( pthread_attr_init( &(worker->attr) ) != 0 )
 			goto cleanup;
@@ -53,10 +72,21 @@ int main()
 			goto cleanup;
 	}
 
-#ifdef JOIN
-	pthread_join( workers[WORKER_MM].tid, (void**)&(worker_ret[WORKER_MM]) );
-	pthread_join( workers[WORKER_FOO].tid, (void**)&(worker_ret[WORKER_FOO]) );
-#endif
+	while ( (ret = poll( &fds, 1, 1 )) >= 0 )
+	{
+		if ( ret == 1 )
+		{
+			/* Prevent uncaught messages by having them sent to all workers,
+			 * they can just ignore what is not relevant to them */
+			
+			rdpipe( pipes[PIPE_RD], (void*)(&ptr) );
+			
+			for ( int w = WORKER_MM; w < WORKER_COUNT; ++w )
+			{
+				wrpipe( worker->own_pipes[PIPE_WR], ptr );
+			}
+		}
+	}
 	
 	cleanup:
 	
@@ -72,6 +102,9 @@ int main()
 		
 		if ( worker->attr_created )
 			pthread_attr_destroy( &(worker->attr) );
+		
+		if ( worker->own_pipes[PIPE_WR] )
+			shut_pipes( worker->own_pipes );
 		
 		worker->attr_created = false;
 		worker->mmi_pipes[PIPE_WR] = INVALID_PIPE;

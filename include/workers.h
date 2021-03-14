@@ -17,17 +17,18 @@
 
 enum
 {
-	ALL_MSG_NIL = 0
-	, ALL_MSG_DIE
-	, MM_MSG_NEW
-	, MM_MSG_DEL
-	, MM_MSG_ALT
-	, MM_MSG_INC
-	, MM_MSG_DEC
-	, MM_MSG_DIE
-	, MM_MSG_WAIT
-	, MM_MSG_READY
-	, MM_MSG_COUNT
+	WORKER_MSG_NONE = 0
+	, WORKER_MSG_EXIT
+	, WORKER_MSG_TERM
+	, WORKER_MSG_DIED
+	, WORKER_MSG_WAIT
+	, WORKER_MSG_CONT
+	, WORKER_MSG_MEM_NEW
+	, WORKER_MSG_MEM_DEL
+	, WORKER_MSG_MEM_ALT
+	, WORKER_MSG_MEM_INC
+	, WORKER_MSG_MEM_DEC
+	, WORKER_MSG_COUNT
 };
 
 struct shared_block
@@ -51,7 +52,7 @@ typedef struct worker
 	// Thread ID
 	pthread_t tid;
 	// Memory Manager
-	pipe_t mmi_pipes[PIPE_COUNT], mmo_pipes[PIPE_COUNT];
+	pipe_t all_pipes[PIPE_COUNT], own_pipes[PIPE_COUNT];
 	// Will an attempt to join be made?
 	bool join;
 	// Should an attempt to close member attr be made by main() during cleanup?

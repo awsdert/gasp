@@ -20,7 +20,9 @@ typedef int pipe_t;
 int open_pipes( pipe_t *pipes );
 void shut_pipes( pipe_t *pipes );
 int pipe_err( pipe_t pipe );
-ssize_t rdpipe( pipe_t pipe, void *data, size_t size );
-ssize_t wrpipe( pipe_t pipe, void *data, size_t size );
+
+/* Will only assume sizeof(void*) */
+ssize_t rdpipe( pipe_t pipe, void *data );
+ssize_t wrpipe( pipe_t pipe, void *data );
 
 #endif

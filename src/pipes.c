@@ -33,20 +33,26 @@ int pipe_err( pipe_t pipe )
 	return ENOSYS;
 }
 
-ssize_t rdpipe( pipe_t pipe, void *data, size_t size )
+int poll_pipe( pipe_t pipe )
+{
+	/* Not supported yet */
+	return -1;
+}
+
+ssize_t rdpipe( pipe_t pipe, void *data )
 {
 	DWORD bytes = 0;
 	
-	ReadFile( pipe, data, size, &bytes, NULL );
+	ReadFile( pipe, data, sizeof(void*), &bytes, NULL );
 	
 	return bytes;
 }
 
-ssize_t wrpipe( pipe_t pipe, void *data, size_t size )
+ssize_t wrpipe( pipe_t pipe, void *data )
 {
 	DWORD bytes = 0;
 	
-	WriteFile( pipe, data, size, &bytes, NULL );
+	WriteFile( pipe, data, sizeof(void*), &bytes, NULL );
 	
 	return bytes;
 }
@@ -73,14 +79,22 @@ int pipe_err( pipe_t pipe )
 	return errno;
 }
 
-ssize_t rdpipe( pipe_t pipe, void *data, size_t size )
+int poll_pipe( pipe_t pipe )
 {
-	return read( pipe, data, size );
+	struct pollfd fds;
+	fds.fd = pipe;
+	fds.events = POLLIN | POLLERR | POLLHUP | POLLNVAL;
+	return poll( &fds, 1, 1 );
 }
 
-ssize_t wrpipe( pipe_t pipe, void *data, size_t size )
+ssize_t rdpipe( pipe_t pipe, void *data )
 {
-	return write( pipe, data, size );
+	return read( pipe, data, sizeof(void*) );
+}
+
+ssize_t wrpipe( pipe_t pipe, void *data )
+{
+	return write( pipe, data, sizeof(void*) );
 }
 
 #endif

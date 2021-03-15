@@ -70,4 +70,6 @@ void * worker_foo( worker_t *worker );
 
 char const * const get_worker_msg_txt( int msg );
 
+int main_worker( Worker_t run );
+
 #endif

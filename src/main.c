@@ -9,7 +9,7 @@ void* worker_lua( struct worker *worker )
 	own.type = WORKER_MSG_DIED;
 	own.data = worker;
 	
-	wrpipe( worker->all_pipes, (void*)(&ptr) );
+	wrpipe( worker->all_pipes[PIPE_WR], (void*)(&ptr) );
 	
 	return worker;
 }
@@ -18,7 +18,7 @@ int main()
 {
 	printf("Gasp Alpha\n");
 	
-	if ( main_worker( worker_lua ) == 0 )
+	if ( main_worker( (Worker_t)worker_lua ) == 0 )
 		return EXIT_SUCCESS;
 	
 	return EXIT_FAILURE;

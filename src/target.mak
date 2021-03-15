@@ -10,4 +10,4 @@ OBJ_DIR?=../obj
 INC_DIR?=../include
 SRC_DIR?=.
 
-CCFLAGS+=$(DEFINES:%=-D %)
+CFLAGS+=-I "$(INC_DIR)" $(DEFINES:%=-D %)

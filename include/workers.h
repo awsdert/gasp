@@ -53,10 +53,8 @@ typedef struct worker
 	pthread_t tid;
 	// Memory Manager
 	pipe_t all_pipes[PIPE_COUNT], own_pipes[PIPE_COUNT];
-	// Will an attempt to join be made?
-	bool join;
 	// Should an attempt to close member attr be made by main() during cleanup?
-	bool attr_created;
+	int init_attr_ret, open_pipes_ret, create_thread_ret;
 	// Attributes
 	pthread_attr_t attr;
 } worker_t;

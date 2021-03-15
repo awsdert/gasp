@@ -1,27 +1,77 @@
 #include <workers.h>
 
-int _new_worker( struct worker *worker, int *pipes, Worker_t run )
-{
-	int ret;
-	
-	worker->attr_created = false;
-	worker->all_pipes[PIPE_RD] = pipes[PIPE_RD];
-	worker->all_pipes[PIPE_WR] = pipes[PIPE_WR];
-	
-	if ( (ret =open_pipes( worker->own_pipes )) != 0 )
+int _del_worker( struct worker *worker )
+{	
+	if ( worker->open_pipes_ret == 0 )
 	{
-		worker->own_pipes[PIPE_RD] = INVALID_PIPE;
-		worker->own_pipes[PIPE_WR] = INVALID_PIPE;
-		return ret;
+		if ( worker->init_attr_ret == 0 )
+		{
+			if ( worker->create_thread_ret == 0 )
+			{
+				struct worker_msg worker_msg = {0};
+				void *ptr = &worker_msg;
+				
+				worker_msg.type = WORKER_MSG_TERM;
+				worker_msg.data = worker;
+				
+				wrpipe( worker->own_pipes[PIPE_WR], (void*)(&ptr) );
+				
+				pthread_join( worker->tid );
+				
+				pthread_cancel( worker->tid );
+			}
+			
+			pthread_attr_destroy( &(worker->attr) );
+		}
+		
+		shut_pipes( worker->own_pipes );
 	}
-	
-	return 0;
+		
+	worker->num = -1;
+	worker->tid = INVALID_TID;
+	worker->all_pipes[PIPE_RD] = INVALID_PIPE;
+	worker->all_pipes[PIPE_WR] = INVALID_PIPE;
+	worker->own_pipes[PIPE_RD] = INVALID_PIPE;
+	worker->own_pipes[PIPE_WR] = INVALID_PIPE;
 }
 
-int _del_worker( struct worker *worker )
+int _new_worker( int num, struct worker *worker, int *pipes, Worker_t run )
 {
-	if ( worker->own_pipes[PIPE_RD] != INVALID_PIPE )
-		shut_pipes( worker->own_pipes );
+	int ret = 0;
+	
+	worker->num = num;
+	worker->tid = INVALID_TID;
+	worker->all_pipes[PIPE_RD] = pipes[PIPE_RD];
+	worker->all_pipes[PIPE_WR] = pipes[PIPE_WR];
+	worker->open_pipes_ret = open_pipes( worker->own_pipes );
+	worker->init_attr_ret = -1;
+	worker->create_thread_ret = -1;
+	
+	if ( worker->open_pipes_ret == 0 )
+	{
+		worker->init_attr_ret = pthread_attr_init( &(worker->attr) );
+		
+		if ( worker->init_attr_ret == 0 )
+		{
+			worker->create_thread_ret = pthread_create
+			(
+				&(worker->tid), &(worker->attr), Worker[i], worker
+			);
+		}
+	}
+	
+	if
+	(
+		worker->init_attr_ret != 0
+		|| worker->open_pipes_ret != 0
+		|| worker->create_thread_ret != 0
+	)
+	{
+		_del_worker( worker );
+		ret = -1;
+	}
+	
+	return ret;
 }
 
 int main_worker( Worker_t run )
@@ -95,6 +145,8 @@ int main_worker( Worker_t run )
 			}
 		}
 	}
+	
+	shut_pipes( pipes );
 	
 	return ret;
 }

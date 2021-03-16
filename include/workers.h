@@ -1,7 +1,6 @@
 #ifndef WORKERS_H
 #define WORKERS_H
 
-#define _GNU_SOURCE
 #include <unistd.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -37,15 +36,9 @@ struct shared_block
 	struct memory_block *memory_block;
 };
 
-struct worker_msg
-{
-	int type;
-	void *data;
-};
-
 #define INVALID_TID -1
 
-typedef struct worker
+struct worker
 {
 	// Thread reference
 	int num;
@@ -57,7 +50,14 @@ typedef struct worker
 	int init_attr_ret, open_pipes_ret, create_thread_ret;
 	// Attributes
 	pthread_attr_t attr;
-} worker_t;
+};
+
+struct worker_msg
+{
+	int type;
+	struct worker *worker;
+	void *data;
+};
 
 int new_worker( char const * const name );
 #define get_worker( index ) ((index >= 0 && index )
@@ -65,8 +65,8 @@ void del_worker( int index );
 
 typedef void * (*Worker_t)( void *arg );
 
-void * worker_mm( worker_t *worker );
-void * worker_foo( worker_t *worker );
+void * worker_mm( struct worker *worker );
+void * worker_foo( struct worker *worker );
 
 char const * const get_worker_msg_txt( int msg );
 

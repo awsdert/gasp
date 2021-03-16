@@ -1,3 +1,5 @@
 TARGET_CC_NAME?=GCC
 
 include mak/cc/$(TARGET_CC_NAME).mak
+
+CC_DEFINES:=$(CC_$(TARGET_CC_NAME)_DEFINES)

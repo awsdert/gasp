@@ -3,6 +3,11 @@
 
 #ifdef _WIN32
 #include <namedpipeapi.h>
+#else
+#include <unistd.h>
+#include <errno.h>
+#include <poll.h>
+#include <pthread.h>
 #endif
 
 #define PIPE_RD 0

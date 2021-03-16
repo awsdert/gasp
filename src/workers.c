@@ -16,7 +16,7 @@ int _del_worker( struct worker *worker )
 				
 				wrpipe( worker->own_pipes[PIPE_WR], (void*)(&ptr) );
 				
-				pthread_join( worker->tid );
+				pthread_join( worker->tid, &ptr );
 				
 				pthread_cancel( worker->tid );
 			}
@@ -54,9 +54,7 @@ int _new_worker( int num, struct worker *worker, int *pipes, Worker_t run )
 		if ( worker->init_attr_ret == 0 )
 		{
 			worker->create_thread_ret = pthread_create
-			(
-				&(worker->tid), &(worker->attr), Worker[i], worker
-			);
+				( &(worker->tid), &(worker->attr), run, worker );
 		}
 	}
 	
@@ -79,15 +77,14 @@ int main_worker( Worker_t run )
 	int ret = 0, ready, active_workers = 0;
 	
 	struct memory_group workerv = {0}, *workers;
-	struct *worker;
+	struct worker *worker;
 	
 	struct pollfd fds = {0};
 	
-	pipe_t pipes[PIPE_COUNT] =
-	{
-		worker->mmi_pipes[PIPE_RD],
-		worker->mmo_pipes[PIPE_WR]
-	};
+	pipe_t pipes[PIPE_COUNT] = { INVALID_PIPE };
+	
+	if ( (ret = open_pipes( pipes )) != 0 )
+		return EPIPE;
 	
 	if ( !new_memory_group_total( struct memory_block, &workerv, 8 ) )
 		return ENOMEM;
@@ -109,12 +106,15 @@ int main_worker( Worker_t run )
 		if ( ready == 1 )
 		{
 			ssize_t bytes;
-			void *ptr = NULL;
-			struct worker_msg *worker_msg = NULL;
+			struct worker_msg *worker_msg = NULL, own_msg = {0};
 			struct shared_block *shared_block = NULL;
 			struct memory_block *memory_block = NULL;
+			void *own = &worker_msg, *ptr = NULL;
 			
 			bytes = rdpipe( pipes[PIPE_RD], (void*)(&ptr) );
+			
+			if ( bytes < 0 )
+				continue;
 			
 			worker_msg = ptr;
 			
@@ -137,11 +137,16 @@ int main_worker( Worker_t run )
 				break;
 			case WORKER_MSG_MM_NEW:
 				(void)new_memory_block( memory_block, shared_block->want );
+				own_msg.type = WORKER_MSG_CONT;
+				own_msg.data = worker;
 				wrpipe(
-					mm_pipes[PIPE_WR], (void*)(&memory_block), sizeof(void*) );
+					pipes[PIPE_WR], (void*)(&memory_block), sizeof(void*) );
 				break;
 			case WORKER_MSG_MM_INC:
-				
+				(void)new_memory_block( memory_block, shared_block->want );
+				wrpipe(
+					pipes[PIPE_WR], (void*)(&memory_block), sizeof(void*) );
+				break;
 			}
 		}
 	}

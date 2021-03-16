@@ -101,7 +101,7 @@ int main_worker( Worker_t run )
 	if ( !new_memory_group_total( struct worker *, &workerv, 8 ) )
 		return ENOMEM;
 		
-	workers = get_memory_group_group( struct worker *, &workerv );
+	workers = workerv.memory_block.block;
 	memset( workers, 0, workerv.memory_block.bytes );
 	
 	worker = new_memory_block( &workerb, sizeof(struct worker) );
@@ -122,7 +122,7 @@ int main_worker( Worker_t run )
 			struct worker_msg *worker_msg = NULL, own_msg = {0};
 			void *own = &own_msg, *ptr = NULL;
 			
-			ret = rdpipe( pipes[PIPE_RD], ptr), &bytes );
+			ret = rdpipe( pipes[PIPE_RD], ptr, &bytes );
 			
 			if ( ret != 0 )
 				continue;
@@ -131,7 +131,7 @@ int main_worker( Worker_t run )
 			
 			switch ( worker_msg->type )
 			{
-			case WORKER_DIED:
+			case WORKER_MSG_DIED:
 				active_workers--;
 				worker = worker_msg->data;
 				_del_worker( worker );
@@ -170,7 +170,7 @@ int main_worker( Worker_t run )
 				
 				if ( ret != 0 )
 				{
-					wrpipe( pipes[PIPE_WR], ptr, &bytes )
+					wrpipe( pipes[PIPE_WR], ptr, &bytes );
 					continue;
 				}
 				

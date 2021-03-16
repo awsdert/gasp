@@ -1,5 +1,6 @@
+include common_goals.mak
+
 MAKECMDGOALS?=main default
-common_goals=default run clean
 COMMONGOALS:=$(filter $(common_goals),$(MAKECMDGOALS))
 TARGETGOALS:=$(filter-out $(common_goals),$(MAKECMDGOALS))
 
@@ -9,4 +10,7 @@ TARGETGOALS:=$(filter-out $(common_goals),$(MAKECMDGOALS))
 # much on windows
 
 $(TARGETGOALS):
-	make -f $@.mak $(COMMONGOALS)
+	$(MAKE) -f $@.mak $(COMMONGOALS)
+
+$(COMMONGOALS):
+	@echo

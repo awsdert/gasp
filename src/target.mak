@@ -1,3 +1,4 @@
+include common_goals.mak
 include platform.mak
 include compiler.mak
 

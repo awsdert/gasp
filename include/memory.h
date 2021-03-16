@@ -1,6 +1,16 @@
 #ifndef MEMORY_H
 #define MEMORY_H
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <inttypes.h>
+#include <malloc.h>
+#endif
+
 struct memory_block
 {
 	void *block;

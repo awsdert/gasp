@@ -99,7 +99,10 @@ int main_worker( Worker_t run )
 		return EPIPE;
 	
 	if ( !new_memory_group_total( struct worker *, &workerv, 8 ) )
-		return ENOMEM;
+	{
+		ret = ENOMEM;
+		goto cleanup;
+	}
 		
 	workers = workerv.memory_block.block;
 	memset( workers, 0, workerv.memory_block.bytes );
@@ -107,10 +110,18 @@ int main_worker( Worker_t run )
 	worker = new_memory_block( &workerb, sizeof(struct worker) );
 	
 	if ( !worker )
+	{
+		puts("Failed to create worker object, exiting...");
 		goto cleanup;
+	}
+	
+	memset( worker, 0, sizeof(struct worker) );
 	
 	if ( _new_worker( 1, worker, pipes, run ) != 0 )
+	{
+		puts("Failed to create worker thread, exiting..." );
 		goto cleanup;
+	}
 	
 	workers[++active_workers] = worker;
 	
@@ -176,6 +187,22 @@ int main_worker( Worker_t run )
 				
 				break;
 			}
+		}
+	}
+	
+	cleanup:
+	
+	if ( workers )
+	{
+		for ( int w = 0; w < workerv.total; ++w )
+		{
+			worker = workers[w];
+			if ( worker )
+			{
+				_del_worker( worker );
+				free( worker );
+			}
+			workers[w] = NULL;
 		}
 	}
 	

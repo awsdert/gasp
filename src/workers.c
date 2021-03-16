@@ -111,9 +111,9 @@ int main_worker( Worker_t run )
 			struct memory_block *memory_block = NULL;
 			void *own = &worker_msg, *ptr = NULL;
 			
-			bytes = rdpipe( pipes[PIPE_RD], (void*)(&ptr) );
+			ret = rdpipe( pipes[PIPE_RD], (void*)(&ptr), &bytes );
 			
-			if ( bytes < 0 )
+			if ( ret != 0 )
 				continue;
 			
 			worker_msg = ptr;

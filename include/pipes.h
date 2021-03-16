@@ -27,7 +27,7 @@ void shut_pipes( pipe_t *pipes );
 int pipe_err( pipe_t pipe );
 
 /* Will only assume sizeof(void*) */
-ssize_t rdpipe( pipe_t pipe, void *data );
-ssize_t wrpipe( pipe_t pipe, void *data );
+int rdpipe( pipe_t pipe, void *data, ssize_t *rd );
+int wrpipe( pipe_t pipe, void *data, ssize_t *wr );
 
 #endif

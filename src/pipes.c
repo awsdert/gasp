@@ -39,22 +39,28 @@ int poll_pipe( pipe_t pipe )
 	return -1;
 }
 
-ssize_t rdpipe( pipe_t pipe, void *data )
+int rdpipe( pipe_t pipe, void *data, ssize_t *done )
 {
 	DWORD bytes = 0;
 	
+	#error Should catch any errors returned by this
 	ReadFile( pipe, data, sizeof(void*), &bytes, NULL );
 	
-	return bytes;
+	*done = bytes;
+	
+	return 0;
 }
 
-ssize_t wrpipe( pipe_t pipe, void *data )
+int wrpipe( pipe_t pipe, void *data, ssize_t *done )
 {
 	DWORD bytes = 0;
 	
+	#error Should catch any errors returned by this
 	WriteFile( pipe, data, sizeof(void*), &bytes, NULL );
 	
-	return bytes;
+	*done = bytes;
+	
+	return 0;
 }
 
 #else
@@ -87,14 +93,56 @@ int poll_pipe( pipe_t pipe )
 	return poll( &fds, 1, 1 );
 }
 
-ssize_t rdpipe( pipe_t pipe, void *data )
+int rdpipe( pipe_t pipe, void *data, ssize_t *done )
 {
-	return read( pipe, data, sizeof(void*) );
+	int ret;
+	ssize_t byte = 0;
+	char *dst = (void*)(&data), tmp[sizeof(void*)];
+	
+	while ( byte < sizeof(void*) )
+	{
+		int ret;
+		ssize_t bytes = read( pipe, data, sizeof(void*) - byte );
+		#prama message "Should consider using a mutex here as this is shared"
+		ret = errno;
+		
+		for ( ssize_t b = 0; b < bytes; dst[byte] = tmp[b], ++b, ++byte );
+		
+		if ( ret != 0 && ret != EINTR )
+		{
+			*done = byte;
+			return ret;
+		}
+	}
+	
+	*done = byte;
+	return 0;
 }
 
-ssize_t wrpipe( pipe_t pipe, void *data )
+int wrpipe( pipe_t pipe, void *data, ssize_t *done )
 {
-	return write( pipe, data, sizeof(void*) );
+	int ret;
+	ssize_t byte = 0;
+	char *dst = (void*)(&data), tmp[sizeof(void*)];
+	
+	while ( byte < sizeof(void*) )
+	{
+		int ret;
+		ssize_t bytes = write( pipe, data, sizeof(void*) - byte );
+		#prama message "Should consider using a mutex here as this is shared"
+		ret = errno;
+		
+		for ( ssize_t b = 0; b < bytes; dst[byte] = tmp[b], ++b, ++byte );
+		
+		if ( ret != 0 && ret != EINTR )
+		{
+			*done = byte;
+			return ret;
+		}
+	}
+	
+	*done = byte;
+	return 0;
 }
 
 #endif

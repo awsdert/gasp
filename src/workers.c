@@ -8,13 +8,26 @@ int _del_worker( struct worker *worker )
 		{
 			if ( worker->create_thread_ret == 0 )
 			{
-				struct worker_msg worker_msg = {0};
-				void *ptr = &worker_msg;
+				int ret;
+				ssize_t bytes;
+				struct worker_msg own_msg = {0};
+				void *own = &own_msg, *ptr;
 				
-				worker_msg.type = WORKER_MSG_TERM;
-				worker_msg.data = worker;
+				own_msg.type = WORKER_MSG_TERM;
+				own_msg.data = worker;
 				
-				wrpipe( worker->own_pipes[PIPE_WR], (void*)(&ptr) );
+				ret = wrpipe( worker->own_pipes[PIPE_WR], own, &bytes );
+				
+				if ( ret != 0 )
+				{
+					printf
+					(
+						"Error 0x%08X (%d) '%s', aborting gasp..."
+						, ret, ret, strerror(ret)
+					);
+					exit( EXIT_FAILURE );
+					return ret;
+				}
 				
 				pthread_join( worker->tid, &ptr );
 				
@@ -76,30 +89,30 @@ int main_worker( Worker_t run )
 {
 	int ret = 0, ready, active_workers = 0;
 	
-	struct memory_group workerv = {0}, *workers;
-	struct worker *worker;
-	
-	struct pollfd fds = {0};
+	struct memory_group workerv = {0};
+	struct memory_block workerb = {0};
+	struct worker **workers, *worker;
 	
 	pipe_t pipes[PIPE_COUNT] = { INVALID_PIPE };
 	
 	if ( (ret = open_pipes( pipes )) != 0 )
 		return EPIPE;
 	
-	if ( !new_memory_group_total( struct memory_block, &workerv, 8 ) )
+	if ( !new_memory_group_total( struct worker *, &workerv, 8 ) )
 		return ENOMEM;
 		
-	workers = get_memory_group_group( struct memory_block, &workerv );
+	workers = get_memory_group_group( struct worker *, &workerv );
+	memset( workers, 0, workerv.memory_block.bytes );
 	
-	worker = new_memory_block( workers + 1, sizeof(struct worker) );
+	worker = new_memory_block( &workerb, sizeof(struct worker) );
 	
 	if ( !worker )
 		goto cleanup;
 	
-	if ( _new_worker( worker, pipes, run ) != 0 )
+	if ( _new_worker( 1, worker, pipes, run ) != 0 )
 		goto cleanup;
-		
-	active_workers++;
+	
+	workers[++active_workers] = worker;
 	
 	while ( active_workers > 0 && (ready = poll_pipe( pipes[PIPE_RD] )) >= 0 )
 	{
@@ -107,26 +120,14 @@ int main_worker( Worker_t run )
 		{
 			ssize_t bytes;
 			struct worker_msg *worker_msg = NULL, own_msg = {0};
-			struct shared_block *shared_block = NULL;
-			struct memory_block *memory_block = NULL;
-			void *own = &worker_msg, *ptr = NULL;
+			void *own = &own_msg, *ptr = NULL;
 			
-			ret = rdpipe( pipes[PIPE_RD], (void*)(&ptr), &bytes );
+			ret = rdpipe( pipes[PIPE_RD], ptr), &bytes );
 			
 			if ( ret != 0 )
 				continue;
 			
 			worker_msg = ptr;
-			
-			if
-			(
-				worker_msg->type >= WORKER_MSG_MEM_NEW &&
-				worker_msg->type <= WORKER_MSG_MEM_DEL
-			)
-			{
-				shared_block = worker_msg->data;
-				memory_block = shared_block->memory_block;
-			}
 			
 			switch ( worker_msg->type )
 			{
@@ -135,17 +136,44 @@ int main_worker( Worker_t run )
 				worker = worker_msg->data;
 				_del_worker( worker );
 				break;
-			case WORKER_MSG_MM_NEW:
-				(void)new_memory_block( memory_block, shared_block->want );
-				own_msg.type = WORKER_MSG_CONT;
-				own_msg.data = worker;
-				wrpipe(
-					pipes[PIPE_WR], (void*)(&memory_block), sizeof(void*) );
-				break;
-			case WORKER_MSG_MM_INC:
-				(void)new_memory_block( memory_block, shared_block->want );
-				wrpipe(
-					pipes[PIPE_WR], (void*)(&memory_block), sizeof(void*) );
+			case WORKER_MSG_ALLOC:
+				own_msg = *worker_msg;
+				worker_msg->type = WORKER_MSG_WAIT;
+				
+				for ( int w = 0; w < workerv.total; ++w )
+				{
+					worker = workers[w];
+					if ( worker )
+					{
+						ret = wrpipe( worker->own_pipes[PIPE_WR], ptr, &bytes );
+						
+						#pragma message "Best to revisit this later"
+						if ( ret != 0 )
+						{
+							printf
+							(
+								"Could not recover from "
+								"error 0x%08X (%d) '%s', exiting..."
+								, ret, ret, strerror(ret)
+							);
+							exit(EXIT_FAILURE);
+						}
+						
+						while ( (ready = poll_pipe( pipes[PIPE_RD] )) != 1 );
+						
+						ret = rdpipe( pipes[PIPE_RD], ptr, &bytes );
+						
+						if ( ret != 0 )
+							break;
+					}
+				}
+				
+				if ( ret != 0 )
+				{
+					wrpipe( pipes[PIPE_WR], ptr, &bytes )
+					continue;
+				}
+				
 				break;
 			}
 		}

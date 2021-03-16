@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <poll.h>
 #include <pthread.h>
+#include <string.h>
 
 #include "memory.h"
 #include "pipes.h"
@@ -22,11 +23,7 @@ enum
 	, WORKER_MSG_DIED
 	, WORKER_MSG_WAIT
 	, WORKER_MSG_CONT
-	, WORKER_MSG_MEM_NEW
-	, WORKER_MSG_MEM_DEL
-	, WORKER_MSG_MEM_ALT
-	, WORKER_MSG_MEM_INC
-	, WORKER_MSG_MEM_DEC
+	, WORKER_MSG_ALLOC
 	, WORKER_MSG_COUNT
 };
 
@@ -50,6 +47,7 @@ struct worker
 	int init_attr_ret, open_pipes_ret, create_thread_ret;
 	// Attributes
 	pthread_attr_t attr;
+	struct memory_group memory_group;
 };
 
 struct worker_msg

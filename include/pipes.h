@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
+#include <string.h>
 #endif
 
 #define PIPE_RD 0
@@ -27,7 +28,8 @@ void shut_pipes( pipe_t *pipes );
 int pipe_err( pipe_t pipe );
 
 /* Will only assume sizeof(void*) */
-int rdpipe( pipe_t pipe, void *data, ssize_t *rd );
-int wrpipe( pipe_t pipe, void *data, ssize_t *wr );
+int poll_pipe( pipe_t pipe );
+int rdpipe( pipe_t pipe, void *data, ssize_t *done );
+int wrpipe( pipe_t pipe, void *data, ssize_t *done );
 
 #endif

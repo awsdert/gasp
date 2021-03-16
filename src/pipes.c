@@ -103,7 +103,7 @@ int rdpipe( pipe_t pipe, void *data, ssize_t *done )
 	{
 		int ret;
 		ssize_t bytes = read( pipe, data, sizeof(void*) - byte );
-		#prama message "Should consider using a mutex here as this is shared"
+		#pragma message "Should consider using a mutex here as this is shared"
 		ret = errno;
 		
 		for ( ssize_t b = 0; b < bytes; dst[byte] = tmp[b], ++b, ++byte );
@@ -129,7 +129,7 @@ int wrpipe( pipe_t pipe, void *data, ssize_t *done )
 	{
 		int ret;
 		ssize_t bytes = write( pipe, data, sizeof(void*) - byte );
-		#prama message "Should consider using a mutex here as this is shared"
+		#pragma message "Should consider using a mutex here as this is shared"
 		ret = errno;
 		
 		for ( ssize_t b = 0; b < bytes; dst[byte] = tmp[b], ++b, ++byte );

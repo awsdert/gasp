@@ -102,13 +102,14 @@ int rdpipe( pipe_t pipe, void *data, ssize_t *done )
 	while ( byte < sizeof(void*) )
 	{
 		int ret;
-		ssize_t bytes = read( pipe, data, sizeof(void*) - byte );
+		ssize_t get = sizeof(void*) - byte;
+		ssize_t bytes = read( pipe, data, get );
 		#pragma message "Should consider using a mutex here as this is shared"
 		ret = errno;
 		
 		for ( ssize_t b = 0; b < bytes; dst[byte] = tmp[b], ++b, ++byte );
 		
-		if ( ret != 0 && ret != EINTR )
+		if ( bytes < get && ret != 0 && ret != EINTR )
 		{
 			*done = byte;
 			return ret;
@@ -128,13 +129,14 @@ int wrpipe( pipe_t pipe, void *data, ssize_t *done )
 	while ( byte < sizeof(void*) )
 	{
 		int ret;
-		ssize_t bytes = write( pipe, data, sizeof(void*) - byte );
+		ssize_t set = sizeof(void*) - byte;
+		ssize_t bytes = write( pipe, data, set );
 		#pragma message "Should consider using a mutex here as this is shared"
 		ret = errno;
 		
 		for ( ssize_t b = 0; b < bytes; dst[byte] = tmp[b], ++b, ++byte );
 		
-		if ( ret != 0 && ret != EINTR )
+		if ( bytes < set && ret != 0 && ret != EINTR )
 		{
 			*done = byte;
 			return ret;

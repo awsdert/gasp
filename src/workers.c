@@ -89,8 +89,9 @@ int main_worker( Worker_t run )
 {
 	int ret = 0, ready, active_workers = 0;
 	
-	struct memory_group workerv = {0};
+	struct memory_group workerv = {0}, blockv = {0};
 	struct memory_block workerb = {0};
+	struct shared_block *blocks, *block;
 	struct worker **workers, *worker;
 	
 	pipe_t pipes[PIPE_COUNT] = { INVALID_PIPE };
@@ -148,15 +149,136 @@ int main_worker( Worker_t run )
 				_del_worker( worker );
 				break;
 			case WORKER_MSG_ALLOC:
-				own_msg = *worker_msg;
-				worker_msg->type = WORKER_MSG_WAIT;
+			{
+				struct worker_block *worker_block = worker_msg->data;
+				struct memory_block *memory_block = worker_block->memory_block;
 				
+				if ( worker_block->worker )
+				{
+					own_msg = *worker_msg;
+					worker_msg->type = WORKER_MSG_WAIT;
+					
+					for ( int w = 0; w < workerv.total; ++w )
+					{
+						worker = workers[w];
+						if ( worker )
+						{
+							ret = wrpipe
+							(
+								worker->own_pipes[PIPE_WR]
+								, ptr
+								, &bytes
+							);
+							
+							#pragma message "Best to revisit this later"
+							if ( ret != 0 )
+							{
+								printf
+								(
+									"Could not recover from "
+									"error 0x%08X (%d) '%s', exiting..."
+									, ret, ret, strerror(ret)
+								);
+								exit(EXIT_FAILURE);
+							}
+							
+							while ( (ready = poll_pipe( pipes[PIPE_RD] )) != 1 );
+							
+							ret = rdpipe( pipes[PIPE_RD], ptr, &bytes );
+							
+							if ( ret != 0 )
+								break;
+						}
+					}
+					
+					if ( worker_block->want )
+					{
+						int i = 0;
+						
+						for ( ; i < blockv.total; ++i )
+						{
+							block = &blocks[i];
+							if ( block->block == memory_block->block )
+							{
+								block->holders++;
+								break;
+							}
+						}
+						
+						if ( i == blockv.total )
+						{
+							for ( i = 0; i < blockv.total; ++i )
+							{
+								block = &blocks[i];
+								if ( !(block->block) )
+								{
+									block->holders++;
+									block->block = memory_block->block;
+									blockv.count++;
+									break;
+								}
+							}
+						}
+						
+						if ( i == blockv.total )
+						{
+							void *temp = inc_memory_group_total
+							(
+								struct shared_block
+								, &blockv
+								, 64
+							);
+							
+							if ( temp )
+							{
+								blocks = temp;
+								block = &blocks[i];
+								block->holders++;
+							}
+						}
+						
+						if ( i < blockv.total )
+						{
+							inc_memory_block( memory_block, worker_block->want );
+							block->block = memory_block->block;
+						}
+					}
+					else
+					{
+						for ( int i = 0; i < blockv.total; ++i )
+						{
+							block = &blocks[i];
+							if ( block->block == memory_block->block )
+							{
+								block->holders--;
+								if ( !block->holders )
+								{
+									del_memory_block( memory_block );
+									block->block = NULL;
+									blockv.count--;
+									break;
+								}
+							}
+						}
+					}
+				}
+				else if ( worker_block->want )
+					alt_memory_block( memory_block, worker_block->want );
+				else
+					del_memory_block( memory_block );
+				
+				worker_msg->type = WORKER_MSG_CONT;
 				for ( int w = 0; w < workerv.total; ++w )
 				{
 					worker = workers[w];
 					if ( worker )
 					{
-						ret = wrpipe( worker->own_pipes[PIPE_WR], ptr, &bytes );
+						ret = wrpipe
+						(
+							worker->own_pipes[PIPE_WR]
+							, ptr
+							, &bytes
+						);
 						
 						#pragma message "Best to revisit this later"
 						if ( ret != 0 )
@@ -169,23 +291,11 @@ int main_worker( Worker_t run )
 							);
 							exit(EXIT_FAILURE);
 						}
-						
-						while ( (ready = poll_pipe( pipes[PIPE_RD] )) != 1 );
-						
-						ret = rdpipe( pipes[PIPE_RD], ptr, &bytes );
-						
-						if ( ret != 0 )
-							break;
 					}
 				}
 				
-				if ( ret != 0 )
-				{
-					wrpipe( pipes[PIPE_WR], ptr, &bytes );
-					continue;
-				}
-				
 				break;
+			}
 			}
 		}
 	}

@@ -10,7 +10,11 @@ OBJS=$(OBJECTS:%=$(OBJ_DIR)/%)
 $(info MAKECMDGOALS=$(MAKECMDGOALS))
 $(info common_goals=$(common_goals))
 
-default: $(EXE) $(LIBS)
+default: build
+
+rebuild: clean build
+
+build: $(EXE) $(LIBS)
 
 run: $(EXE) $(LIBS)
 	$(BIN_DIR)/$(EXE)

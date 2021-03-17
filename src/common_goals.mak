@@ -1,1 +1,1 @@
-common_goals=default run clean
+common_goals=default build run clean rebuild

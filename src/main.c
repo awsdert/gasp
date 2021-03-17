@@ -22,17 +22,17 @@ void* lua_memory( void *ud, void *ptr, size_t osize, size_t nsize )
 		int ret;
 		ssize_t bytes;
 		struct worker_msg *worker_msg, own_msg;
-		struct shared_block shared_block;
+		struct worker_block worker_block;
 		struct memory_block memory_block = {0};
 		void *own = &own_msg, *ptr = (void*)&(worker_msg);
 		
-		shared_block.memory_block = &memory_block;
-		shared_block.want = nsize;
+		worker_block.memory_block = &memory_block;
+		worker_block.want = nsize;
 		memory_block.block = ptr;
 		memory_block.bytes = osize;
 		
 		own_msg.type = WORKER_MSG_ALLOC;
-		own_msg.data = &shared_block;
+		own_msg.data = &worker_block;
 		
 		/* While this does create latency it also creates stability */
 		ret = wrpipe( lua_worker->all_pipes[PIPE_WR], own, &bytes );

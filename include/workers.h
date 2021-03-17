@@ -27,12 +27,6 @@ enum
 	, WORKER_MSG_COUNT
 };
 
-struct shared_block
-{
-	size_t want;
-	struct memory_block *memory_block;
-};
-
 #define INVALID_TID -1
 
 struct worker
@@ -48,6 +42,19 @@ struct worker
 	// Attributes
 	pthread_attr_t attr;
 	struct memory_group memory_group;
+};
+
+struct worker_block
+{
+	size_t want;
+	struct worker *worker;
+	struct memory_block *memory_block;
+};
+
+struct shared_block
+{
+	size_t holders;
+	void *block;
 };
 
 struct worker_msg

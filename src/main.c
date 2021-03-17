@@ -68,19 +68,12 @@ void* lua_memory( void *ud, void *ptr, size_t osize, size_t nsize )
 }
 
 void* worker_lua( struct worker *worker )
-{
-	struct worker_msg own_msg = {0};
-	void *own = &own_msg;
-	ssize_t bytes;
-	int ret;
+{	
+	puts("Starting lua worker");
 	
 	lua_worker = worker;
 	
-	/* Only way to identify the worker after it died */
-	own_msg.type = WORKER_MSG_DIED;
-	own_msg.data = worker;
+	puts("Ending lua worker");
 	
-	ret = wrpipe( worker->all_pipes[PIPE_WR], own, &bytes );
-	
-	return worker;
+	return say_worker_died( worker );
 }

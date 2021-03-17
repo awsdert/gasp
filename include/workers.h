@@ -29,6 +29,13 @@ enum
 
 #define INVALID_TID -1
 
+struct worker_msg
+{
+	int type;
+	struct worker *worker;
+	void *data;
+};
+
 struct worker
 {
 	// Thread reference
@@ -42,6 +49,8 @@ struct worker
 	// Attributes
 	pthread_attr_t attr;
 	struct memory_group memory_group;
+	struct worker_msg own_msg, *ptr2own_msg;
+	void *ptr2ptr2own_msg;
 };
 
 struct worker_block
@@ -57,13 +66,6 @@ struct shared_block
 	void *block;
 };
 
-struct worker_msg
-{
-	int type;
-	struct worker *worker;
-	void *data;
-};
-
 int new_worker( char const * const name );
 #define get_worker( index ) ((index >= 0 && index )
 void del_worker( int index );
@@ -73,6 +75,7 @@ typedef void * (*Worker_t)( void *arg );
 void * worker_mm( struct worker *worker );
 void * worker_foo( struct worker *worker );
 
+struct worker* say_worker_died( struct worker *worker );
 char const * const get_worker_msg_txt( int msg );
 
 int main_worker( Worker_t run );

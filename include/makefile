@@ -1,2 +1,2 @@
 default $(MAKECMDGOALS):
-	cd ../ && make
+	cd ../ && make $(MAKECMDGOALS)

@@ -104,25 +104,29 @@ struct memory_group
 	int total, count, focus;
 };
 
-#define get_memory_group_total( group ) ((group)->total)
-#define get_memory_group_count( group ) ((group)->count)
-#define get_memory_group_focus( group ) ((group)->focus)
-#define get_memory_group_bytes( group ) \
-	get_memory_block_bytes( ((struct memory_block*)group) )
-#define get_memory_group_group( T, group ) \
-	get_memory_block_block( T*, ((struct memory_block*)group) )
-#define get_memory_group_entry( T, group, index ) \
-	(get_memory_group_group( T, group )[index])
+#define get_memory_group_total( memory_group ) ((memory_group)->total)
+#define get_memory_group_count( memory_group ) ((memory_group)->count)
+#define get_memory_group_focus( memory_group ) ((memory_group)->focus)
+#define get_memory_group_bytes( memory_group ) \
+	get_memory_block_bytes( ((struct memory_block*)memory_group) )
+#define get_memory_group_group( T, memory_group ) \
+	get_memory_block_block( T*, ((struct memory_block*)memory_group) )
+#define get_memory_group_entry( T, memory_group, index ) \
+	(get_memory_group_group( T, memory_group )[index])
 
-#define new_memory_group_total( T, group, total ) \
-	new_memory_block( ((struct memory_block*)group), sizeof(T) * total )
-#define alt_memory_group_total( T, group, total ) \
-	alt_memory_block( ((struct memory_block*)group), sizeof(T) * total )	
-#define inc_memory_group_total( T, group, total ) \
-	inc_memory_block( ((struct memory_block*)group), sizeof(T) * (((group)->total) + total) )
-#define dec_memory_group_total( T, group, total ) \
-	dec_memory_block( ((struct memory_block*)group), sizeof(T) * (((group)->total) - total) )
-#define del_memory_group_total( group ) \
-	del_memory_block( ((struct memory_block*)group) )
+#define new_memory_group_total( T, memory_group, total ) \
+	new_memory_block( ((struct memory_block*)memory_group) \
+		, (total) * sizeof(T) )
+#define alt_memory_group_total( T, memory_group, total ) \
+	alt_memory_block( ((struct memory_block*)memory_group) \
+		, (total) * sizeof(T) )
+#define inc_memory_group_total( T, memory_group, total ) \
+	inc_memory_block( ((struct memory_block*)memory_group) \
+		, (get_memory_group_total(memory_group) + (total)) * sizeof(T) )
+#define dec_memory_group_total( T, memory_group, total ) \
+	dec_memory_block( ((struct memory_block*)memory_group) \
+		, (get_memory_group_total(memory_group) - (total)) * sizeof(T) )
+#define del_memory_group_total( memory_group ) \
+	del_memory_block( ((struct memory_block*)memory_group) )
 
 #endif

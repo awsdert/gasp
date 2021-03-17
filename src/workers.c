@@ -89,7 +89,7 @@ int main_worker( Worker_t run )
 {
 	int ret = 0, ready, active_workers = 0;
 	
-	struct memory_group workerv = {0}, blockv = {0};
+	struct memory_group workers_group = {0}, blocks_group = {0}, *memory_group;
 	struct memory_block workerb = {0};
 	struct shared_block *blocks, *block;
 	struct worker **workers, *worker;
@@ -99,14 +99,14 @@ int main_worker( Worker_t run )
 	if ( (ret = open_pipes( pipes )) != 0 )
 		return EPIPE;
 	
-	if ( !new_memory_group_total( struct worker *, &workerv, 8 ) )
+	if ( !new_memory_group_total( struct worker *, &workers_group, 8 ) )
 	{
 		ret = ENOMEM;
 		goto cleanup;
 	}
 		
-	workers = workerv.memory_block.block;
-	memset( workers, 0, workerv.memory_block.bytes );
+	workers = workers_group.memory_block.block;
+	memset( workers, 0, workers_group.memory_block.bytes );
 	
 	worker = new_memory_block( &workerb, sizeof(struct worker) );
 	
@@ -158,7 +158,7 @@ int main_worker( Worker_t run )
 					own_msg = *worker_msg;
 					worker_msg->type = WORKER_MSG_WAIT;
 					
-					for ( int w = 0; w < workerv.total; ++w )
+					for ( int w = 0; w < workers_group.total; ++w )
 					{
 						worker = workers[w];
 						if ( worker )
@@ -195,7 +195,7 @@ int main_worker( Worker_t run )
 					{
 						int i = 0;
 						
-						for ( ; i < blockv.total; ++i )
+						for ( ; i < blocks_group.total; ++i )
 						{
 							block = &blocks[i];
 							if ( block->block == memory_block->block )
@@ -205,29 +205,27 @@ int main_worker( Worker_t run )
 							}
 						}
 						
-						if ( i == blockv.total )
+						if ( i == blocks_group.total )
 						{
-							for ( i = 0; i < blockv.total; ++i )
+							for ( i = 0; i < blocks_group.total; ++i )
 							{
 								block = &blocks[i];
 								if ( !(block->block) )
 								{
 									block->holders++;
 									block->block = memory_block->block;
-									blockv.count++;
+									blocks_group.count++;
 									break;
 								}
 							}
 						}
 						
-						if ( i == blockv.total )
+						if ( i == blocks_group.total )
 						{
-							void *temp = inc_memory_group_total
-							(
-								struct shared_block
-								, &blockv
-								, 64
-							);
+							void *temp;
+							memory_group = &blocks_group;
+							temp = inc_memory_group_total
+								( struct shared_block, memory_group, 64 );
 							
 							if ( temp )
 							{
@@ -237,7 +235,7 @@ int main_worker( Worker_t run )
 							}
 						}
 						
-						if ( i < blockv.total )
+						if ( i < blocks_group.total )
 						{
 							inc_memory_block( memory_block, worker_block->want );
 							block->block = memory_block->block;
@@ -245,7 +243,7 @@ int main_worker( Worker_t run )
 					}
 					else
 					{
-						for ( int i = 0; i < blockv.total; ++i )
+						for ( int i = 0; i < blocks_group.total; ++i )
 						{
 							block = &blocks[i];
 							if ( block->block == memory_block->block )
@@ -255,7 +253,7 @@ int main_worker( Worker_t run )
 								{
 									del_memory_block( memory_block );
 									block->block = NULL;
-									blockv.count--;
+									blocks_group.count--;
 									break;
 								}
 							}
@@ -268,7 +266,7 @@ int main_worker( Worker_t run )
 					del_memory_block( memory_block );
 				
 				worker_msg->type = WORKER_MSG_CONT;
-				for ( int w = 0; w < workerv.total; ++w )
+				for ( int w = 0; w < workers_group.total; ++w )
 				{
 					worker = workers[w];
 					if ( worker )
@@ -304,7 +302,7 @@ int main_worker( Worker_t run )
 	
 	if ( workers )
 	{
-		for ( int w = 0; w < workerv.total; ++w )
+		for ( int w = 0; w < workers_group.total; ++w )
 		{
 			worker = workers[w];
 			if ( worker )

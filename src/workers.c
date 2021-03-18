@@ -85,7 +85,7 @@ struct worker* _new_worker( int num, int *pipes, Worker_t run )
 	worker->create_thread_ret = -1;
 	worker->ptr2own_msg = &(worker->own_msg);
 	worker->ptr2ptr2own_msg = (void*)(&(worker->ptr2own_msg));
-	worker->ptr2ptr2src_msg = &(worker->own_msg);
+	worker->ptr2ptr2src_msg = (void*)(&(worker->ptr2src_msg));
 	
 	if ( worker->open_pipes_ret == 0 )
 	{
@@ -121,11 +121,11 @@ struct worker* _new_worker( int num, int *pipes, Worker_t run )
 int send_worker_msg( struct worker *worker, int msg, void *obj )
 {
 	struct worker_msg *own_msg = worker->ptr2own_msg;
-	void *own = worker->ptr2ptr2own_msg, *_ptr = NULL, *ptr = (void*)&(_ptr);
+	void *own = worker->ptr2ptr2own_msg;
 	ssize_t bytes;
 	
 	own_msg->type = WORKER_MSG_ALLOC;
-	own_msg->data = ptr;
+	own_msg->data = obj;
 	
 	/* While this does create latency it also creates stability */
 	return wrpipe( worker->all_pipes[PIPE_WR], own, &bytes );

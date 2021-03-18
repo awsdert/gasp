@@ -46,11 +46,14 @@ int _del_worker( struct worker *worker )
 	worker->all_pipes[PIPE_WR] = INVALID_PIPE;
 	worker->own_pipes[PIPE_RD] = INVALID_PIPE;
 	worker->own_pipes[PIPE_WR] = INVALID_PIPE;
+	worker->ptr2src_msg = NULL;
 }
 
 int _new_worker( int num, struct worker *worker, int *pipes, Worker_t run )
 {
 	int ret = 0;
+	
+	memset( worker, 0, sizeof(struct worker) );
 	
 	worker->num = num;
 	worker->tid = INVALID_TID;
@@ -61,6 +64,7 @@ int _new_worker( int num, struct worker *worker, int *pipes, Worker_t run )
 	worker->create_thread_ret = -1;
 	worker->ptr2own_msg = &(worker->own_msg);
 	worker->ptr2ptr2own_msg = (void*)(&(worker->ptr2own_msg));
+	worker->ptr2ptr2src_msg = &(worker->own_msg);
 	
 	if ( worker->open_pipes_ret == 0 )
 	{
@@ -87,19 +91,75 @@ int _new_worker( int num, struct worker *worker, int *pipes, Worker_t run )
 	return ret;
 }
 
-struct worker* say_worker_died( struct worker *worker )
+int send_worker_msg( struct worker *worker, int msg, void *obj )
+{
+	struct worker_msg *own_msg = worker->ptr2own_msg;
+	void *own = worker->ptr2ptr2own_msg, *_ptr = NULL, *ptr = (void*)&(_ptr);
+	ssize_t bytes;
+	
+	own_msg->type = WORKER_MSG_ALLOC;
+	own_msg->data = ptr;
+	
+	/* While this does create latency it also creates stability */
+	return wrpipe( worker->all_pipes[PIPE_WR], own, &bytes );
+}
+	
+int seek_worker_msg( struct worker *worker, int msg )
 {
 	int ret;
 	ssize_t bytes;
-	struct worker_msg *own_msg = worker->ptr2own_msg;
+	void *ptr = worker->ptr2ptr2src_msg;
 	
-	/* Only way to identify the worker after it died */
-	own_msg->type = WORKER_MSG_DIED;
-	own_msg->data = worker;
+	worker->ptr2src_msg = NULL;
 	
-	printf( "Reporting Death of Worker %d\n", worker->num );
+	printf("Worker %d is seeking a message\n", worker->num );
 	
-	ret = wrpipe( worker->all_pipes[PIPE_WR], worker->ptr2ptr2own_msg, &bytes );
+	while ( (ret = poll_pipe( worker->own_pipes[PIPE_RD] )) >= 0 )
+	{
+		printf("Worker %d is checking if pipe is ready\n", worker->num );
+		
+		if ( ret == 1 )
+		{
+			struct worker_msg *own_msg = worker->ptr2own_msg, *src_msg;
+			
+			printf("Worker %d is reading a message pointer\n", worker->num );
+			
+			ret = rdpipe( worker->own_pipes[PIPE_RD], ptr, &bytes );
+			
+			if ( ret != 0 )
+				return ret;
+			
+			src_msg = worker->ptr2src_msg;
+			
+			printf("Worker %d is checking for message type\n", worker->num );
+			
+			if ( src_msg->type == WORKER_MSG_WAIT )
+			{
+				send_worker_msg( worker, WORKER_MSG_CONT, own_msg->data );
+				continue;
+			}
+			
+			if ( msg >= 0 && src_msg->type != msg )
+				continue;
+			
+			break;
+		}
+	}
+	
+	printf("Worker %d successfully sought a message\n", worker->num );
+	
+	return 0;
+}
+
+struct worker* say_worker_died( struct worker *worker, worker_panic panic )
+{
+	int ret = send_worker_msg( worker, WORKER_MSG_DIED, worker );
+	
+	if ( ret != 0 )
+	{
+		if ( panic ) panic(worker);
+		exit(EXIT_FAILURE);
+	}
 	
 	return worker;
 }
@@ -135,7 +195,8 @@ int main_worker( Worker_t run )
 		goto cleanup;
 	}
 	
-	memset( worker, 0, sizeof(struct worker) );
+	workers_group.count++;
+	workers[workers_group.count] = worker;
 	
 	if ( _new_worker( 1, worker, pipes, run ) != 0 )
 	{
@@ -143,15 +204,14 @@ int main_worker( Worker_t run )
 		goto cleanup;
 	}
 	
-	workers[++active_workers] = worker;
-	
 	puts("Starting main worker loop");
 	
-	while ( active_workers > 0 && (ready = poll_pipe( pipes[PIPE_RD] )) >= 0 )
+	while ( workers_group.count > 0 && (ready = poll_pipe( pipes[PIPE_RD] )) >= 0 )
 	{
 		ssize_t bytes;
 		struct worker_msg *worker_msg = NULL, own_msg = {0};
-		void *own = &own_msg, *_ptr = NULL, *ptr = (void*)&(_ptr);
+		void *_own = &own_msg, *own = (void*)(&_own)
+			, *_ptr = NULL, *ptr = (void*)&(_ptr);
 			
 		if ( ready != 1 )
 			continue;
@@ -172,10 +232,12 @@ int main_worker( Worker_t run )
 		{
 		case WORKER_MSG_DIED:
 			puts("Main worker is removing a worker");
-			active_workers--;
+			workers_group.count--;
 			worker = worker_msg->data;
 			worker->create_thread_ret = ENOMEDIUM;
+			workers[worker->num] = NULL;
 			_del_worker( worker );
+			free( worker );
 			break;
 		case WORKER_MSG_ALLOC:
 		{
@@ -184,24 +246,20 @@ int main_worker( Worker_t run )
 			
 			if ( worker_block->worker )
 			{
-				own_msg = *worker_msg;
 				worker_msg->type = WORKER_MSG_WAIT;
 				
-				for ( int w = 0; w < workers_group.total; ++w )
+				for ( int w = 1; w < workers_group.total; ++w )
 				{
 					worker = workers[w];
 					if ( worker )
 					{
-						ret = wrpipe
-						(
-							worker->own_pipes[PIPE_WR]
-							, ptr
-							, &bytes
-						);
+						puts("Main worker is sending wait message");
+						ret = wrpipe( worker->own_pipes[PIPE_WR], ptr, &bytes );
 						
 						#pragma message "Best to revisit this later"
 						if ( ret != 0 )
 						{
+							wrpipe_panic:
 							printf
 							(
 								"Could not recover from "
@@ -211,14 +269,40 @@ int main_worker( Worker_t run )
 							exit(EXIT_FAILURE);
 						}
 						
-						while ( (ready = poll_pipe( pipes[PIPE_RD] )) != 1 );
+						printf("Main worker is waiting on a response from "
+								"worker %d", worker->num );
 						
-						ret = rdpipe( pipes[PIPE_RD], ptr, &bytes );
-						
-						if ( ret != 0 )
-							break;
+						while ( (ready = poll_pipe( pipes[PIPE_RD] )) >= 0 )
+						{
+							puts("Main worker is checking if pipe is ready");
+							
+							if ( ready == 1 )
+							{
+								ret = rdpipe( pipes[PIPE_RD], ptr, &bytes );
+								
+								if ( ret != 0 )
+									break;
+								
+								if ( worker_msg->type != WORKER_MSG_CONT || worker_msg->worker != worker )
+								{
+									puts("Main worker is sending resend message");
+									
+									own_msg.type = WORKER_MSG_RESEND;
+									own_msg.worker = NULL;
+									own_msg.data = worker_msg;
+									ret = wrpipe( worker_msg->worker->own_pipes[PIPE_WR], own, &bytes );
+									
+									if ( ret != 0 )
+										goto wrpipe_panic;
+								}
+								else
+									break;
+							}
+						}
 					}
 				}
+				
+				puts("Main worker is performing allocation");
 				
 				if ( worker_block->want )
 				{
@@ -294,29 +378,19 @@ int main_worker( Worker_t run )
 				del_memory_block( memory_block );
 			
 			worker_msg->type = WORKER_MSG_CONT;
+			
 			for ( int w = 0; w < workers_group.total; ++w )
 			{
 				worker = workers[w];
 				if ( worker )
 				{
-					ret = wrpipe
-					(
-						worker->own_pipes[PIPE_WR]
-						, ptr
-						, &bytes
-					);
+					printf("Main worker is sending continue message to "
+						"worker %d", worker->num );
 					
-					#pragma message "Best to revisit this later"
+					ret = wrpipe( worker->own_pipes[PIPE_WR], ptr, &bytes );
+					
 					if ( ret != 0 )
-					{
-						printf
-						(
-							"Could not recover from "
-							"error 0x%08X (%d) '%s', exiting..."
-							, ret, ret, strerror(ret)
-						);
-						exit(EXIT_FAILURE);
-					}
+						goto wrpipe_panic;
 				}
 			}
 			
@@ -331,7 +405,7 @@ int main_worker( Worker_t run )
 	
 	if ( workers )
 	{
-		for ( int w = 0; w < workers_group.total; ++w )
+		for ( int w = 1; w < workers_group.total; ++w )
 		{
 			worker = workers[w];
 			if ( worker )

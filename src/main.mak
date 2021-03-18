@@ -2,7 +2,7 @@ include target.mak
 
 NAME=main
 EXE=$(BIN_DIR)/gasp_$(NAME)$(SYS_EXE_SFX)
-LIBRARIES+= pthread
+LIBRARIES+= pthread lua
 LIBS:=$(LIBRARIES:%=-l%)
 OBJECTS:=$(NAME).o pipes.o workers.o memory.o
 OBJS=$(OBJECTS:%=$(OBJ_DIR)/%)

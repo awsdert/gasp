@@ -23,6 +23,7 @@ enum
 	, WORKER_MSG_DIED
 	, WORKER_MSG_WAIT
 	, WORKER_MSG_CONT
+	, WORKER_MSG_RESEND
 	, WORKER_MSG_ALLOC
 	, WORKER_MSG_COUNT
 };
@@ -49,8 +50,8 @@ struct worker
 	// Attributes
 	pthread_attr_t attr;
 	struct memory_group memory_group;
-	struct worker_msg own_msg, *ptr2own_msg;
-	void *ptr2ptr2own_msg;
+	struct worker_msg own_msg, *ptr2own_msg, *ptr2src_msg;
+	void *ptr2ptr2own_msg, *ptr2ptr2src_msg;
 };
 
 struct worker_block
@@ -75,7 +76,10 @@ typedef void * (*Worker_t)( void *arg );
 void * worker_mm( struct worker *worker );
 void * worker_foo( struct worker *worker );
 
-struct worker* say_worker_died( struct worker *worker );
+typedef void (*worker_panic)( struct worker *worker );
+int send_worker_msg( struct worker *worker, int msg, void *obj );
+int seek_worker_msg( struct worker *worker, int msg );
+struct worker* say_worker_died( struct worker *worker, worker_panic panic );
 char const * const get_worker_msg_txt( int msg );
 
 int main_worker( Worker_t run );

@@ -1,4 +1,7 @@
 #include <workers.h>
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
 
 void* memory( void* ud, void* ptr, size_t osize, size_t nsize );
 void* worker_lua( struct worker *worker );
@@ -20,22 +23,18 @@ void* lua_memory( void *ud, void *ptr, size_t osize, size_t nsize )
 	if ( ptr || nsize )
 	{
 		int ret;
-		ssize_t bytes;
-		struct worker_msg *worker_msg, own_msg;
-		struct worker_block worker_block;
+		struct worker *worker = ud;
+		struct worker_msg *own_msg = worker->ptr2own_msg, *src_msg;
+		struct worker_block worker_block = {0};
 		struct memory_block memory_block = {0};
-		void *own = &own_msg, *ptr = (void*)&(worker_msg);
 		
-		worker_block.memory_block = &memory_block;
-		worker_block.want = nsize;
 		memory_block.block = ptr;
 		memory_block.bytes = osize;
-		
-		own_msg.type = WORKER_MSG_ALLOC;
-		own_msg.data = &worker_block;
+		worker_block.want = nsize;
+		worker_block.memory_block = &memory_block;
 		
 		/* While this does create latency it also creates stability */
-		ret = wrpipe( lua_worker->all_pipes[PIPE_WR], own, &bytes );
+		ret = send_worker_msg( worker, WORKER_MSG_ALLOC, &worker_block );
 		
 		if ( ret != 0 )
 		{
@@ -50,16 +49,7 @@ void* lua_memory( void *ud, void *ptr, size_t osize, size_t nsize )
 			return ptr;
 		}
 		
-		while ( (ret = poll_pipe( lua_worker->own_pipes[PIPE_RD] )) )
-		{
-			ret = rdpipe( lua_worker->own_pipes[PIPE_RD], ptr, &bytes );
-			
-			if ( ret != 0 )
-				return NULL;
-			
-			if ( ptr != own || worker_msg->type != WORKER_MSG_CONT )
-				continue;
-		}
+		ret = seek_worker_msg( worker, WORKER_MSG_CONT );
 		
 		return (memory_block.bytes >= nsize) ? memory_block.block : NULL;
 	}
@@ -73,7 +63,22 @@ void* worker_lua( struct worker *worker )
 	
 	lua_worker = worker;
 	
-	puts("Ending lua worker");
+	lua_State *L = lua_newstate( lua_memory, worker );
 	
-	return say_worker_died( worker );
+	if ( !L )
+		goto die;
+		
+	puts("Created lua state");
+	
+	luaL_openlibs(L);
+	
+	puts("Opened standard lua libs");
+	
+	luaL_dofile(L, "test.lua");
+	
+	lua_close(L);
+
+	die:
+	puts("Ending lua worker");
+	return say_worker_died( worker, NULL );
 }

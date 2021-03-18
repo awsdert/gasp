@@ -49,9 +49,30 @@ int _del_worker( struct worker *worker )
 	worker->ptr2src_msg = NULL;
 }
 
-int _new_worker( int num, struct worker *worker, int *pipes, Worker_t run )
+void report_error( int err, char const * const msg )
 {
-	int ret = 0;
+	if ( err == 0 )
+		return;
+
+	printf( "Error 0x%08X (%d) '%s'", err, err, strerror(err) );
+	
+	if ( msg )
+		printf(", %s", msg );
+	
+	putc('\n',stdout);
+}
+
+struct worker* _new_worker( int num, int *pipes, Worker_t run )
+{
+	int ret;
+	struct worker *worker = malloc( sizeof(struct worker) );
+	ret = errno;
+	
+	if ( !worker )
+	{
+		report_error( ret, "Could not create worker object" );
+		return NULL;
+	}
 	
 	memset( worker, 0, sizeof(struct worker) );
 	
@@ -84,11 +105,17 @@ int _new_worker( int num, struct worker *worker, int *pipes, Worker_t run )
 		|| worker->create_thread_ret != 0
 	)
 	{
+		report_error(
+			worker->init_attr_ret, "Couldn't initialise worker attribute/s" );
+		report_error( worker->open_pipes_ret, "Couldn't open pipes" );
+		report_error(
+			worker->create_thread_ret, "Couldn't create worker thread" );
+		
 		_del_worker( worker );
-		ret = -1;
+		worker = NULL;
 	}
 	
-	return ret;
+	return worker;
 }
 
 int send_worker_msg( struct worker *worker, int msg, void *obj )
@@ -164,6 +191,9 @@ struct worker* say_worker_died( struct worker *worker, worker_panic panic )
 	return worker;
 }
 
+struct worker** inc_workers_group( struct memory_group *workers_group );
+void del_workers_group( struct memory_group *workers_group );
+
 int main_worker( Worker_t run )
 {
 	int ret = 0, ready, active_workers = 0;
@@ -178,16 +208,20 @@ int main_worker( Worker_t run )
 	if ( (ret = open_pipes( pipes )) != 0 )
 		return EPIPE;
 	
-	if ( !new_memory_group_total( struct worker *, &workers_group, 8 ) )
+	workers_group.Tsize = sizeof(struct worker*);
+	blocks_group.Tsize = sizeof(struct shared_block);
+	
+	workers = inc_workers_group( &workers_group );
+	
+	if ( !workers )
 	{
 		ret = ENOMEM;
 		goto cleanup;
 	}
-		
-	workers = workers_group.memory_block.block;
+	
 	memset( workers, 0, workers_group.memory_block.bytes );
 	
-	worker = new_memory_block( &workerb, sizeof(struct worker) );
+	worker = _new_worker( 1, pipes, run );
 	
 	if ( !worker )
 	{
@@ -198,11 +232,7 @@ int main_worker( Worker_t run )
 	workers_group.count++;
 	workers[workers_group.count] = worker;
 	
-	if ( _new_worker( 1, worker, pipes, run ) != 0 )
-	{
-		puts("Failed to create worker thread, exiting..." );
-		goto cleanup;
-	}
+	printf( "Worker pointer 1 is now %p\n", workers[1] );
 	
 	puts("Starting main worker loop");
 	
@@ -336,8 +366,8 @@ int main_worker( Worker_t run )
 					if ( i == blocks_group.total )
 					{
 						void *temp;
-						temp = inc_memory_group_total
-							( struct shared_block, &blocks_group, 64 );
+						temp = (struct shared_block*)
+							inc_memory_group_total( &blocks_group, 64 );
 						
 						if ( temp )
 						{
@@ -379,9 +409,10 @@ int main_worker( Worker_t run )
 			
 			worker_msg->type = WORKER_MSG_CONT;
 			
-			for ( int w = 0; w < workers_group.total; ++w )
+			for ( int w = 1; w < workers_group.total; ++w )
 			{
 				worker = workers[w];
+				
 				if ( worker )
 				{
 					printf("Main worker is sending continue message to "
@@ -403,21 +434,31 @@ int main_worker( Worker_t run )
 	
 	cleanup:
 	
-	if ( workers )
-	{
-		for ( int w = 1; w < workers_group.total; ++w )
-		{
-			worker = workers[w];
-			if ( worker )
-			{
-				_del_worker( worker );
-				free( worker );
-			}
-			workers[w] = NULL;
-		}
-	}
+	del_workers_group( &workers_group );
 	
 	shut_pipes( pipes );
 	
 	return ret;
+}
+
+struct worker** inc_workers_group( struct memory_group *workers_group )
+{
+	return (struct worker**)inc_memory_group_total( workers_group, 8 );
+}
+
+void del_workers_group( struct memory_group *workers_group )
+{
+	struct worker *worker, **workers =
+		(struct worker **)get_memory_group_block( workers_group );
+	
+	for ( int w = 0; w < workers_group->total; ++w )
+	{
+		worker = workers[w];
+		if ( worker )
+		{
+			_del_worker( worker );
+			free( worker );
+		}
+		workers[w] = NULL;
+	}
 }

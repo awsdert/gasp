@@ -1,1 +1,1 @@
-common_goals=default build run clean rebuild
+common_goals=default build run clean rebuild debug gede

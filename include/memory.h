@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <malloc.h>
+#include <string.h>
 #endif
 
 struct memory_block
@@ -17,8 +18,14 @@ struct memory_block
 	size_t bytes;
 };
 
-#define get_memory_block_bytes( block ) ((block)->bytes)
-#define get_memory_block_block( T, block ) ((T)((block)->block))
+static size_t get_memory_block_bytes( struct memory_block *memory_block )
+{
+	return memory_block->bytes;
+}
+static void* get_memory_block_block( struct memory_block *memory_block )
+{
+	return memory_block->block;
+}
 
 /* Initialises memory block structure
  * 
@@ -102,31 +109,97 @@ struct memory_group
 {
 	struct memory_block memory_block;
 	int total, count, focus;
+	size_t Tsize;
 };
 
-#define get_memory_group_total( memory_group ) ((memory_group)->total)
-#define get_memory_group_count( memory_group ) ((memory_group)->count)
-#define get_memory_group_focus( memory_group ) ((memory_group)->focus)
-#define get_memory_group_bytes( memory_group ) \
-	get_memory_block_bytes( ((struct memory_block*)memory_group) )
-#define get_memory_group_group( T, memory_group ) \
-	get_memory_block_block( T*, ((struct memory_block*)memory_group) )
+static int get_memory_group_focus( struct memory_group *memory_group )
+{
+	return memory_group->focus;
+}
+static int get_memory_group_count( struct memory_group *memory_group )
+{
+	return memory_group->count;
+}
+static int get_memory_group_total( struct memory_group *memory_group )
+{
+	return memory_group->total;
+}
+static size_t get_memory_group_bytes( struct memory_group *memory_group )
+{
+	return get_memory_block_bytes( &(memory_group->memory_block) );
+}
+static void* get_memory_group_block( struct memory_group *memory_group )
+{
+	return get_memory_block_block( &(memory_group->memory_block) );
+}
 #define get_memory_group_entry( T, memory_group, index ) \
-	(get_memory_group_group( T, memory_group )[index])
+	(((T*)get_memory_group_block(memory_group))[index])
 
-#define new_memory_group_total( T, memory_group, total ) \
-	new_memory_block( ((struct memory_block*)memory_group) \
-		, (total) * sizeof(T) )
-#define alt_memory_group_total( T, memory_group, total ) \
-	alt_memory_block( ((struct memory_block*)memory_group) \
-		, (total) * sizeof(T) )
-#define inc_memory_group_total( T, memory_group, total ) \
-	inc_memory_block( ((struct memory_block*)memory_group) \
-		, (get_memory_group_total(memory_group) + (total)) * sizeof(T) )
-#define dec_memory_group_total( T, memory_group, total ) \
-	dec_memory_block( ((struct memory_block*)memory_group) \
-		, (get_memory_group_total(memory_group) - (total)) * sizeof(T) )
-#define del_memory_group_total( memory_group ) \
-	del_memory_block( ((struct memory_block*)memory_group) )
+/* It was un-intended but look at what the abbreviations of Index, Count &
+ * Total spell out :D */
+static void set_memory_group_focus( struct memory_group *memory_group, int I )
+{
+	I = (I >= 0 && I < memory_group->total) * I;
+	memory_group->focus = I;
+}
+static void set_memory_group_count( struct memory_group *memory_group, int C )
+{
+	C = (C >= 0 && C < memory_group->total) * C; 
+	memory_group->count = C;
+}
+
+static void* new_memory_group_block( struct memory_group *memory_group, int T )
+{
+	void *ptr;
+	T = (T >= 0) * T;
+	ptr = new_memory_block(
+		&(memory_group->memory_block), T * memory_group->Tsize );
+	memory_group->total =
+		memory_group->memory_block.bytes / memory_group->Tsize;
+	return ptr;
+}
+
+static void* alt_memory_group_total( struct memory_group *memory_group, int T )
+{
+	void *ptr;
+	T = (T >= 0) * T;
+	ptr = alt_memory_block(
+		&(memory_group->memory_block), T * memory_group->Tsize );
+	memory_group->total =
+		memory_group->memory_block.bytes / memory_group->Tsize;
+	return ptr;
+}
+
+static void* inc_memory_group_total( struct memory_group *memory_group, int T )
+{
+	void *ptr;
+	T = memory_group->total + ((T >= 0) * T);
+	T = ((T >= memory_group->total) * T)
+		+ ((T < memory_group->total) * memory_group->total);
+	ptr = inc_memory_block(
+		&(memory_group->memory_block), T * memory_group->Tsize );
+	memory_group->total =
+		memory_group->memory_block.bytes / memory_group->Tsize;
+	return ptr;
+}
+
+static void* dec_memory_group_total( struct memory_group *memory_group, int T )
+{
+	void *ptr;
+	T = memory_group->total + ((T >= 0) * T);
+	T = (T >= 0) * T;
+	ptr = dec_memory_block(
+		&(memory_group->memory_block), T * memory_group->Tsize );
+	memory_group->total =
+		memory_group->memory_block.bytes / memory_group->Tsize;
+	return ptr;
+}
+
+static void del_memory_group_block( struct memory_group *memory_group )
+{
+	del_memory_block( &(memory_group->memory_block) );
+	memset( memory_group, 0, sizeof(struct memory_group) );
+}
+	
 
 #endif

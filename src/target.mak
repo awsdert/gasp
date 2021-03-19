@@ -8,6 +8,7 @@ DEFINES:=$(CPU_DEFINES) $(SYS_DEFINES) $(CC_DEFINES)
 ifneq '$(filter debug gede,$(MAKECMDGOALS))' ''
 	DFLAGS+= -ggdb
 	DEFINES+= _DEBUG
+	DBG_SFX:=_d
 endif
 
 BIN_DIR?=../bin

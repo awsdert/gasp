@@ -32,6 +32,7 @@ enum
 
 struct worker_msg
 {
+	int num;
 	int type;
 	struct worker *worker;
 	void *data;

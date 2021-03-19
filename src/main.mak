@@ -1,14 +1,13 @@
 include target.mak
 
 NAME=main
-EXE=$(BIN_DIR)/gasp_$(NAME)$(SYS_EXE_SFX)
-DBG_EXE=$(EXE)_d
+EXE=$(BIN_DIR)/gasp_$(NAME)$(DBG_SFX)$(SYS_EXE_SFX)
+LANG?=enGB
 LIBRARIES+= pthread lua
 LIBS:=$(LIBRARIES:%=-l%)
 DBG_LIBS:=$(LIBRARIES:%=-l%)
-OBJECTS:=$(NAME) pipes workers memory
-OBJS=$(OBJECTS:%=$(OBJ_DIR)/%.o)
-OBJS=$(OBJECTS:%=$(OBJ_DIR)/%_d.o)
+OBJECTS:=$(NAME) pipes workers memory worker_msg/$(basename $(LANG))
+OBJS=$(OBJECTS:%=$(OBJ_DIR)/%$(DBG_SFX).o)
 
 $(info MAKECMDGOALS=$(MAKECMDGOALS))
 $(info common_goals=$(common_goals))
@@ -35,10 +34,7 @@ $(EXE): $(OBJS)
 lib%: $(SYS_DLL_PFX)%.$(SYS_DLL_SFX)
 	make -f $<.mak
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
-	$(CC) $(CFLAGS) $(LIBS) -o $@ -c $<
-
-$(OBJ_DIR)/%_d.o: $(SRC_DIR)/%.c
+$(OBJ_DIR)/%$(DBG_SFX).o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) $(LIBS) -o $@ -c $<
 
 .PHONY: $(common_goals)

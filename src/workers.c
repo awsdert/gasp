@@ -124,8 +124,10 @@ int send_worker_msg( struct worker *worker, int msg, void *obj )
 	void *own = worker->ptr2ptr2own_msg;
 	ssize_t bytes;
 	
-	own_msg->type = WORKER_MSG_ALLOC;
+	own_msg->type = msg;
 	own_msg->data = obj;
+	own_msg->worker = worker;
+	own_msg->num = worker->num;
 	
 	/* While this does create latency it also creates stability */
 	return wrpipe( worker->all_pipes[PIPE_WR], own, &bytes );
@@ -133,24 +135,18 @@ int send_worker_msg( struct worker *worker, int msg, void *obj )
 	
 int seek_worker_msg( struct worker *worker, int msg )
 {
-	int ret;
+	int ret, sent;
 	ssize_t bytes;
 	void *ptr = worker->ptr2ptr2src_msg;
+	struct worker_msg *own_msg = worker->ptr2own_msg, *src_msg;
+	sent = own_msg->type;
 	
 	worker->ptr2src_msg = NULL;
 	
-	printf("Worker %d is seeking a message\n", worker->num );
-	
 	while ( (ret = poll_pipe( worker->own_pipes[PIPE_RD] )) >= 0 )
 	{
-		printf("Worker %d is checking if pipe is ready\n", worker->num );
-		
 		if ( ret == 1 )
-		{
-			struct worker_msg *own_msg = worker->ptr2own_msg, *src_msg;
-			
-			printf("Worker %d is reading a message pointer\n", worker->num );
-			
+		{	
 			ret = rdpipe( worker->own_pipes[PIPE_RD], ptr, &bytes );
 			
 			if ( ret != 0 )
@@ -158,11 +154,15 @@ int seek_worker_msg( struct worker *worker, int msg )
 			
 			src_msg = worker->ptr2src_msg;
 			
-			printf("Worker %d is checking for message type\n", worker->num );
-			
 			if ( src_msg->type == WORKER_MSG_WAIT )
 			{
 				send_worker_msg( worker, WORKER_MSG_CONT, own_msg->data );
+				continue;
+			}
+			
+			if ( src_msg->type == WORKER_MSG_RESEND )
+			{
+				send_worker_msg( worker, sent, own_msg->data );
 				continue;
 			}
 			
@@ -173,19 +173,17 @@ int seek_worker_msg( struct worker *worker, int msg )
 		}
 	}
 	
-	printf("Worker %d successfully sought a message\n", worker->num );
-	
 	return 0;
 }
 
 struct worker* say_worker_died( struct worker *worker, worker_panic panic )
 {
-	int ret = send_worker_msg( worker, WORKER_MSG_DIED, worker );
+	int ret;
 	
-	if ( ret != 0 )
+	while ( (ret = send_worker_msg( worker, WORKER_MSG_DIED, worker )) )
 	{
-		if ( panic ) panic(worker);
-		exit(EXIT_FAILURE);
+		if ( ret != 0 )
+			continue;
 	}
 	
 	return worker;
@@ -193,6 +191,63 @@ struct worker* say_worker_died( struct worker *worker, worker_panic panic )
 
 struct worker** inc_workers_group( struct memory_group *workers_group );
 void del_workers_group( struct memory_group *workers_group );
+
+void worker_died(
+	struct memory_group *workers_group, struct worker_msg *worker_msg )
+{
+	struct worker
+		**workers = (struct worker**)get_memory_group_block( workers_group )
+		, *worker = worker_msg->data;
+		
+	worker_msg->type = WORKER_MSG_CONT;
+		
+	printf("Removing worker %d\n", worker->num );
+	
+	worker->create_thread_ret = ENOMEDIUM;
+	workers[worker->num] = NULL;
+	workers_group->count--;
+	_del_worker( worker );
+	free( worker );
+}
+
+struct worker_msg* poll_worker_msg( int *pipes, struct memory_group *workers_group )
+{
+	int ret;
+	
+	while
+	(
+		workers_group->count > 0
+		&& (ret = poll_pipe( pipes[PIPE_RD] )) >= 0
+	)
+	{
+		ssize_t bytes;
+		struct worker_msg *src_msg = NULL;
+		void *_ptr = NULL, *ptr = (void*)&(_ptr);
+			
+		if ( ret != 1 )
+			continue;
+			
+		ret = rdpipe( pipes[PIPE_RD], ptr, &bytes );
+		
+		if ( ret != 0 )
+		{
+			printf( "Error 0x%08X (%d) '%s'\n", ret, ret, strerror(ret) );
+			continue;
+		}
+		
+		src_msg = _ptr;
+		
+		if ( src_msg->type == WORKER_MSG_DIED )
+		{
+			worker_died( workers_group, src_msg );
+			continue;
+		}
+		
+		return src_msg;
+	}
+	
+	return NULL;
+}
 
 int main_worker( Worker_t run )
 {
@@ -202,6 +257,7 @@ int main_worker( Worker_t run )
 	struct memory_block workerb = {0};
 	struct shared_block *blocks, *block;
 	struct worker **workers, *worker;
+	struct worker_msg *src_msg;
 	
 	pipe_t pipes[PIPE_COUNT] = { INVALID_PIPE };
 	
@@ -232,59 +288,29 @@ int main_worker( Worker_t run )
 	workers_group.count++;
 	workers[workers_group.count] = worker;
 	
-	printf( "Worker pointer 1 is now %p\n", workers[1] );
-	
-	puts("Starting main worker loop");
-	
-	while ( workers_group.count > 0 && (ready = poll_pipe( pipes[PIPE_RD] )) >= 0 )
+	while ( (src_msg = poll_worker_msg(pipes, &workers_group)) )
 	{
 		ssize_t bytes;
-		struct worker_msg *worker_msg = NULL, own_msg = {0};
+		struct worker_msg own_msg = {0}, tmp_msg = *src_msg;
 		void *_own = &own_msg, *own = (void*)(&_own)
-			, *_ptr = NULL, *ptr = (void*)&(_ptr);
-			
-		if ( ready != 1 )
-			continue;
-			
-		ret = rdpipe( pipes[PIPE_RD], ptr, &bytes );
+			, *_tmp = &tmp_msg, *tmp = (void*)(&_tmp)
+			, *_ptr = src_msg, *ptr = (void*)&(_ptr);
 		
-		if ( ret != 0 )
+		if ( src_msg->type == WORKER_MSG_ALLOC )
 		{
-			printf( "Error 0x%08X (%d) '%s'\n", ret, ret, strerror(ret) );
-			continue;
-		}
-		
-		puts("Main worker is reading from pointer");
-		
-		worker_msg = _ptr;
-		
-		switch ( worker_msg->type )
-		{
-		case WORKER_MSG_DIED:
-			puts("Main worker is removing a worker");
-			workers_group.count--;
-			worker = worker_msg->data;
-			worker->create_thread_ret = ENOMEDIUM;
-			workers[worker->num] = NULL;
-			_del_worker( worker );
-			free( worker );
-			break;
-		case WORKER_MSG_ALLOC:
-		{
-			struct worker_block *worker_block = worker_msg->data;
+			struct worker_block *worker_block = src_msg->data;
 			struct memory_block *memory_block = worker_block->memory_block;
 			
 			if ( worker_block->worker )
 			{
-				worker_msg->type = WORKER_MSG_WAIT;
+				tmp_msg.type = WORKER_MSG_WAIT;
 				
 				for ( int w = 1; w < workers_group.total; ++w )
 				{
 					worker = workers[w];
 					if ( worker )
 					{
-						puts("Main worker is sending wait message");
-						ret = wrpipe( worker->own_pipes[PIPE_WR], ptr, &bytes );
+						ret = wrpipe( worker->own_pipes[PIPE_WR], tmp, &bytes );
 						
 						#pragma message "Best to revisit this later"
 						if ( ret != 0 )
@@ -297,42 +323,32 @@ int main_worker( Worker_t run )
 								, ret, ret, strerror(ret)
 							);
 							exit(EXIT_FAILURE);
+							break;
 						}
 						
-						printf("Main worker is waiting on a response from "
-								"worker %d", worker->num );
-						
-						while ( (ready = poll_pipe( pipes[PIPE_RD] )) >= 0 )
+						while
+						(
+							(src_msg = poll_worker_msg( pipes, &workers_group ))
+						)
 						{
-							puts("Main worker is checking if pipe is ready");
-							
-							if ( ready == 1 )
+							if ( src_msg->worker != worker || src_msg->type != WORKER_MSG_CONT )
 							{
-								ret = rdpipe( pipes[PIPE_RD], ptr, &bytes );
+								own_msg.type = WORKER_MSG_RESEND;
+								own_msg.worker = NULL;
+								own_msg.data = src_msg;
+								ret = wrpipe( src_msg->worker->own_pipes[PIPE_WR], own, &bytes );
 								
 								if ( ret != 0 )
-									break;
-								
-								if ( worker_msg->type != WORKER_MSG_CONT || worker_msg->worker != worker )
-								{
-									puts("Main worker is sending resend message");
-									
-									own_msg.type = WORKER_MSG_RESEND;
-									own_msg.worker = NULL;
-									own_msg.data = worker_msg;
-									ret = wrpipe( worker_msg->worker->own_pipes[PIPE_WR], own, &bytes );
-									
-									if ( ret != 0 )
-										goto wrpipe_panic;
-								}
-								else
-									break;
+									goto wrpipe_panic;
 							}
+							else
+								break;
 						}
 					}
 				}
 				
-				puts("Main worker is performing allocation");
+				if ( workers_group.count < 1 )
+					break;
 				
 				if ( worker_block->want )
 				{
@@ -407,26 +423,21 @@ int main_worker( Worker_t run )
 			else
 				del_memory_block( memory_block );
 			
-			worker_msg->type = WORKER_MSG_CONT;
-			
+			tmp_msg.type = WORKER_MSG_CONT;
+				
 			for ( int w = 1; w < workers_group.total; ++w )
 			{
 				worker = workers[w];
 				
 				if ( worker )
-				{
-					printf("Main worker is sending continue message to "
-						"worker %d", worker->num );
-					
-					ret = wrpipe( worker->own_pipes[PIPE_WR], ptr, &bytes );
+				{	
+					tmp_msg.worker = worker;
+					ret = wrpipe( worker->own_pipes[PIPE_WR], tmp, &bytes );
 					
 					if ( ret != 0 )
 						goto wrpipe_panic;
 				}
 			}
-			
-			break;
-		}
 		}
 	}
 	

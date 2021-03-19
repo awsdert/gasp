@@ -6,8 +6,6 @@
 void* memory( void* ud, void* ptr, size_t osize, size_t nsize );
 void* worker_lua( struct worker *worker );
 
-struct worker *lua_worker = NULL;
-
 int main()
 {
 	printf("Gasp Alpha\n");
@@ -57,28 +55,79 @@ void* lua_memory( void *ud, void *ptr, size_t osize, size_t nsize )
 	return NULL;
 }
 
+/* Robbed from
+ * https://stackoverflow.com/questions/59091462/from-c-how-can-i-print-the-contents-of-the-lua-stack
+ */
+
+void dumpstack (lua_State *L)
+{
+	int top=lua_gettop(L);
+	for (int i=1; i <= top; i++)
+	{
+		printf("%d\t%s\t", i, luaL_typename(L,i));
+		switch (lua_type(L, i))
+		{
+			case LUA_TNUMBER:
+				printf("%g\n",lua_tonumber(L,i));
+				break;
+			case LUA_TSTRING:
+				printf("%s\n",lua_tostring(L,i));
+				break;
+			case LUA_TBOOLEAN:
+				printf("%s\n", (lua_toboolean(L, i) ? "true" : "false"));
+				break;
+			case LUA_TNIL:
+				printf("%s\n", "nil");
+				break;
+			default:
+				printf("%p\n",lua_topointer(L,i));
+				break;
+		}
+	}
+}
+
 void* worker_lua( struct worker *worker )
-{	
-	puts("Starting lua worker");
+{
+	int c;
+	char *cwd = getcwd(NULL,0), *path = NULL, *tmp = NULL, *main_file = "test.lua";
+	size_t i, size = strlen(cwd) + strlen(main_file) + 3;
+	path = lua_memory( worker, path, size, size + BUFSIZ );
 	
-	lua_worker = worker;
+	if ( !path )
+		goto die;
+	
+	memset( path, 0, size );
+	
+	printf( "path is '%s'\n", path );
+	
+	strcat( path, cwd );
+	
+	printf( "path is '%s'\n", path );
+	
+	strcat( path, "/" );
+	
+	printf( "path is '%s'\n", path );
+	
+	strcat( path, main_file );
+	
+	printf( "path is '%s'\n", path );
 	
 	lua_State *L = lua_newstate( lua_memory, worker );
 	
 	if ( !L )
 		goto die;
-		
-	puts("Created lua state");
 	
 	luaL_openlibs(L);
 	
-	puts("Opened standard lua libs");
-	
-	luaL_dofile(L, "test.lua");
+	if ( luaL_dofile(L,path) != 0 )
+	{
+		dumpstack(L);
+	}
 	
 	lua_close(L);
+	
+	lua_memory( worker, path, size, 0 );
 
 	die:
-	puts("Ending lua worker");
 	return say_worker_died( worker, NULL );
 }

@@ -86,31 +86,96 @@ void dumpstack (lua_State *L)
 	}
 }
 
+#ifdef _WIN32
+#	define ENV_HOME "HOMEPATH"
+#else
+#	define ENV_HOME "HOME"
+#endif
+
+struct memory_block get_cfg_path( struct worker *worker )
+{
+	struct memory_block PATH = {0};
+	char *cwd = getcwd(NULL,0), *path = NULL, *home = getenv(ENV_HOME);
+	size_t i, size = 50;
+	
+	size += cwd ? strlen(cwd) : 0;
+	size += home ? strlen(home) : 0;
+	
+	path = lua_memory( worker, path, 0, size );
+	
+	if ( !path )
+		return PATH;
+	
+	PATH.bytes = size;
+	PATH.block = path;
+	memset( path, 0, size );
+	
+	/* Assume we're being run in portable mode 1st */
+	if ( cwd )
+	{
+		if ( access( cwd, W_OK ) == 0 )
+		{
+			strcat( path, cwd );
+			strcat( path, "/../OTG" );
+			return PATH;
+		}
+	}
+	
+	if ( home )
+	{
+		strcat( path, home );
+		strcat( path, "/.gasp" );
+		return PATH;
+	}
+	
+	return PATH;
+}
+
 void* worker_lua( struct worker *worker )
 {
 	int c;
-	char *cwd = getcwd(NULL,0), *path = NULL, *tmp = NULL, *main_file = "test.lua";
-	size_t i, size = strlen(cwd) + strlen(main_file) + 3;
-	path = lua_memory( worker, path, size, size + BUFSIZ );
+	struct memory_block PATH = get_cfg_path(worker);
+	char *path = PATH.block, *tmp = NULL, *init,
+		*main_file = "/lua/init.lua", *std_LUA_PATH = getenv("LUA_PATH");
+	char *paths[] = { "/lua/?.lua;", "/lua/?;", "/?.lua;", "/?", NULL };
+	size_t i, size = PATH.bytes, need = size * 6;
+	
+	if ( std_LUA_PATH )
+		need += strlen(std_LUA_PATH) + 1;
+		
+	path = lua_memory( worker, path, 0, need );
 	
 	if ( !path )
+	{
+		lua_memory( worker, PATH.block, PATH.bytes, 0 );
 		goto die;
+	}
 	
-	memset( path, 0, size );
+	PATH.block = path;
+	PATH.bytes = need;
+		
+	init = path + size;
 	
-	printf( "path is '%s'\n", path );
+	memset( init, 0, need - size );
 	
-	strcat( path, cwd );
+	strcat( init, path );
+	strcat( init, main_file );
 	
-	printf( "path is '%s'\n", path );
+	tmp = init + size;
 	
-	strcat( path, "/" );
+	for ( i = 0; paths[i]; ++i )
+	{
+		strcat( tmp, path );
+		strcat( tmp, paths[i] );
+	}
 	
-	printf( "path is '%s'\n", path );
+	if ( std_LUA_PATH )
+	{
+		strcat( tmp, ";" );
+		strcat( tmp, std_LUA_PATH );
+	}
 	
-	strcat( path, main_file );
-	
-	printf( "path is '%s'\n", path );
+	setenv( "LUA_PATH", tmp, 1 );
 	
 	lua_State *L = lua_newstate( lua_memory, worker );
 	
@@ -119,15 +184,17 @@ void* worker_lua( struct worker *worker )
 	
 	luaL_openlibs(L);
 	
-	if ( luaL_dofile(L,path) != 0 )
+	if ( luaL_dofile(L,init) != 0 )
 	{
 		dumpstack(L);
 	}
 	
 	lua_close(L);
 	
-	lua_memory( worker, path, size, 0 );
+	lua_memory( worker, path, need, 0 );
 
 	die:
+	if ( std_LUA_PATH )
+		setenv( "LUA_PATH", std_LUA_PATH, 1 );
 	return say_worker_died( worker, NULL );
 }

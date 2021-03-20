@@ -25,14 +25,15 @@ communicate ongoing scan results to the GUI though.
 These are the open source libraries I'm currently using whether
 directly or indrectly (not including system libraries)
 * https://github.com/lua/lua
-* http://tekui.neoscientists.org/
-
-Gasp used to use these but I changed to tekUI for the sake of
-easing accessibility support, if I'm right then I don't have to
-do anything more to enable screenreaders and the like to
-understand the GUI elements I'll be working with for devlopement,
-please let me know if you experience problems with the results
 * https://github.com/stetre/moongl
 * https://github.com/stetre/moonglfw
 * https://github.com/stetre/moonnuklear
 * https://github.com/vurtun/nuklear
+
+tekUI and pretty much EVERY library I tried turned out to be a nightmare to
+install, reverting back to this and will see about accessibility MUCH later in
+the future, perhaps when IUP (the original library I wanted to use prior to
+moonlibs) can actually install without me manually editing the install files of
+libim & libcd (and still failing to get libcd to install because of missing
+pdflib library) PRIOR to trying to install IUP itself, then I will switch to it
+and the accessibility will come as a side benifit).

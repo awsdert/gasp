@@ -1,8 +1,10 @@
 SYS_NAME=Linux
 CPU_NAME=X64
+mkdir=if [ ! -d "$1" ]; then mkdir "$1" fi
 
 ifeq ($(OS),Windows_NT)
 	SYS_NAME=WIN32
+	mkdir=IF exist "$1" () ELSE (mkdir "$1")
     ifeq ($(PROCESSOR_ARCHITEW6432),AMD64)
 		CPU_NAME=X86_64
     else

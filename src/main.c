@@ -1,7 +1,4 @@
-#include <workers.h>
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
+#include "gasp.h"
 
 void* memory( void* ud, void* ptr, size_t osize, size_t nsize );
 void* worker_lua( struct worker *worker );
@@ -55,36 +52,7 @@ void* lua_memory( void *ud, void *ptr, size_t osize, size_t nsize )
 	return NULL;
 }
 
-/* Robbed from
- * https://stackoverflow.com/questions/59091462/from-c-how-can-i-print-the-contents-of-the-lua-stack
- */
 
-void dumpstack (lua_State *L)
-{
-	int top=lua_gettop(L);
-	for (int i=1; i <= top; i++)
-	{
-		printf("%d\t%s\t", i, luaL_typename(L,i));
-		switch (lua_type(L, i))
-		{
-			case LUA_TNUMBER:
-				printf("%g\n",lua_tonumber(L,i));
-				break;
-			case LUA_TSTRING:
-				printf("%s\n",lua_tostring(L,i));
-				break;
-			case LUA_TBOOLEAN:
-				printf("%s\n", (lua_toboolean(L, i) ? "true" : "false"));
-				break;
-			case LUA_TNIL:
-				printf("%s\n", "nil");
-				break;
-			default:
-				printf("%p\n",lua_topointer(L,i));
-				break;
-		}
-	}
-}
 
 #ifdef _WIN32
 #	define ENV_HOME "HOMEPATH"
@@ -137,8 +105,15 @@ void* worker_lua( struct worker *worker )
 	struct memory_block PATH = get_cfg_path(worker);
 	char *path = PATH.block, *tmp = NULL, *init,
 		*main_file = "/lua/init.lua", *std_LUA_PATH = getenv("LUA_PATH");
-	char *paths[] = { "/lua/?.lua;", "/lua/?;", "/?.lua;", "/?", NULL };
-	size_t i, size = PATH.bytes, need = size * 6;
+	char *paths[] = {
+#ifdef _WIN32
+		"/lib/?.dll;"
+#else
+		"/lib/?.so;"
+#endif
+		, "/lib/?;", "/lua/?.lua;", "/lua/?;", "/?.lua;", "/?", NULL
+	};
+	size_t i, size = PATH.bytes, need = size * 8;
 	
 	if ( std_LUA_PATH )
 		need += strlen(std_LUA_PATH) + 1;
@@ -150,6 +125,8 @@ void* worker_lua( struct worker *worker )
 		lua_memory( worker, PATH.block, PATH.bytes, 0 );
 		goto die;
 	}
+	
+	setenv( "GASP_PATH", path, 0 );
 	
 	PATH.block = path;
 	PATH.bytes = need;
@@ -169,6 +146,8 @@ void* worker_lua( struct worker *worker )
 		strcat( tmp, paths[i] );
 	}
 	
+	puts(tmp);
+	
 	if ( std_LUA_PATH )
 	{
 		strcat( tmp, ";" );
@@ -182,14 +161,21 @@ void* worker_lua( struct worker *worker )
 	if ( !L )
 		goto die;
 	
+	lua_atpanic( L, lua_panic_cb );
+	
 	luaL_openlibs(L);
+	
+	push_global_cfunc( L, "dump_lua_stack", lua_dumpstack );
 	
 	if ( luaL_dofile(L,init) != 0 )
 	{
-		dumpstack(L);
+		lua_dumpstack(L);
 	}
 	
 	lua_close(L);
+	
+	if ( getenv( "GASP_PATH" ) == path )
+		setenv( "GASP_PATH", NULL, 1 );
 	
 	lua_memory( worker, path, need, 0 );
 

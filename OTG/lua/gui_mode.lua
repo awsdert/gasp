@@ -1,7 +1,7 @@
-gl = require("moongl")
-glfw = require("moonglfw")
-nk = require("moonnuklear")
-rear = require("moonnuklear.glbackend")
+gl = Require("moongl",true,true)
+glfw = Require("moonglfw",true,true)
+nk = Require("moonnuklear",true,true)
+rear = Require("moonnuklear/glbackend.lua",true,true)
 
 function rebuild_cheat(v)
 	if not v then return end
@@ -97,7 +97,7 @@ end
 
 function pad_width(font,text)
 	if font == nil or text == nil then
-		print(debug.traceback())
+		trace()
 	end
 	text = "" .. text
 	return math.ceil((font:width(font:height(),text)) * 1.2)
@@ -105,7 +105,7 @@ end
 
 function pad_height(font,text)
 	if font == nil or text == nil then
-		print(debug.traceback())
+		trace()
 	end
 	text = "" .. text
 	return math.ceil((font:height(text)) * 1.2)

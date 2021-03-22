@@ -1,6 +1,10 @@
 loadlib = package.loadlib
+function _trace()
+	dump_lua_stack()
+	return debug.traceback()
+end
 function trace()
-	return print(debug.traceback())
+	return print(_trace())
 end
 debug.sethook(trace,"*")
 
@@ -10,33 +14,73 @@ function calc_percentage( num, dem )
 	return (((0.0 + num) / (0.0 + dem)) * 100.0)
 end
 
-function Require(path)
-	if not path then
-		print(debug.traceback())
+function _RequireLib(dir,name,report_attempts,error_on_failure)
+	local paths, p, v, ret, err = { name, name .. ".so" }
+	for p, v in pairs(paths) do
+		if not ret then
+			local path = dir .. "/" .. v
+			ret, err = loadlib(path,'luaopen_' .. name)
+			if report_attempts then
+				print("Trying " .. path)
+			end
+		end
+	end
+	if error_on_failure and not ret then
+		dump_lua_stack()
+		error( err .. _trace() )
+	end
+	return ret, err
+end
+
+function _RequireLua( name, report_attempts )
+	local dir = os.getenv("GASP_PATH")
+	local paths, p, v, ret, err =
+	{
+		name
+		, name .. ".lua"
+		, "lua/" .. name
+		, "lua/" .. name .. ".lua"
+	}
+	for p, v in pairs(paths) do
+		if not ret then
+			local path = dir .. "/" .. v
+			ret, err = loadfile(path)
+			if report_attempts then
+				print("Trying " .. path)
+			end
+		end
+	end
+	if not ret then
+		dump_lua_stack()
+		error( (err or "nil\n") .. _trace() )
+	end
+	return pcall( ret ), err, ret
+end
+
+function Require(name,report_attempts,onlylibs)
+	if not name then
+		trace()
 		return nil
 	end
-	local func, err = loadfile(path)
-	if not func then
-		print(debug.traceback())
-		print(err)
-		print("Tried to load '" .. path .. "'")
-		return nil
+	local ret, err = _RequireLib
+	(
+		os.getenv("GASP_PATH") .. "/lib", name, report_attempts, onlylibs
+	)
+	if not ret then 
+		return _RequireLua( name, report_attempts )
 	end
-	return func, pcall( func )
+	return ret, err
 end
 
 function init()
-	local func, ok, err, v, tmp
+	local ret, err, func
 	
 	_G.asked4_reboot = true
 	while _G.asked4_reboot == true do
 		_G.asked4_reboot = false
-		-- For a different interface just change the file below
-		tmp = scriptspath() .. "/gui_mode.lua"
 		-- Prevent lua from exiting gasp without good reason
-		func, ok, err, v = Require( tmp )
-		if not ok then
-			print( err )
+		ret, err, func = Require( "gui_mode", false )
+		if not func then
 			-- Avoid fully restarting gasp
 			if _G.asked4_reboot == false then
 				-- Avoid a never closing app
@@ -83,13 +127,7 @@ function mkdir(path)
 end
 
 function cheatspath()
-	local path = app_data()
-	if gasp.path_isdir( path .. '/cheats' ) then
-		return path .. '/cheats'
-	end
-	mkdir(path)
-	path = path .. '/cheats'
-	mkdir(path)
+	local path = os.getenv("GASP_PATH") .. "/cheats"
 	return path
 end
 

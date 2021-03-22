@@ -69,7 +69,7 @@ end
 local function draw_size_field(ctx,font,v)
 	local x
 	if not v then
-		print( debug.traceback() )
+		trace()
 	end
 	x = v.size or 1
 	if v.generated then

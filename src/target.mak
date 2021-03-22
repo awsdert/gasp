@@ -12,7 +12,7 @@ ifneq '$(filter debug gede,$(MAKECMDGOALS))' ''
 endif
 
 BIN_DIR?=../bin
-LIB_DIR?=../lib
+LIB_DIR?=../OTG/lib
 OBJ_DIR?=../obj
 INC_DIR?=../include
 SRC_DIR?=.

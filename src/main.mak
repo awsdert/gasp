@@ -6,7 +6,7 @@ LANG?=enGB
 LIBRARIES+= pthread lua
 LIBS:=$(LIBRARIES:%=-l%)
 DBG_LIBS:=$(LIBRARIES:%=-l%)
-OBJECTS:=$(NAME) pipes workers memory worker_msg/$(basename $(LANG))
+OBJECTS:=$(NAME) pipes workers memory worker_msg/$(basename $(LANG)) lua_common
 OBJS=$(OBJECTS:%=$(OBJ_DIR)/%$(DBG_SFX).o)
 
 $(info MAKECMDGOALS=$(MAKECMDGOALS))

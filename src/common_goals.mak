@@ -1,1 +1,1 @@
-common_goals=default build run clean rebuild debug gede clone update copy
+common_goals=default build run clean rebuild debug gede pull

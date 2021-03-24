@@ -167,6 +167,8 @@ void* worker_lua( struct worker *worker )
 	
 	push_global_cfunc( L, "dump_lua_stack", lua_dumpstack );
 	
+	lua_create_gasp(L);
+	
 	if ( luaL_dofile(L,init) != 0 )
 	{
 		lua_dumpstack(L);

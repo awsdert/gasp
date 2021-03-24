@@ -302,9 +302,9 @@ GUI.use_ui = function(ctx,name,now)
 end
 	
 GUI.add_ui = function( name, desc, file )
-	local path = scriptspath()
-	local func, ok, err, v = Require( path .. "/" .. file )
-	if not ok then
+	print( "Attempting to add script " .. file )
+	local ret, err, func = Require( file )
+	if not func then
 		func = GUI.draw_fallback
 	end
 	GUI.draw[#(GUI.draw) + 1] = { name = name, desc = desc, func = func() }

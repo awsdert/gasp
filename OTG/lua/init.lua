@@ -15,21 +15,40 @@ function calc_percentage( num, dem )
 end
 
 function _RequireLib(dir,name,report_attempts,error_on_failure)
-	local paths, p, v, ret, err = { name, name .. ".so" }
+	local paths, p, v, ret, err, all
+	paths = { name, name .. ".so" }
+	all = {}
 	for p, v in pairs(paths) do
 		if not ret then
-			local path = dir .. "/" .. v
-			ret, err = loadlib(path,'luaopen_' .. name)
+			local path
+			if dir then
+				path = dir .. "/" .. v
+			else
+				path = v
+			end
 			if report_attempts then
 				print("Trying " .. path)
 			end
+			paths[p] = path
+			ret, err = loadlib(path,'luaopen_' .. name)
+			all[p] = err
 		end
 	end
-	if error_on_failure and not ret then
-		dump_lua_stack()
-		error( err .. _trace() )
+	
+	if ret then
+		return ret(), err, ret
 	end
-	return ret, err
+	
+	if error_on_failure then
+		dump_lua_stack()
+		err = _trace()
+		for p, v in pairs(all) do
+			err = err .. "\nPath " .. paths[p] .. "had error: " .. v
+		end
+		error( "Failed to load library " .. name .. "\n" ..  err )
+	end
+	
+	return nil, err, ret
 end
 
 function _RequireLua( name, report_attempts )
@@ -91,6 +110,7 @@ function init()
 			--[[ We're forcing a reboot, this prevents consective
 			forced reboots in the event the bug occurs in the main
 			script file above ]]
+			print( "Forcing Reboot" )
 			_G.forced_reboot = true
 		end
 	end

@@ -24,6 +24,13 @@ void push_global_int( lua_State *L, char const *key, int val );
 void push_global_num( lua_State *L, char const *key, long double val );
 void push_global_obj( lua_State *L, char const *key );
 void push_global_str( lua_State *L, char const *key, char *val );
+void push_branch_cfunc( lua_State *L, char const *key, lua_CFunction val );
+void push_branch_bool( lua_State *L, char const *key, bool val );
+void push_branch_int( lua_State *L, char const *key, int val );
+void push_branch_num( lua_State *L, char const *key, long double val );
+void push_branch_obj( lua_State *L, char const *key );
+void push_branch_str( lua_State *L, char const *key, char *val );
+void lua_create_gasp(lua_State *L);
 
 
 #endif

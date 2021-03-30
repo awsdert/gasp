@@ -11,6 +11,8 @@ ifneq '$(filter debug gede,$(MAKECMDGOALS))' ''
 	DBG_SFX:=_d
 endif
 
+LUAVER?=5.4
+LUA_VER:=$(LUAVER)
 BIN_DIR?=../bin
 LIB_DIR?=../OTG/lib
 OBJ_DIR?=../obj

@@ -99,24 +99,70 @@ struct memory_block get_cfg_path( struct worker *worker )
 	return PATH;
 }
 
+#ifdef _WIN32
+#define LIB_SFX ".dll"
+#else
+#define LIB_SFX ".so"
+#endif
+
+struct env_pair { char * key; char *val; char *ret; };
+
+void set_env_pair( struct env_pair *env_pairs, char *key, char *val, char *ret )
+{
+	for ( int i = 0; env_pairs[i].key; ++i )
+	{
+		if ( env_pairs[i].key == key )
+		{
+			if ( val )
+			{
+				env_pairs[i].ret = ret;
+				setenv( key, val, !!ret );
+				if ( getenv(key) == val )
+					env_pairs[i].val = val;
+			}
+			else if ( getenv( key ) == env_pairs[i].val )
+				setenv( key, env_pairs[i].ret, 1 );
+		}
+	}
+}
+
 void* worker_lua( struct worker *worker )
 {
 	int c;
 	struct memory_block PATH = get_cfg_path(worker);
-	char *path = PATH.block, *tmp = NULL, *init,
-		*main_file = "/lua/init.lua", *std_LUA_PATH = getenv("LUA_PATH");
-	char *paths[] = {
-#ifdef _WIN32
-		"/lib/?.dll;"
-#else
-		"/lib/?.so;"
-#endif
-		, "/lib/?;", "/lua/?.lua;", "/lua/?;", "/?.lua;", "/?", NULL
+	char *path = PATH.block, *lua_path = NULL, *lua_cpath, *init,
+		*main_file = "/init.lua"
+		, *std_LUA_PATH = getenv("LUA_PATH")
+		, *std_LUA_CPATH = getenv("LUA_CPATH");
+	char *paths[] =
+	{
+		"/lib/?.lua;"
+		, "/?.lua;"
+		, NULL
 	};
-	size_t i, size = PATH.bytes, need = size * 8;
+	char *cpaths[] =
+	{
+		"/lib/?" LIB_SFX ";"
+		, "/?" LIB_SFX
+		, NULL
+	};
+	struct env_pair env_pairs[] =
+	{
+		{ "LUA_PATH", NULL, std_LUA_PATH },
+		{ "LUA_CPATH", NULL, std_LUA_CPATH },
+		{ "GASP_PATH", NULL, NULL },
+		{ "GASP_LIB_SFX", LIB_SFX, NULL },
+		{ NULL, NULL, NULL }
+	};
 	
-	if ( std_LUA_PATH )
-		need += strlen(std_LUA_PATH) + 1;
+	size_t i, size = PATH.bytes, need = size * 2
+		, lua_path_used = std_LUA_PATH ? strlen(std_LUA_PATH) + 1: 1
+		, lua_cpath_used = std_LUA_CPATH ? strlen(std_LUA_CPATH) + 1: 1;
+	
+	for ( i = 0; paths[i]; ++i, lua_path_used += size );
+	for ( i = 0; cpaths[i]; ++i, lua_cpath_used += size );
+	
+	need += lua_path_used + lua_cpath_used;
 		
 	path = lua_memory( worker, path, 0, need );
 	
@@ -125,8 +171,6 @@ void* worker_lua( struct worker *worker )
 		lua_memory( worker, PATH.block, PATH.bytes, 0 );
 		goto die;
 	}
-	
-	setenv( "GASP_PATH", path, 0 );
 	
 	PATH.block = path;
 	PATH.bytes = need;
@@ -138,23 +182,40 @@ void* worker_lua( struct worker *worker )
 	strcat( init, path );
 	strcat( init, main_file );
 	
-	tmp = init + size;
+	lua_path = init + size;
+	lua_cpath = lua_path + lua_path_used;
 	
 	for ( i = 0; paths[i]; ++i )
 	{
-		strcat( tmp, path );
-		strcat( tmp, paths[i] );
+		strcat( lua_path, path );
+		strcat( lua_path, paths[i] );
 	}
-	
-	puts(tmp);
 	
 	if ( std_LUA_PATH )
 	{
-		strcat( tmp, ";" );
-		strcat( tmp, std_LUA_PATH );
+		strcat( lua_path, ";" );
+		strcat( lua_path, std_LUA_PATH );
 	}
 	
-	setenv( "LUA_PATH", tmp, 1 );
+	for ( i = 0; cpaths[i]; ++i )
+	{
+		strcat( lua_cpath, path );
+		strcat( lua_cpath, cpaths[i] );
+	}
+	
+	if ( std_LUA_CPATH )
+	{
+		strcat( lua_cpath, ";" );
+		strcat( lua_cpath, std_LUA_CPATH );
+	}
+	
+	printf("Setting LUA_PATH to:\n%s\n", lua_path );
+	printf("Setting LUA_CPATH to:\n%s\n", lua_cpath );
+	
+	set_env_pair( env_pairs, "LUA_PATH", lua_path, std_LUA_PATH );
+	set_env_pair( env_pairs, "LUA_CPATH", lua_cpath, std_LUA_CPATH );
+	set_env_pair( env_pairs, "GASP_PATH", path, 0 );
+	set_env_pair( env_pairs, "GASP_LIB_SFX", LIB_SFX, 0 );
 	
 	lua_State *L = lua_newstate( lua_memory, worker );
 	
@@ -176,13 +237,12 @@ void* worker_lua( struct worker *worker )
 	
 	lua_close(L);
 	
-	if ( getenv( "GASP_PATH" ) == path )
-		setenv( "GASP_PATH", NULL, 1 );
-	
 	lua_memory( worker, path, need, 0 );
 
 	die:
-	if ( std_LUA_PATH )
-		setenv( "LUA_PATH", std_LUA_PATH, 1 );
+	set_env_pair( env_pairs, "LUA_PATH", NULL, NULL );
+	set_env_pair( env_pairs, "LUA_CPATH", NULL, NULL );
+	set_env_pair( env_pairs, "GASP_PATH", NULL, NULL );
+	set_env_pair( env_pairs, "GASP_LIB_SFX", NULL, NULL );
 	return say_worker_died( worker, NULL );
 }

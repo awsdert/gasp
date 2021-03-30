@@ -5,6 +5,7 @@
 *.dll
 *.exe
 *.zip
+*.geany
 *.AppImage
 gede.ini
 gede*.ini

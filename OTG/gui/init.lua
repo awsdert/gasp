@@ -1,7 +1,7 @@
-gl = Require("moongl",true,true)
-glfw = Require("moonglfw",true,true)
-nk = Require("moonnuklear",true,true)
-rear = Require("moonnuklear/glbackend.lua",true,true)
+gl = require("moongl")
+glfw = require("moonglfw")
+nk = require("moonnuklear")
+rear = require("moonnuklear.glbackend")
 
 function rebuild_cheat(v)
 	if not v then return end
@@ -56,7 +56,7 @@ function rebuild_cheat(v)
 end
 
 GUI = {
-	cfg = require("cfg"),
+	cfg = require("gui.cfg"),
 	--[[ ID Counter, since nuklear insists on unique IDs
 	Once used increment by 1 ready for next usage]]
 	idc = 0,
@@ -330,19 +330,20 @@ GUI.draw_fallback = function( ctx, now, prv )
 end
 
 GUI.selected = {}
-GUI.reboot = true
-GUI.forced_reboot = false
-while GUI.reboot == true do
+_G.forced_reboot = false
+while _G.asked4_reboot == true do
 	GUI.draw = {}
 	GUI.fonts = {}
 	
-	GUI.add_ui( "main", "Main", "main.lua" )
-	GUI.add_ui( "cfg-font", "Change Font", "cfg/font.lua" )
-	GUI.add_ui( "cfg-proc", "Hook process", "cfg/proc.lua" )
-	GUI.add_ui( "scan", "Scan memory", "scan.lua" )
-	GUI.add_ui( "cheatfile", "Load cheat file", "cfg/cheatfile.lua" )
+	--[[
+	GUI.add_ui( "main", "Main", "gui/main.lua" )
+	GUI.add_ui( "cfg-font", "Change Font", "gui/cfg/font.lua" )
+	GUI.add_ui( "cfg-proc", "Hook process", "gui/cfg/proc.lua" )
+	GUI.add_ui( "scan", "Scan memory", "gui/scan.lua" )
+	GUI.add_ui( "cheatfile", "Load cheat file", "gui/cfg/cheatfile.lua" )
+	]]
 	
-	GUI.reboot = gasp.set_reboot_gui(false)
+	_G.asked4_reboot = gasp.set_reboot_gui(false)
 	GUI.window = nil
 	boot_window()
 	GUI.draw = nil

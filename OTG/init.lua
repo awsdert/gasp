@@ -16,7 +16,7 @@ end
 
 function _RequireLib(dir,name,report_attempts,error_on_failure)
 	local paths, p, v, ret, err, all
-	paths = { name, name .. ".so" }
+	paths = { name, name .. os.getenv("GASP_LIB_SFX") }
 	all = {}
 	for p, v in pairs(paths) do
 		if not ret then
@@ -41,11 +41,13 @@ function _RequireLib(dir,name,report_attempts,error_on_failure)
 	
 	if error_on_failure then
 		dump_lua_stack()
-		err = _trace()
+		path = debug.traceback()
 		for p, v in pairs(all) do
-			err = err .. "\nPath " .. paths[p] .. "had error: " .. v
+			path = path .. "\n " .. v
 		end
-		error( "Failed to load library " .. name .. "\n" ..  err )
+		path = "Failed to load library " .. name .. "\n" ..  path
+		print( path )
+		error( path )
 	end
 	
 	return nil, err, ret
@@ -66,14 +68,17 @@ function _RequireLua( name, report_attempts )
 			ret, err = loadfile(path)
 			if report_attempts then
 				print("Trying " .. path)
+				if ret then
+					print("Using " .. path)
+				end
 			end
 		end
 	end
 	if not ret then
 		dump_lua_stack()
-		error( (err or "nil\n") .. _trace() )
+		error( (err or "nil\n") .. debug.traceback() )
 	end
-	return pcall( ret ), err, ret
+	return ret(), err, ret
 end
 
 function Require(name,report_attempts,onlylibs)
@@ -98,7 +103,7 @@ function init()
 	while _G.asked4_reboot == true do
 		_G.asked4_reboot = false
 		-- Prevent lua from exiting gasp without good reason
-		ret, err, func = Require( "gui_mode", false )
+		ret, err, func = Require( "gui/init", true )
 		if not func then
 			-- Avoid fully restarting gasp
 			if _G.asked4_reboot == false then

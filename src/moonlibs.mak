@@ -28,7 +28,7 @@ $(SHARED_NAMES):
 	@$(call mkdir,$(CLONED))
 	@$(call mkdir,$(LIB_DIR))
 	$(call github_pull,$<,$($<_DEV)/$<)
-	cd $(CLONED)/$@ && make
+	cd $(CLONED)/$@ && make LUAVER=$(LUAVER) LUA_VER=$(LUAVER)
 	cp $(CLONED)/$@/src/$@$(SYS_DLL_SFX) $(LIB_DIR)/$@$(SYS_DLL_SFX)
 
 .PHONY: $(common_goals) $(SHARED_NAMES) $(SHARED_LIBS) _copy

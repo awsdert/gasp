@@ -1,3 +1,5 @@
 MAKECMDGOALS?=default
 $(MAKECMDGOALS):
-	cd ../ && make --no-print-directory $(MAKEFILES) $(MAKECMDGOALS)
+	cd ../ && make $(MAKECMDGOALS)
+
+.PHONY: $(MAKECMDGOALS)

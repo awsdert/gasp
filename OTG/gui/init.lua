@@ -56,7 +56,7 @@ function rebuild_cheat(v)
 end
 
 GUI = {
-	cfg = require("gui.cfg"),
+	cfg = Require("gui/cfg") or {},
 	--[[ ID Counter, since nuklear insists on unique IDs
 	Once used increment by 1 ready for next usage]]
 	idc = 0,
@@ -227,6 +227,9 @@ end
 
 local function boot_window()
 	local tmp
+	
+	print("boot_window()")
+	
 	-- Forces reset
 	GUI.window = glfw.create_window(
 		GUI.cfg.window.width,
@@ -243,6 +246,8 @@ local function boot_window()
 		clipboard = GUI.cfg.clipboard,
 		callbacks = true
 	})
+	
+	print("Attempting font_stash_begin()")
 
 	atlas = rear.font_stash_begin()
 	for name,size in pairs(GUI.cfg.font.sizes) do
@@ -258,6 +263,8 @@ local function boot_window()
 	
 	collectgarbage()
 	collectgarbage('stop')
+	
+	print("Attempting window_should_close()")
 	
 	while not glfw.window_should_close(GUI.window) do
 		GUI.cfg.window.width, GUI.cfg.window.height =
@@ -335,9 +342,9 @@ while _G.asked4_reboot == true do
 	GUI.draw = {}
 	GUI.fonts = {}
 	
-	--[[
 	GUI.add_ui( "main", "Main", "gui/main.lua" )
 	GUI.add_ui( "cfg-font", "Change Font", "gui/cfg/font.lua" )
+	--[[
 	GUI.add_ui( "cfg-proc", "Hook process", "gui/cfg/proc.lua" )
 	GUI.add_ui( "scan", "Scan memory", "gui/scan.lua" )
 	GUI.add_ui( "cheatfile", "Load cheat file", "gui/cfg/cheatfile.lua" )

@@ -99,25 +99,12 @@ end
 function init()
 	local ret, err, func
 	
-	_G.asked4_reboot = true
-	while _G.asked4_reboot == true do
-		_G.asked4_reboot = false
+	_G.forced_reboot = true
+	while _G.forced_reboot == true do
+		_G.asked4_reboot = true
 		-- Prevent lua from exiting gasp without good reason
 		ret, err, func = Require( "gui/init", true )
-		if not func then
-			-- Avoid fully restarting gasp
-			if _G.asked4_reboot == false then
-				-- Avoid a never closing app
-				if _G.forced_reboot == true then
-					return
-				end
-			end
-			--[[ We're forcing a reboot, this prevents consective
-			forced reboots in the event the bug occurs in the main
-			script file above ]]
-			print( "Forcing Reboot" )
-			_G.forced_reboot = true
-		end
+		_G.forced_reboot = _G.asked4_reboot
 	end
 end
 

@@ -1,2 +1,5 @@
-default $(MAKECMDGOALS):
+MAKECMDGOALS?=default
+$(MAKECMDGOALS):
 	cd ./src/ && make $(MAKECMDGOALS)
+
+.PHONY: $(MAKECMDGOALS)

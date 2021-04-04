@@ -37,4 +37,4 @@ lib%: $(SYS_DLL_PFX)%.$(SYS_DLL_SFX)
 $(OBJ_DIR)/%$(DBG_SFX).o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) $(LIBS) -o $@ -c $<
 
-.PHONY: $(common_goals)
+.PHONY: $(MAKECMDGOALS) $(common_goals)

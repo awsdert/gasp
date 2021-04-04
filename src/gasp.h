@@ -32,5 +32,44 @@ void push_branch_obj( lua_State *L, char const *key );
 void push_branch_str( lua_State *L, char const *key, char *val );
 void lua_create_gasp(lua_State *L);
 
+#define SIZEOF_PROCESS_BASE_PATH bitsof(int)
+
+typedef struct process {
+	bool self, hooked, paused, exited;
+	int pid, parent;
+	/* Used to internally mimic behaviour if not natively supported */
+	mode_t flags;
+	//proc_thread_t thread; 
+	//text_t name, cmdl;
+	//kvpair_t kvpair;
+#ifdef _WIN32
+	HANDLE handle;
+#else
+	char path[SIZEOF_PROCESS_BASE_PATH];
+#endif
+} process_t;
+
+struct glance_at_apps {
+	int underId;
+	process_t process;
+	struct memory_group memory_group;
+};
+
+struct glance_at_maps
+{
+	char *save2dir;
+	struct memory_group maps;
+	struct memory_group *path;
+	struct memory_block *buff;
+};
+
+struct mapped {
+	mode_t perm, prot;
+	char _perm[8];
+	int dev_major, dev_minor, inode;
+	uintmax_t head, foot, size, moff;
+	struct memory_group msrc;
+};
+
 
 #endif

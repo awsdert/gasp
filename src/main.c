@@ -1,11 +1,10 @@
 #include "gasp.h"
 
-void* memory( void* ud, void* ptr, size_t osize, size_t nsize );
 void* worker_lua( struct worker *worker );
 
 int main()
 {
-	printf("Gasp Alpha\n");
+	//printf("Gasp Alpha\n");
 	
 	if ( main_worker( (Worker_t)worker_lua ) == 0 )
 		return EXIT_SUCCESS;
@@ -137,7 +136,7 @@ void* worker_lua( struct worker *worker )
 	char *paths[] =
 	{
 		"/lib/?.lua;"
-		, "/?.lua;"
+		, "/?.lua"
 		, NULL
 	};
 	char *cpaths[] =
@@ -208,9 +207,6 @@ void* worker_lua( struct worker *worker )
 		strcat( lua_cpath, ";" );
 		strcat( lua_cpath, std_LUA_CPATH );
 	}
-	
-	printf("Setting LUA_PATH to:\n%s\n", lua_path );
-	printf("Setting LUA_CPATH to:\n%s\n", lua_cpath );
 	
 	set_env_pair( env_pairs, "LUA_PATH", lua_path, std_LUA_PATH );
 	set_env_pair( env_pairs, "LUA_CPATH", lua_cpath, std_LUA_CPATH );

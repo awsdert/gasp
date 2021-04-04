@@ -56,7 +56,6 @@ function rebuild_cheat(v)
 end
 
 GUI = {
-	cfg = Require("gui/cfg") or {},
 	--[[ ID Counter, since nuklear insists on unique IDs
 	Once used increment by 1 ready for next usage]]
 	idc = 0,
@@ -67,8 +66,8 @@ GUI = {
 local R, G, B, A
 
 local function set_bgcolor(color)
-   GUI.cfg.colors.bg = color or GUI.cfg.colors.bg
-   return table.unpack(GUI.cfg.colors.bg)
+   _G.pref.colors.bg = color or _G.pref.colors.bg
+   return table.unpack(_G.pref.colors.bg)
 end
 R, G, B, A = set_bgcolor()
 
@@ -76,10 +75,10 @@ R, G, B, A = set_bgcolor()
 glfw.version_hint(3, 3, 'core')
 
 function get_font(name)
-	if type(name) ~= "string" or not GUI.fonts[name] then
-		name = GUI.cfg.font.use
+	if type(name) ~= "string" or not _G.fonts[name] then
+		name = _G.pref.font.use
 	end
-	return GUI.fonts[name]
+	return _G.fonts[name]
 end
 
 GUI.global_cb = function (window, key, scancode, action, shift, control, alt, super)
@@ -110,26 +109,25 @@ function pad_height(font,text)
 	text = "" .. text
 	return math.ceil((font:height(text)) * 1.2)
 end
-function add_tree_node(ctx,text,selected,id,isparent)
+function add_tree_node( text,selected,id,isparent)
 	local ok
 	if isparent ~= true then
 		selected =
 			nk.selectable(
-			ctx, nil, text, nk.TEXT_LEFT,
+			_G.gui.ctx, nil, text, nk.TEXT_LEFT,
 			(selected or false) )
 		return true, selected
 	end
 	ok, selected =
 		nk.tree_element_push(
-		ctx, nk.TREE_NODE, text, nk.MAXIMIZED,
+		_G.gui.ctx, nk.TREE_NODE, text, nk.MAXIMIZED,
 		(selected or false), id )
 	if ok then
-		nk.tree_element_pop(ctx)
+		nk.tree_element_pop( _G.gui.ctx )
 		return true, selected
 	end
 	return false, selected
 end
-
 
 function hook_process()
 	if not GUI.noticed then
@@ -169,12 +167,12 @@ function autoload()
 			v = rebuild_cheat(func())
 		end
 		if v and v.app then
-			GUI.cfg.find_process =
-				v.app.name or GUI.cfg.find_process
+			_G.pref.find_process =
+				v.app.name or _G.pref.find_process
 			if not GUI.donothook then
 				print( "Searching for process '"
-					.. GUI.cfg.find_process .. "'")
-				tmp = gasp.locate_app(GUI.cfg.find_process)
+					.. _G.pref.find_process .. "'")
+				tmp = gasp.locate_app(_G.pref.find_process)
 				if tmp then
 					print( "Found " .. (#tmp) .. " matching processes" )
 					-- Auto hook process
@@ -192,32 +190,31 @@ function autoload()
 	return v
 end
 
-local function draw_all(ctx)
-	local push_font = (GUI.cfg.font.use ~= "default")
+local function draw_all()
+	local push_font = (_G.pref.font.use ~= "default")
 	local tmp
 	GUI.quit = glfw.window_should_close( GUI.window )
 	if push_font == true then
-		nk.style_push_font( ctx, get_font() )
+		nk.style_push_font( _G.gui.ctx, get_font() )
 	end
-	if nk.window_begin(ctx, "Show",
-		{0,0,GUI.cfg.window.width,GUI.cfg.window.height},
+	if nk.window_begin( _G.gui.ctx, "Show",
+		{0,0,_G.pref.window.width,_G.pref.window.height},
 		nk.WINDOW_BORDER
 	) then
 		if not GUI.cheat then
 			GUI.cheat = autoload()
 		end
 		GUI.keep_cheat = nil
-		GUI.draw[GUI.which].func(
-			GUI.ctx, GUI.which, GUI.previous )
+		GUI.view[GUI.which].func( GUI.which, GUI.previous )
 		if type(GUI.keep_cheat) == "table" then
 			GUI.cheat = rebuild_cheat( GUI.keep_cheat )
 		end
 	end
-	nk.window_end(ctx)
+	nk.window_end( _G.gui.ctx )
 	if push_font == true then
-		nk.style_pop_font(ctx)
+		nk.style_pop_font( _G.gui.ctx )
 	end
-	gl.viewport(0, 0, GUI.cfg.window.width, GUI.cfg.window.height)
+	gl.viewport(0, 0, _G.pref.window.width, _G.pref.window.height)
 	gl.clear_color(R, G, B, A)
 	gl.clear('color')
 	rear.render()
@@ -228,51 +225,45 @@ end
 local function boot_window()
 	local tmp
 	
-	print("boot_window()")
-	
 	-- Forces reset
 	GUI.window = glfw.create_window(
-		GUI.cfg.window.width,
-		GUI.cfg.window.height,
-		GUI.cfg.window.title )
+		_G.pref.window.width,
+		_G.pref.window.height,
+		_G.pref.window.title )
 	glfw.make_context_current(GUI.window)
 	gl.init()
 
 	-- Initialize the rear
 	GUI.ctx = rear.init(GUI.window, {
-		vbo_size = GUI.cfg.sizes.gl_vbo,
-		ebo_size = GUI.cfg.sizes.gl_ebo,
-		anti_aliasing = GUI.cfg.anti_aliasing,
-		clipboard = GUI.cfg.clipboard,
+		vbo_size = _G.pref.sizes.gl_vbo,
+		ebo_size = _G.pref.sizes.gl_ebo,
+		anti_aliasing = _G.pref.anti_aliasing,
+		clipboard = _G.pref.clipboard,
 		callbacks = true
 	})
-	
-	print("Attempting font_stash_begin()")
 
 	atlas = rear.font_stash_begin()
-	for name,size in pairs(GUI.cfg.font.sizes) do
-		size = GUI.cfg.font.base_size * size
-		GUI.fonts[name] = atlas:add( size, GUI.cfg.font.file )
+	for name,size in pairs(_G.pref.font.sizes) do
+		size = _G.pref.font.base_size * size
+		_G.fonts[name] = atlas:add( size, _G.pref.font.file )
 		-- Needed for memory editor later
-		GUI.fonts["mono-" .. name] =
-			atlas:add( size, GUI.cfg.font.mono )
+		_G.fonts["mono-" .. name] =
+			atlas:add( size, _G.pref.font.mono )
 	end
-	rear.font_stash_end( GUI.ctx, (get_font()) )
+	rear.font_stash_end( _G.gui.ctx, (get_font()) )
 	
 	glfw.set_key_callback(GUI.window,GUI.global_cb)
 	
 	collectgarbage()
 	collectgarbage('stop')
 	
-	print("Attempting window_should_close()")
-	
 	while not glfw.window_should_close(GUI.window) do
-		GUI.cfg.window.width, GUI.cfg.window.height =
+		_G.pref.window.width, _G.pref.window.height =
 			glfw.get_window_size(GUI.window)
-		glfw.wait_events_timeout(1/(GUI.cfg.fps or 30))
+		glfw.wait_events_timeout(1/(_G.pref.fps or 30))
 		rear.new_frame()
 		GUI.idc = 0
-		draw_all(GUI.ctx)
+		draw_all( _G.gui.ctx )
 		if GUI.keep_cheat then
 			GUI.cheat = rebuild_cheat( GUI.keep_cheat )
 		end
@@ -285,41 +276,38 @@ local function boot_window()
 	
 end
 
-GUI.draw_reboot = function(ctx)
+GUI.draw_reboot = function()
 	local text = "Reboot GUI"
-	nk.layout_row_dynamic( ctx, pad_height(get_font(),text), 2)
-	if nk.button( ctx, nil, text ) then
-		GUI.reboot = gasp.toggle_reboot_gui()
-	else
-		GUI.reboot = gasp.get_reboot_gui()
+	nk.layout_row_dynamic( _G.gui.ctx, pad_height(get_font(),text), 2)
+	if nk.button( _G.gui.ctx, nil, text ) then
+		_G.asked4_reboot = (_G.asked4_reboot == false)
 	end
-	nk.label( ctx, tostring(GUI.reboot), nk.TEXT_RIGHT )
+	nk.label( _G.gui.ctx, tostring(_G.asked4_reboot), nk.TEXT_RIGHT )
 	
 end
 
-GUI.use_ui = function(ctx,name,now)
+GUI.use_ui = function(name,now)
 	local i,v
-	for i,v in pairs(GUI.draw) do
+	for i,v in pairs( GUI.view ) do
 		if v.name == name then
 			GUI.previous = now
 			GUI.which = i
 		end
 	end
-	
 end
 	
-GUI.add_ui = function( name, desc, file )
+GUI.add_ui = function( name, desc, file, report )
 	print( "Attempting to add script " .. file )
-	local ret, err, func = Require( file )
+	local func, err = Require( file, report )
 	if not func then
 		func = GUI.draw_fallback
 	end
-	GUI.draw[#(GUI.draw) + 1] = { name = name, desc = desc, func = func() }
+	GUI.view[#(GUI.view) + 1] = { name = name, desc = desc, func = func() }
 end
 
-GUI.draw_goback = function(ctx,now,prv,func)
-	nk.layout_row_dynamic( ctx, pad_height(get_font(),"Done"), 1 )
-	if nk.button( ctx, nil, "Go Back" ) then
+GUI.draw_goback = function(now,prv,func)
+	nk.layout_row_dynamic( _G.gui.ctx, pad_height(get_font(),"Done"), 1 )
+	if nk.button( _G.gui.ctx, nil, "Go Back" ) then
 		GUI.which = prv
 		if prv == GUI.previous then
 			GUI.previous = 1
@@ -331,28 +319,30 @@ GUI.draw_goback = function(ctx,now,prv,func)
 	
 end
 
-GUI.draw_fallback = function( ctx, now, prv )
-	GUI.draw_reboot(ctx)
-	GUI.draw_goback(ctx,now,prv)
+GUI.draw_fallback = function( now, prv )
+	GUI.draw_reboot()
+	GUI.draw_goback(now,prv)
 end
 
 GUI.selected = {}
 _G.forced_reboot = false
 while _G.asked4_reboot == true do
-	GUI.draw = {}
-	GUI.fonts = {}
+	_G.asked4_reboot = false
+	_G.gui = GUI
+	_G.fonts = {}
+	GUI.view = {}
 	
-	GUI.add_ui( "main", "Main", "gui/main.lua" )
-	GUI.add_ui( "cfg-font", "Change Font", "gui/cfg/font.lua" )
+	GUI.add_ui( "main", "Main", "gui/main" )
+	GUI.add_ui( "cfg-font", "Change Font", "gui/cfg/font" )
 	--[[
-	GUI.add_ui( "cfg-proc", "Hook process", "gui/cfg/proc.lua" )
-	GUI.add_ui( "scan", "Scan memory", "gui/scan.lua" )
-	GUI.add_ui( "cheatfile", "Load cheat file", "gui/cfg/cheatfile.lua" )
+	GUI.add_ui( "cfg-proc", "Hook process", "gui/cfg/proc" )
+	GUI.add_ui( "scan", "Scan memory", "gui/scan" )
+	GUI.add_ui( "cheatfile", "Load cheat file", "gui/cfg/cheatfile" )
 	]]
 	
-	_G.asked4_reboot = gasp.set_reboot_gui(false)
 	GUI.window = nil
 	boot_window()
-	GUI.draw = nil
-	GUI.fonts = nil
+	GUI.view = nil
+	_G.fonts = nil
+	_G.gui = nil
 end

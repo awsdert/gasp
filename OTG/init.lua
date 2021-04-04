@@ -39,18 +39,21 @@ function _RequireLib(dir,name,report_attempts,error_on_failure)
 		return ret(), err, ret
 	end
 	
-	if error_on_failure then
-		dump_lua_stack()
-		path = debug.traceback()
-		for p, v in pairs(all) do
-			path = path .. "\n " .. v
+	if not ret then
+		if error_on_failure then
+			dump_lua_stack()
+			path = debug.traceback()
+			for p, v in pairs(all) do
+				path = path .. "\n " .. v
+			end
+			path = "Failed to load library " .. name .. "\n" ..  path
+			print( path )
+			error( path )
 		end
-		path = "Failed to load library " .. name .. "\n" ..  path
-		print( path )
-		error( path )
+		return nil, err
 	end
 	
-	return nil, err, ret
+	return ret(), err
 end
 
 function _RequireLua( name, report_attempts )
@@ -59,8 +62,6 @@ function _RequireLua( name, report_attempts )
 	{
 		name
 		, name .. ".lua"
-		, "lua/" .. name
-		, "lua/" .. name .. ".lua"
 	}
 	for p, v in pairs(paths) do
 		if not ret then
@@ -78,7 +79,7 @@ function _RequireLua( name, report_attempts )
 		dump_lua_stack()
 		error( (err or "nil\n") .. debug.traceback() )
 	end
-	return ret(), err, ret
+	return ret, err
 end
 
 function Require(name,report_attempts,onlylibs)
@@ -97,14 +98,30 @@ function Require(name,report_attempts,onlylibs)
 end
 
 function init()
-	local ret, err, func
+	local ret, err, func, reboot_count
 	
+	_G.pref = {}
+	_G.boot_count = 0
 	_G.forced_reboot = true
+	_G.asked4_reboot = true
+	
+	ret, err = Require("pref")
+	if ret then
+		_G.pref = ret()
+	end
+	
 	while _G.forced_reboot == true do
-		_G.asked4_reboot = true
+		_G.boot_count = _G.boot_count + 1
+		print( "Boot count = " .. _G.boot_count )
 		-- Prevent lua from exiting gasp without good reason
-		ret, err, func = Require( "gui/init", true )
+		func, err = Require( "gui/init" )
+		if func then
+			func()
+		else
+			_G.asked4_reboot = false
+		end
 		_G.forced_reboot = _G.asked4_reboot
+		_G.asked4_reboot = true
 	end
 end
 

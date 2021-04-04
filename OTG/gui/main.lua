@@ -1,42 +1,42 @@
-local function draw_desc_field( ctx, font, v )
+local function draw_desc_field( font, v )
 	local text = '+ ' .. v.desc
 	if v.active == true then
 		text = '- ' .. v.desc
 	end
 	if v.is_group then
-		if nk.button( ctx, nil, text ) then
+		if nk.button( _G.gui.ctx, nil, text ) then
 			v.active = not v.active
 		end
 	else
-		v.active = nk.checkbox( ctx, v.desc, v.active )
+		v.active = nk.checkbox( _G.gui.ctx, v.desc, v.active )
 	end
 	GUI.keep_cheat = rebuild_cheat(v)
 	return rebuild_cheat(v)
 end
-local function draw_addr_field( ctx, font, v )
+local function draw_addr_field( font, v )
 	local hex
 	v.addr = v.addr or 0
 	if v.offset then
 		hex = string.format( "%X", v.offset )
 		if v.generated == true then
-			nk.label( ctx, hex, nk.TEXT_LEFT )
+			nk.label( _G.gui.ctx, hex, nk.TEXT_LEFT )
 		else
-			hex = nk.edit_string(ctx,nk.EDIT_FIELD,hex,10)
+			hex = nk.edit_string( _G.gui.ctx, nk.EDIT_FIELD, hex, 10 )
 			v.offset = tonumber( hex, 16 )
 		end
 	end
 	
 	hex = string.format( "%X", v.addr )
 	if v.generated == true or v.offset then
-		nk.label(ctx,hex,nk.TEXT_LEFT)
+		nk.label( _G.gui.ctx, hex, nk.TEXT_LEFT )
 	else
-		hex = nk.edit_string(ctx,nk.EDIT_FIELD,hex,20)
+		hex = nk.edit_string( _G.gui.ctx, nk.EDIT_FIELD, hex, 20 )
 		v.addr = tonumber( hex, 16 )
 	end
 	GUI.keep_cheat = rebuild_cheat(v)
 	return rebuild_cheat(v)
 end
-local function draw_type_field( ctx, font, v )
+local function draw_type_field( font, v )
 	local types = { "signed", "unsigned", "bits", "text", "bytes" }
 	local k,x
 	v.Type = v.Type or "bytes"
@@ -50,11 +50,11 @@ local function draw_type_field( ctx, font, v )
 	if not k or k > #types then k = #types end
 	v.Type = types[k]
 	if v.count then
-		nk.label( ctx, "", nk.TEXT_LEFT )
+		nk.label( _G.gui.ctx, "", nk.TEXT_LEFT )
 	elseif v.generated then
-		nk.label( ctx, v.Type, nk.TEXT_LEFT )
+		nk.label( _G.gui.ctx, v.Type, nk.TEXT_LEFT )
 	else
-		k = nk.combo( ctx,
+		k = nk.combo( _G.gui.ctx,
 			types, k, pad_height(font,v.Type),
 			{	-- width & height of dropdown box
 				pad_width(font,v.Type) * 2,
@@ -66,20 +66,20 @@ local function draw_type_field( ctx, font, v )
 	GUI.keep_cheat = rebuild_cheat(v)
 	return rebuild_cheat(v)
 end
-local function draw_size_field(ctx,font,v)
+local function draw_size_field(font,v)
 	local x
 	if not v then
 		trace()
 	end
 	x = v.size or 1
 	if v.generated then
-		nk.label(ctx,"",nk.TEXT_LEFT)
-		nk.label(ctx,"",nk.TEXT_LEFT)
+		nk.label( _G.gui.ctx,"",nk.TEXT_LEFT)
+		nk.label( _G.gui.ctx,"",nk.TEXT_LEFT)
 	else
-		if nk.button(ctx,nil,"-") then
+		if nk.button( _G.gui.ctx, nil,"-") then
 			x = x - 1
 		end
-		if nk.button(ctx,nil,"+") then
+		if nk.button( _G.gui.ctx, nil,"+") then
 			x = x + 1
 		end
 		if x < 1 then x = 1 end
@@ -89,13 +89,13 @@ local function draw_size_field(ctx,font,v)
 			if x > 8 then x = 8 end
 		end
 	end
-	nk.label( ctx, tostring(x), nk.TEXT_RIGHT )
+	nk.label( _G.gui.ctx, tostring(x), nk.TEXT_RIGHT )
 	v.size = x
 	GUI.keep_cheat = rebuild_cheat(v)
 	return rebuild_cheat(v)
 end
 
-local function draw_edit_field(ctx,font,v)
+local function draw_edit_field(font,v)
 	local tmp, maxlen = 1
 	v.edited = false
 	v.as_text = v.as_text or ""
@@ -108,7 +108,7 @@ local function draw_edit_field(ctx,font,v)
 	else
 		maxlen = 1
 	end
-	tmp = nk.edit_string(ctx,nk.EDIT_FIELD,v.as_text,maxlen) or ""
+	tmp = nk.edit_string( _G.gui.ctx,nk.EDIT_FIELD,v.as_text,maxlen) or ""
 	if tmp ~= v.as_text then
 		v.edited = true
 	end
@@ -129,7 +129,7 @@ local function draw_edit_field(ctx,font,v)
 	return rebuild_cheat(v)
 end
 
-local function draw_cheat_edit(ctx,font,v)
+local function draw_cheat_edit( font,v)
 	local text, tmp, k, x, test
 	-- Editing in progress
 	v.size = v.size or 1
@@ -159,7 +159,7 @@ local function draw_cheat_edit(ctx,font,v)
 			v.as_text = ""
 		end
 	end
-	GUI.draw_edit_field(ctx,font,v)
+	_G.GUI.draw_edit_field( _G.gui.ctx,font,v)
 	v = rebuild_cheat( GUI.keep_cheat )
 	if v.edited == true then
 		GUI.cheat_text = v.as_text
@@ -176,17 +176,17 @@ local function draw_cheat_edit(ctx,font,v)
 	return rebuild_cheat(v)
 end
 
-local function draw_cheats( ctx, font, v )
+local function draw_cheats( font, v )
 	local prv, now, nxt, text, i, j, k, x, tmp, bytes, test, list, all
 	v = rebuild_cheat(v)
 	GUI.keep_cheat = nil
 	if v.is_group == false then
-		return GUI.draw_cheat( ctx, font, v )
+		return _G.GUI.draw_cheat( font, v )
 	end
 	tmp = GUI.idc
 	GUI.idc = GUI.idc + 1
-	nk.layout_row_dynamic( ctx, pad_height( font, v.desc ), 1 )
-	v = GUI.draw_desc_field( ctx, font, v )
+	nk.layout_row_dynamic( _G.gui.ctx, pad_height( font, v.desc ), 1 )
+	v = _G.GUI.draw_desc_field(  font, v )
 	if v.active == false then
 		return rebuild_cheat(v)
 	end
@@ -203,7 +203,7 @@ local function draw_cheats( ctx, font, v )
 				k.addr = x.addr
 			end
 			GUI.keep_cheat = nil
-			list[j] = GUI.draw_cheat(ctx,font,rebuild_cheat(k))
+			list[j] = _G.GUI.draw_cheat( font,rebuild_cheat(k))
 		end
 		v.list = list
 		GUI.keep_cheat = rebuild_cheat(v)
@@ -219,7 +219,7 @@ local function draw_cheats( ctx, font, v )
 			k.desc = v.desc .. "#All:" .. k.desc
 			k.offset = x.offset or bytes
 			k.addr = v.addr + k.offset
-			k = GUI.draw_cheat(ctx,font,rebuild_cheat(k))
+			k = _G.GUI.draw_cheat( font,rebuild_cheat(k))
 			k.desc = x.desc
 			v.split[j] = rebuild_cheat(k)
 			if k.edited == true then
@@ -254,7 +254,7 @@ local function draw_cheats( ctx, font, v )
 					k.list = x.list
 					k.count = x.count
 					k.split = x.split
-					k = GUI.draw_cheat(ctx,font,rebuild_cheat(k))
+					k = _G.GUI.draw_cheat( font,rebuild_cheat(k))
 					k.desc = x.desc
 					list[i * j] = rebuild_cheat(k)
 					bytes = bytes + k.size
@@ -281,7 +281,7 @@ local function draw_cheats( ctx, font, v )
 				k.list = x.list
 				k.count = x.count
 				k.split = x.split
-				k = GUI.draw_cheat( ctx, font, rebuild_cheat(k) )
+				k = _G.GUI.draw_cheat( font, rebuild_cheat(k) )
 				k.desc = x.desc
 				list[i] = rebuild_cheat(k)
 			end
@@ -293,62 +293,62 @@ local function draw_cheats( ctx, font, v )
 	return rebuild_cheat(v)
 end
 
-local function draw_cheat(ctx,font,v)
+local function draw_cheat(font,v)
 	local prv, now, nxt, text, j, k, x, tmp, bytes, test
 	v = rebuild_cheat(v)
 	
 	GUI.keep_cheat = nil
 	if v.is_group == true then
-		return GUI.draw_cheats( ctx, font, v )
+		return _G.GUI.draw_cheats( font, v )
 	end
 	
 	text = v.desc
-	nk.layout_row_template_begin(ctx, pad_height(font,"="))
-	nk.layout_row_template_push_static(ctx, pad_width(font,"="))
-	nk.layout_row_template_push_dynamic(ctx)
+	nk.layout_row_template_begin( _G.gui.ctx, pad_height(font,"="))
+	nk.layout_row_template_push_static( _G.gui.ctx, pad_width(font,"="))
+	nk.layout_row_template_push_dynamic( _G.gui.ctx )
 	if v.offset then
-		nk.layout_row_template_push_static(ctx, pad_width(font,"0000"))
+		nk.layout_row_template_push_static( _G.gui.ctx, pad_width(font,"0000"))
 	end
-	nk.layout_row_template_push_static(ctx, pad_width(font,"00000000"))
-	nk.layout_row_template_push_static(ctx, pad_width(font,"unsigned"))
-	nk.layout_row_template_push_static(ctx, pad_width(font,"-"))
-	nk.layout_row_template_push_static(ctx, pad_width(font,"+"))
-	nk.layout_row_template_push_static(ctx, pad_width(font,"100"))
-	nk.layout_row_template_push_static(ctx, pad_width(font,"00 00 00 00 "))
-	nk.layout_row_template_end(ctx)
+	nk.layout_row_template_push_static( _G.gui.ctx, pad_width(font,"00000000"))
+	nk.layout_row_template_push_static( _G.gui.ctx, pad_width(font,"unsigned"))
+	nk.layout_row_template_push_static( _G.gui.ctx, pad_width(font,"-"))
+	nk.layout_row_template_push_static( _G.gui.ctx, pad_width(font,"+"))
+	nk.layout_row_template_push_static( _G.gui.ctx, pad_width(font,"100"))
+	nk.layout_row_template_push_static( _G.gui.ctx, pad_width(font,"00 00 00 00 "))
+	nk.layout_row_template_end( _G.gui.ctx )
 
 	-- Method of changing the value
-	nk.label(ctx,v.method or "=",nk.TEXT_LEFT)
+	nk.label( _G.gui.ctx,v.method or "=",nk.TEXT_LEFT)
 	
-	v = GUI.draw_desc_field(ctx,font,rebuild_cheat(v))
-	v = GUI.draw_addr_field(ctx,font,rebuild_cheat(v))
-	v = GUI.draw_type_field(ctx,font,rebuild_cheat(v))
-	v = GUI.draw_size_field(ctx,font,rebuild_cheat(v))
-	v = GUI.draw_cheat_edit(ctx,font,rebuild_cheat(v))
+	v = _G.GUI.draw_desc_field(font,rebuild_cheat(v))
+	v = _G.GUI.draw_addr_field(font,rebuild_cheat(v))
+	v = _G.GUI.draw_type_field(font,rebuild_cheat(v))
+	v = _G.GUI.draw_size_field(font,rebuild_cheat(v))
+	v = _G.GUI.draw_cheat_edit(font,rebuild_cheat(v))
 	
 	GUI.keep_cheat = rebuild_cheat(v)
 	return rebuild_cheat(v)
 end
-local function draw_all_cheats(ctx,font,v)
+local function draw_all_cheats(font,v)
 	local i, id, text, j, k, tmp
 	if not v then return end
 	v = rebuild_cheat(v)
 	text = "Game"
-	nk.layout_row_dynamic( ctx, pad_height( font, text ), 2 )
-	nk.label(ctx,text,nk.TEXT_LEFT)
+	nk.layout_row_dynamic( _G.gui.ctx, pad_height( font, text ), 2 )
+	nk.label( _G.gui.ctx,text,nk.TEXT_LEFT)
 	if v.emu then
-		nk.label(ctx,v.emu.desc,nk.TEXT_LEFT)
+		nk.label( _G.gui.ctx,v.emu.desc,nk.TEXT_LEFT)
 	elseif v.app then
-		nk.label(ctx,v.app.desc,nk.TEXT_LEFT)
+		nk.label( _G.gui.ctx,v.app.desc,nk.TEXT_LEFT)
 	else
-		nk.label(ctx,"Undescribed",nk.TEXT_LEFT)
+		nk.label( _G.gui.ctx,"Undescribed",nk.TEXT_LEFT)
 	end
 	v.endian = v.endian or gasp.get_endian()
 	text = "Endian"
-	nk.label(ctx,text,nk.TEXT_LEFT)
-	nk.label(ctx,v.endian,nk.TEXT_LEFT)
+	nk.label( _G.gui.ctx,text,nk.TEXT_LEFT)
+	nk.label( _G.gui.ctx,v.endian,nk.TEXT_LEFT)
 	v.desc = "Cheats"
-	v = GUI.draw_cheat(ctx,font,rebuild_cheat(v))
+	v = _G.GUI.draw_cheat(font,rebuild_cheat(v))
 	GUI.keep_cheat = rebuild_cheat(v)
 	return rebuild_cheat(v)
 end
@@ -359,25 +359,25 @@ local function list_cheat_files()
 end
 
 
-return function(ctx)
+return function()
 	local font = get_font()
 	local text, file, dir, tmp, i, v
 	
-	GUI.draw_reboot(ctx)
-	GUI.draw_desc_field = draw_desc_field
-	GUI.draw_addr_field = draw_addr_field
-	GUI.draw_type_field = draw_type_field
-	GUI.draw_size_field = draw_size_field
-	GUI.draw_edit_field = draw_edit_field
-	GUI.draw_cheat = draw_cheat
-	GUI.draw_cheats = draw_cheats
-	GUI.draw_cheat_edit = draw_cheat_edit
+	_G.GUI.draw_reboot()
+	_G.GUI.draw_desc_field = draw_desc_field
+	_G.GUI.draw_addr_field = draw_addr_field
+	_G.GUI.draw_type_field = draw_type_field
+	_G.GUI.draw_size_field = draw_size_field
+	_G.GUI.draw_edit_field = draw_edit_field
+	_G.GUI.draw_cheat = draw_cheat
+	_G.GUI.draw_cheats = draw_cheats
+	_G.GUI.draw_cheat_edit = draw_cheat_edit
 	
 	text = "UNDESCRIBED"
-	nk.layout_row_dynamic( ctx, pad_height(font,text), 1)
-	for i,v in pairs(GUI.draw) do
+	nk.layout_row_dynamic( _G.gui.ctx, pad_height(font,text), 1)
+	for i,v in pairs(_G.GUI.view) do
 		if i > 1 then
-			if nk.button(ctx, nil, v.desc) then
+			if nk.button( _G.gui.ctx, nil, v.desc) then
 				 GUI.which = i
 			end
 		end
@@ -385,43 +385,43 @@ return function(ctx)
 	
 	--[[ Slider Example with Custom width
 	text = "Volume:"
-	nk.layout_row_begin(ctx, 'static', pad_height(font,text), 2)
-	nk.layout_row_push(ctx, pad_width(font,text))
-	nk.label(ctx,text, nk.TEXT_LEFT)
-	nk.layout_row_push(ctx, pad_width(font,text))
-	GUI.cfg.volume = nk.slider(ctx, 0, GUI.cfg.volume, 1.0, 0.1)
-	nk.layout_row_end(ctx)
+	nk.layout_row_begin( _G.gui.ctx, 'static', pad_height(font,text), 2)
+	nk.layout_row_push( _G.gui.ctx, pad_width(font,text))
+	nk.label( _G.gui.ctx,text, nk.TEXT_LEFT)
+	nk.layout_row_push( _G.gui.ctx, pad_width(font,text))
+	_G.pref.volume = nk.slider( _G.gui.ctx, 0, _G.pref.volume, 1.0, 0.1)
+	nk.layout_row_end( _G.gui.ctx )
 	--]]
 	
 	if not GUI.handle then
 		if GUI.noticed then
 			text = "Selected:"
-			nk.layout_row_dynamic(ctx,pad_height(font,text),2)
-			nk.label( ctx, text, nk.TEXT_LEFT )
-			nk.label( ctx, GUI.noticed.name, nk.TEXT_LEFT )
-			nk.layout_row_dynamic(ctx,pad_height(font,text),1)
-			if nk.button( ctx, nil, "Hook" ) then
+			nk.layout_row_dynamic( _G.gui.ctx,pad_height(font,text),2)
+			nk.label( _G.gui.ctx, text, nk.TEXT_LEFT )
+			nk.label( _G.gui.ctx, GUI.noticed.name, nk.TEXT_LEFT )
+			nk.layout_row_dynamic( _G.gui.ctx,pad_height(font,text),1)
+			if nk.button( _G.gui.ctx, nil, "Hook" ) then
 				GUI.donothook = false
 			end
 		else
-			nk.layout_row_dynamic(ctx,pad_height(font,text),1)
-			nk.label( ctx, "Nothing selected", nk.TEXT_LEFT )
+			nk.layout_row_dynamic( _G.gui.ctx,pad_height(font,text),1)
+			nk.label( _G.gui.ctx, "Nothing selected", nk.TEXT_LEFT )
 		end
 	end
 	
 	if hook_process() == true then
 		text = "Hooked:"
-		nk.layout_row_dynamic(ctx,pad_height(font,text),2)
-		nk.label( ctx, text, nk.TEXT_LEFT )
-		nk.label( ctx, GUI.noticed.name, nk.TEXT_LEFT )
-		nk.layout_row_dynamic(ctx,pad_height(font,text),1)
-		if nk.button( ctx, nil, "Unhook" ) then
+		nk.layout_row_dynamic( _G.gui.ctx,pad_height(font,text),2)
+		nk.label( _G.gui.ctx, text, nk.TEXT_LEFT )
+		nk.label( _G.gui.ctx, GUI.noticed.name, nk.TEXT_LEFT )
+		nk.layout_row_dynamic( _G.gui.ctx,pad_height(font,text),1)
+		if nk.button( _G.gui.ctx, nil, "Unhook" ) then
 			GUI.handle:term()
 			GUI.donothook = true
 		end
 	end
 	
-	v = draw_all_cheats( ctx, font, autoload() )
+	v = draw_all_cheats( font, autoload() )
 	GUI.cheat = rebuild_cheat(v)
 	GUI.keep_cheat = rebuild_cheat(v)
 end

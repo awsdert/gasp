@@ -1,5 +1,6 @@
+MAKE?=make
 MAKECMDGOALS?=default
 $(MAKECMDGOALS):
-	cd ../ && make $(MAKECMDGOALS)
+	cd ../ && $(MAKE) $(MAKEFILES) $(MAKECMDGOALS)
 
 .PHONY: $(MAKECMDGOALS)

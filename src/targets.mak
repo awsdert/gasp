@@ -1,6 +1,6 @@
 include common_goals.mak
 
-MAKECMDGOALS?=main default
+MAKECMDGOALS?=main
 COMMONGOALS:=$(filter $(common_goals),$(MAKECMDGOALS))
 TARGETGOALS:=$(filter-out $(common_goals),$(MAKECMDGOALS))
 
@@ -12,7 +12,7 @@ TARGETGOALS:=$(filter-out $(common_goals),$(MAKECMDGOALS))
 $(TARGETGOALS):
 	$(MAKE) -f $@.mak $(COMMONGOALS)
 
-$(COMMONGOALS):
-	@echo
+#$(COMMONGOALS):
+#	@echo
 
-.PHONY: $(MAKECMDGOALS)
+.PHONY: $(MAKECMDGOALS) $(TARGETGOALS:%=%.mak) $(common_goals)

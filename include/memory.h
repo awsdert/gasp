@@ -5,6 +5,7 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <inttypes.h>
@@ -12,17 +13,51 @@
 #include <string.h>
 #endif
 
+#ifdef __cplusplus
+#define MEMORY_INLINE inline
+#elif defined( STDC_VERSION ) && STDC_VERSION >= 199900L
+#define MEMORY_INLINE inline
+#elif !defined( STDC_VERSION ) && defined( __GNU__ )
+#define MEMORY_INLINE inline
+#else
+#define MEMORY_INLINE static
+#endif
+
+#ifndef bitsof
+#define bitsof(T) (sizeof(T) * CHAR_BIT)
+#endif
+
+typedef void* (*cbAlloc)( void *ud, void *prev, size_t size, size_t want );
+
+static void* default_alloc( void *ud, void *prev, size_t size, size_t want )
+{
+	if ( want )
+	{
+		prev = prev ? realloc( prev, want ) : malloc( want );
+		
+		if ( prev && want > size )
+			memset( prev + size, 0, want - size );
+		
+		return prev;
+	}
+	
+	if ( prev ) free( prev );
+	return NULL;
+}
+
+static cbAlloc memory = default_alloc;
+
 struct memory_block
 {
 	void *block;
 	size_t bytes;
 };
 
-static size_t get_memory_block_bytes( struct memory_block *memory_block )
+MEMORY_INLINE size_t get_memory_block_bytes( struct memory_block *memory_block )
 {
 	return memory_block->bytes;
 }
-static void* get_memory_block_block( struct memory_block *memory_block )
+MEMORY_INLINE void* get_memory_block_block( struct memory_block *memory_block )
 {
 	return memory_block->block;
 }
@@ -38,7 +73,21 @@ static void* get_memory_block_block( struct memory_block *memory_block )
  * 
  * @return NULL on failure, valid pointer on success
 */
-void * new_memory_block( struct memory_block *memory_block, size_t bytes );
+MEMORY_INLINE void* new_memory_block
+(
+	void *ud
+	, struct memory_block *memory_block
+	, size_t bytes
+)
+{
+	void *tmp = memory( ud, NULL, memory_block->bytes, bytes );
+	if ( tmp )
+	{
+		memory_block->block = tmp;
+		memory_block->bytes = bytes;
+	}
+	return tmp;
+}
 
 /* Reallocates memory pointed by structure
  * 
@@ -55,7 +104,21 @@ void * new_memory_block( struct memory_block *memory_block, size_t bytes );
  * 
  * @return NULL on failure, memory_block->block on success
 */
-void * alt_memory_block( struct memory_block *memory_block, size_t bytes );
+MEMORY_INLINE void* alt_memory_block
+(
+	void *ud
+	, struct memory_block *memory_block
+	, size_t bytes
+)
+{
+	void *tmp = memory( ud, memory_block->block, memory_block->bytes, bytes );
+	if ( tmp )
+	{
+		memory_block->block = tmp;
+		memory_block->bytes = bytes;
+	}
+	return tmp;
+}
 
 /* Reallocates memory pointed by structure
  * 
@@ -73,7 +136,25 @@ void * alt_memory_block( struct memory_block *memory_block, size_t bytes );
  * 
  * @return NULL on failure, memory_block->block on success
 */
-void * inc_memory_block( struct memory_block *memory_block, size_t bytes );
+MEMORY_INLINE void* inc_memory_block
+(
+	void *ud
+	, struct memory_block *memory_block
+	, size_t bytes
+)
+{
+	if ( bytes > memory_block->bytes )
+	{
+		void *tmp = memory( ud, memory_block->block, memory_block->bytes, bytes );
+		if ( tmp )
+		{
+			memory_block->block = tmp;
+			memory_block->bytes = bytes;
+		}
+		return tmp;
+	}
+	return memory_block->block;
+}
 
 /* Reallocates memory pointed by structure
  * 
@@ -91,7 +172,25 @@ void * inc_memory_block( struct memory_block *memory_block, size_t bytes );
  * 
  * @return NULL on failure, memory_block->block on success
 */
-void * dec_memory_block( struct memory_block *memory_block, size_t bytes );
+MEMORY_INLINE void* dec_memory_block
+(
+	void *ud
+	, struct memory_block *memory_block
+	, size_t bytes
+)
+{
+	if ( bytes < memory_block->bytes )
+	{
+		void *tmp = memory( ud, memory_block->block, memory_block->bytes, bytes );
+		if ( tmp )
+		{
+			memory_block->block = tmp;
+			memory_block->bytes = bytes;
+		}
+		return tmp;
+	}
+	return memory_block->block;
+}
 
 /* Releases pointed memory
  * 
@@ -103,7 +202,16 @@ void * dec_memory_block( struct memory_block *memory_block, size_t bytes );
  * undefined behaviour, currently whatever free() does in this situation is
  * what happens here as the pointer is directly passed on to the function
 */
-void del_memory_block( struct memory_block *memory_block );
+MEMORY_INLINE void del_memory_block
+(
+	void *ud
+	, struct memory_block *memory_block
+)
+{
+	(void)memory( ud, memory_block->block, memory_block->bytes, 0 );
+	memory_block->block = NULL;
+	memory_block->bytes = 0;
+}
 
 struct memory_group
 {
@@ -142,64 +250,90 @@ static void set_memory_group_focus( struct memory_group *memory_group, int I )
 	I = (I >= 0 && I < memory_group->total) * I;
 	memory_group->focus = I;
 }
-static void set_memory_group_count( struct memory_group *memory_group, int C )
+static void set_memory_group_count
+(
+	struct memory_group *memory_group, int count
+)
 {
-	C = (C >= 0 && C < memory_group->total) * C; 
-	memory_group->count = C;
+	count = (count >= 0 && count < memory_group->total) * count; 
+	memory_group->count = count;
 }
 
-static void* new_memory_group_block( struct memory_group *memory_group, int T )
+MEMORY_INLINE void* new_memory_group_block
+(
+	void *ud
+	, struct memory_group *memory_group
+	, int total
+)
 {
 	void *ptr;
-	T = (T >= 0) * T;
+	total = (total >= 0) * total;
 	ptr = new_memory_block(
-		&(memory_group->memory_block), T * memory_group->Tsize );
+		ud, &(memory_group->memory_block), total * memory_group->Tsize );
 	memory_group->total =
 		memory_group->memory_block.bytes / memory_group->Tsize;
 	return ptr;
 }
 
-static void* alt_memory_group_total( struct memory_group *memory_group, int T )
+MEMORY_INLINE void* alt_memory_group_total
+(
+	void *ud
+	,struct memory_group *memory_group
+	, int total
+)
 {
 	void *ptr;
-	T = (T >= 0) * T;
+	total = (total >= 0) * total;
 	ptr = alt_memory_block(
-		&(memory_group->memory_block), T * memory_group->Tsize );
+		ud, &(memory_group->memory_block), total * memory_group->Tsize );
 	memory_group->total =
 		memory_group->memory_block.bytes / memory_group->Tsize;
 	return ptr;
 }
 
-static void* inc_memory_group_total( struct memory_group *memory_group, int T )
+MEMORY_INLINE void* inc_memory_group_total
+(
+	void *ud
+	, struct memory_group *memory_group
+	, int total
+)
 {
 	void *ptr;
-	T = memory_group->total + ((T >= 0) * T);
-	T = ((T >= memory_group->total) * T)
-		+ ((T < memory_group->total) * memory_group->total);
+	total = memory_group->total + ((total >= 0) * total);
+	total = ((total >= memory_group->total) * total)
+		+ ((total < memory_group->total) * memory_group->total);
 	ptr = inc_memory_block(
-		&(memory_group->memory_block), T * memory_group->Tsize );
+		ud, &(memory_group->memory_block), total * memory_group->Tsize );
 	memory_group->total =
 		memory_group->memory_block.bytes / memory_group->Tsize;
 	return ptr;
 }
 
-static void* dec_memory_group_total( struct memory_group *memory_group, int T )
+MEMORY_INLINE void* dec_memory_group_total
+(
+	void *ud
+	, struct memory_group *memory_group
+	, int total
+)
 {
 	void *ptr;
-	T = memory_group->total + ((T >= 0) * T);
-	T = (T >= 0) * T;
+	total = memory_group->total + ((total >= 0) * total);
+	total = (total >= 0) * total;
 	ptr = dec_memory_block(
-		&(memory_group->memory_block), T * memory_group->Tsize );
+		ud, &(memory_group->memory_block), total * memory_group->Tsize );
 	memory_group->total =
 		memory_group->memory_block.bytes / memory_group->Tsize;
 	return ptr;
 }
 
-static void del_memory_group_block( struct memory_group *memory_group )
+MEMORY_INLINE void del_memory_group_block
+(
+	void* ud
+	, struct memory_group *memory_group
+)
 {
-	del_memory_block( &(memory_group->memory_block) );
+	del_memory_block( ud, &(memory_group->memory_block) );
 	memset( memory_group, 0, sizeof(struct memory_group) );
 }
-	
 
 #endif

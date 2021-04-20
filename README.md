@@ -5,7 +5,14 @@ Game Assistive tech for Solo Play
 Got tired of waiting for PINCE to be usable so started this myself.
 
 ## Current target
-Started the re-write I planned, 
+Started the re-write I planned
+
+## Current Status
+Moved to gitlab as github crossed the line by forcing less secure
+login method (even if they tout it is more secure), if I can't
+type the "password" in manually from memory then I opening my
+project to security holes just by storing the SSH key I'm supposed
+to use
 
 ## APIs
 Uses C under the hood but will be mostly scripted in Lua so users

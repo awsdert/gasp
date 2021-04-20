@@ -14,6 +14,8 @@ type the "password" in manually from memory then I opening my
 project to security holes just by storing the SSH key I'm supposed
 to use
 
+https://gitlab.com/awsdert
+
 ## APIs
 Uses C under the hood but will be mostly scripted in Lua so users
 can customize for themselves (also make Trainers easier to design).
